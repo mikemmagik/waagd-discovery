@@ -7,7 +7,7 @@ name = "waagd-discovery"
 version = "0.1.0"
 description = "Independent, deterministic RSS/Atom discovery for WAAGD"
 requires-python = ">=3.13"
-dependencies = ["httpx==0.28.1", "defusedxml==0.7.1", "PyYAML==6.0.3", "jsonschema==4.26.0"]
+dependencies = ["httpx==0.28.1", "defusedxml==0.7.1", "PyYAML==6.0.3", "jsonschema==4.26.0", "idna==3.20"]
 
 [project.scripts]
 waagd-discovery = "waagd_discovery.cli:main"
