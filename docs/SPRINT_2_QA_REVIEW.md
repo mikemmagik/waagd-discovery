@@ -30,7 +30,8 @@ the corresponding owners and reviewed again in this isolated integration.
 
 ## Independent checks
 
-The two added test files contain 30 offline cases:
+The two added test files originally contained 30 offline cases, with three
+additional focused regressions from the backup boundary follow-up below:
 
 - Freshness and future tolerance at the exact boundary and one microsecond on
   either side, including stable complete check ordering.
@@ -56,7 +57,7 @@ The reviewed filtering code streams all article/source inputs, fingerprints
 quality and current provenance inputs, gates persisted eligibility by matching
 policy/engine/fingerprint, and reevaluates freshness at export. The append-only
 batch and decisions commit atomically. The retention code reuses existing SQLite
-backup/snapshot/verification paths, validates legacy backups on private copies,
+backup/snapshot/verification paths, validates legacy backups on memory snapshots,
 locks the dedicated directory, and rechecks survivor and file identities before
 deletion. The benchmark uses disposable fixtures and records resource limits.
 
@@ -74,6 +75,42 @@ On macOS/Python 3.14.8, the isolated combined tree passed:
 - **466 tests in 3.81 seconds, no warnings**, including all baseline scenarios,
   feature-owned tests and 30 independent additions.
 - Statement coverage: **1,539/1,603 (96.01%, displayed as 96%)**.
+
+## Follow-up: managed backups beyond the 32 MiB temporary filesystem
+
+A measured release boundary exposed a complete temporary disk copy in managed
+backup verification. A valid backup larger than the production container's
+32 MiB `/tmp` could not be verified. The independent regression reproduced
+rejection of a 41,844,736-byte valid backup when temporary disk allocation was
+unavailable.
+
+Reviewed owner fix `05ffd249` against lead `45ef653`, including the guarded
+immutable snapshot option and preservation of file-descriptor aliases. Verification
+now opens a checked standalone descriptor read-only/immutable and uses the existing
+memory snapshot. Regular-file identity, hardlink/symlink and sidecar checks remain
+in place, including revalidation before any old backup deletion. Working database
+snapshots retain their ordinary WAL-aware behavior.
+
+Three added independent cases verify large-backup preview/create without temporary
+disk, replacement by a symlink during immutable snapshotting, and safe rejection of
+a 5,000-digit YAML integer. The earlier corruption, legacy, manual-file, survivor,
+substitution and fsync-failure scenarios still pass. The YAML integer initially
+escaped as `ValueError`; the owner fix now returns a safe configuration error.
+
+The final combined native run passed **472 tests in 5.02 seconds with no warnings**,
+Ruff without its cache, formatting and strict mypy. Coverage is
+**1,542/1,606 statements (96.01%)**. No unresolved blocking defect remains in the fix.
+
+An additional independent Docker run used the reviewed source through a read-only
+overlay, a fresh disposable data volume, non-root/read-only runtime, one CPU,
+512 MiB memory and the original 32 MiB `/tmp`. With 9,000 observations and a
+41,844,736-byte backup, preview, managed creation and applied rotation all passed.
+The retained backup hash was unchanged, and `/tmp` remained empty. Observed peak
+process RSS was 71,084 KiB; the proof completed in 1.188 seconds. Cgroup values
+were `memory.max=536870912` and `cpu.max=100000 100000`; temporary filesystem size
+was 33,554,432 bytes. The dedicated test volume was removed afterward. This proves
+the focused boundary; the coordinator separately rebuilds the final release image
+and repeats the larger workload and architecture checks.
 
 All added tests use temporary databases and local synthetic inputs. No stable
 operator volume, live feed, LLM, publication, scheduler or external integration
