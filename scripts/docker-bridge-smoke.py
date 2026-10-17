@@ -101,9 +101,9 @@ def inbox() -> dict[str, Any]:
 def main() -> None:
     if os.environ.get("WAAGD_SMOKE_SKIP_BUILD") != "1":
         docker("build", "--tag", IMAGE, str(ROOT), timeout=900)
-    for volume in VOLUMES.values():
-        docker("volume", "create", "--label", "com.waagd-discovery.smoke=true", volume)
     try:
+        for volume in VOLUMES.values():
+            docker("volume", "create", "--label", "com.waagd-discovery.smoke=true", volume)
         # Fixture-only bootstrap: new Docker volumes are owned by root. Give the
         # nonroot test process private fake roots, without changing host folders.
         docker(
