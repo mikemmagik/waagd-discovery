@@ -1,0 +1,216 @@
+{
+  "arm64": {
+    "status": "PASS",
+    "image": "waagd-discovery:sprint3",
+    "elapsed_seconds": 27.477,
+    "memory_peak_bytes": 55058432,
+    "memory_peak_scope": "final_recreated_scheduler_cgroup",
+    "memory_limit_bytes": 536870912,
+    "cpu_limit": 1.0,
+    "sqlite": {
+      "articles": 2,
+      "observations": 22,
+      "runs": 12,
+      "source_runs": 22,
+      "run_interruptions": 1,
+      "success": 10,
+      "running": 0,
+      "interrupted": 2,
+      "eligible": 2,
+      "session": {
+        "consecutive_failures": 0,
+        "heartbeat_at": "2026-10-17T20:14:25.122474+00:00",
+        "last_cycle_at": "2026-10-17T20:14:24.098837+00:00",
+        "last_cycle_finished_at": "2026-10-17T20:14:24.120333+00:00",
+        "last_error": null,
+        "last_result": {
+          "dry_run": false,
+          "filter": {
+            "articles_evaluated": 2,
+            "assessed_at": "2026-10-17T20:14:24.118219+00:00",
+            "counts": {
+              "deferred": 0,
+              "eligible": 2,
+              "excluded": 0
+            },
+            "engine_version": "rules-v1",
+            "policy": {
+              "future_tolerance_minutes": 15.0,
+              "max_age_hours": 72.0,
+              "min_description_chars": 40,
+              "require_publisher": false
+            },
+            "policy_hash": "67aa6a9341fb0f35e218854e8852eda3bd0d68f055eab91237cc73909915b6da",
+            "reference_time": "2026-10-17T20:14:24.118147+00:00",
+            "run_id": "7191e567-5c91-4a78-840a-518639051c31"
+          },
+          "finished_at": "2026-10-17T20:14:24.117205+00:00",
+          "items_added": 0,
+          "items_existing": 2,
+          "items_failed": 0,
+          "items_received": 2,
+          "items_skipped": 0,
+          "recovered_runs": [],
+          "run_id": "8d11a50e-ed42-4b01-b3c8-d81be187f910",
+          "sources": [
+            {
+              "error_code": null,
+              "finished_at": "2026-10-17T20:14:24.112406+00:00",
+              "items_added": 0,
+              "items_existing": 1,
+              "items_failed": 0,
+              "items_received": 1,
+              "items_skipped": 0,
+              "source_id": "first",
+              "status": "success"
+            },
+            {
+              "error_code": null,
+              "finished_at": "2026-10-17T20:14:24.115284+00:00",
+              "items_added": 0,
+              "items_existing": 1,
+              "items_failed": 0,
+              "items_received": 1,
+              "items_skipped": 0,
+              "source_id": "second",
+              "status": "success"
+            }
+          ],
+          "sources_checked": 2,
+          "sources_failed": 0,
+          "sources_successful": 2,
+          "started_at": "2026-10-17T20:14:24.108748+00:00",
+          "status": "success"
+        },
+        "last_success_at": "2026-10-17T20:14:24.120272+00:00",
+        "next_run_at": "2026-10-17T20:14:26.120333+00:00",
+        "session_id": "b71701ce-c839-4d7b-be1c-28b93aaf5f03",
+        "started_at": "2026-10-17T20:14:22.052706+00:00",
+        "status": "waiting"
+      }
+    },
+    "checks": [
+      "cycles",
+      "deduplication",
+      "singleton",
+      "manual_lock",
+      "sigterm",
+      "restart",
+      "docker_sigkill_recovery",
+      "process_sigkill_autorestart",
+      "recovery",
+      "recreate",
+      "health",
+      "hardening",
+      "integrity"
+    ],
+    "image_id": "sha256:1c9b807bc457355c701aeee66dc8499feb9a497415acb7c3eeddab4d99f318d7"
+  },
+  "amd64": {
+    "status": "PASS",
+    "image": "waagd-discovery:sprint3-amd64",
+    "elapsed_seconds": 37.853,
+    "memory_peak_bytes": 109400064,
+    "memory_peak_scope": "final_recreated_scheduler_cgroup",
+    "memory_limit_bytes": 536870912,
+    "cpu_limit": 1.0,
+    "sqlite": {
+      "articles": 2,
+      "observations": 24,
+      "runs": 13,
+      "source_runs": 24,
+      "run_interruptions": 1,
+      "success": 11,
+      "running": 0,
+      "interrupted": 2,
+      "eligible": 2,
+      "session": {
+        "consecutive_failures": 0,
+        "heartbeat_at": "2026-10-17T20:14:41.448693+00:00",
+        "last_cycle_at": "2026-10-17T20:14:41.416917+00:00",
+        "last_cycle_finished_at": "2026-10-17T20:14:41.448693+00:00",
+        "last_error": null,
+        "last_result": {
+          "dry_run": false,
+          "filter": {
+            "articles_evaluated": 2,
+            "assessed_at": "2026-10-17T20:14:41.441752+00:00",
+            "counts": {
+              "deferred": 0,
+              "eligible": 2,
+              "excluded": 0
+            },
+            "engine_version": "rules-v1",
+            "policy": {
+              "future_tolerance_minutes": 15.0,
+              "max_age_hours": 72.0,
+              "min_description_chars": 40,
+              "require_publisher": false
+            },
+            "policy_hash": "67aa6a9341fb0f35e218854e8852eda3bd0d68f055eab91237cc73909915b6da",
+            "reference_time": "2026-10-17T20:14:41.441630+00:00",
+            "run_id": "ab137f17-a7bf-4e0e-9fd2-04ea27adf41d"
+          },
+          "finished_at": "2026-10-17T20:14:41.440293+00:00",
+          "items_added": 0,
+          "items_existing": 2,
+          "items_failed": 0,
+          "items_received": 2,
+          "items_skipped": 0,
+          "recovered_runs": [],
+          "run_id": "d15eac3f-f555-4d69-81f2-bb53c43958f7",
+          "sources": [
+            {
+              "error_code": null,
+              "finished_at": "2026-10-17T20:14:41.433729+00:00",
+              "items_added": 0,
+              "items_existing": 1,
+              "items_failed": 0,
+              "items_received": 1,
+              "items_skipped": 0,
+              "source_id": "first",
+              "status": "success"
+            },
+            {
+              "error_code": null,
+              "finished_at": "2026-10-17T20:14:41.437333+00:00",
+              "items_added": 0,
+              "items_existing": 1,
+              "items_failed": 0,
+              "items_received": 1,
+              "items_skipped": 0,
+              "source_id": "second",
+              "status": "success"
+            }
+          ],
+          "sources_checked": 2,
+          "sources_failed": 0,
+          "sources_successful": 2,
+          "started_at": "2026-10-17T20:14:41.430769+00:00",
+          "status": "success"
+        },
+        "last_success_at": "2026-10-17T20:14:41.448566+00:00",
+        "next_run_at": "2026-10-17T20:14:43.448693+00:00",
+        "session_id": "f32ea974-81df-4559-8f33-6da5ecd71d49",
+        "started_at": "2026-10-17T20:14:37.225437+00:00",
+        "status": "waiting"
+      }
+    },
+    "checks": [
+      "cycles",
+      "deduplication",
+      "singleton",
+      "manual_lock",
+      "sigterm",
+      "restart",
+      "docker_sigkill_recovery",
+      "process_sigkill_autorestart",
+      "recovery",
+      "recreate",
+      "health",
+      "hardening",
+      "integrity"
+    ],
+    "image_id": "sha256:b1a080a3ca46410ba7accbf85a36dd653a0d3c537ec44fce98803bb19112ad42"
+  }
+}

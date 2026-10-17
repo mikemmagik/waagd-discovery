@@ -1,0 +1,199 @@
+{
+  "architecture": "aarch64",
+  "cgroup_memory_current_bytes": 311529472,
+  "cgroup_memory_peak_bytes": 316256256,
+  "cpu_seconds": 7.9349,
+  "current_rss_kib": 44872,
+  "peak_rss_kib": 111116,
+  "phases": [
+    {
+      "cgroup_memory_current_bytes": 64536576,
+      "cgroup_memory_peak_bytes": 68341760,
+      "current_rss_kib": 40284,
+      "items": 10000,
+      "peak_rss_kib": 44168,
+      "phase": "collect_parse_normalize_store",
+      "seconds": 0.908
+    },
+    {
+      "assessment": {
+        "articles_evaluated": 10000,
+        "assessed_at": "2026-10-17T20:12:42.409990+00:00",
+        "counts": {
+          "deferred": 840,
+          "eligible": 6896,
+          "excluded": 2264
+        },
+        "engine_version": "rules-v1",
+        "policy": {
+          "future_tolerance_minutes": 15.0,
+          "max_age_hours": 72.0,
+          "min_description_chars": 40,
+          "require_publisher": false
+        },
+        "policy_hash": "67aa6a9341fb0f35e218854e8852eda3bd0d68f055eab91237cc73909915b6da",
+        "reference_time": "2026-10-17T12:00:00+00:00",
+        "run_id": "b8864e45-d58d-4c20-ae10-6affe043d599"
+      },
+      "cgroup_memory_current_bytes": 68915200,
+      "cgroup_memory_peak_bytes": 68915200,
+      "current_rss_kib": 40284,
+      "peak_rss_kib": 44168,
+      "phase": "filter_and_select",
+      "seconds": 1.0438,
+      "selection": {
+        "assessed_at": "2026-10-17T20:12:42.409990+00:00",
+        "assessment_run_id": "b8864e45-d58d-4c20-ae10-6affe043d599",
+        "assessment_status": "current",
+        "counts": {
+          "deferred": 840,
+          "eligible": 6896,
+          "excluded": 2264,
+          "stale": 0,
+          "unassessed": 0
+        },
+        "engine_version": "rules-v1",
+        "policy": {
+          "future_tolerance_minutes": 15.0,
+          "max_age_hours": 72.0,
+          "min_description_chars": 40,
+          "require_publisher": false
+        },
+        "policy_hash": "67aa6a9341fb0f35e218854e8852eda3bd0d68f055eab91237cc73909915b6da",
+        "reference_time": "2026-10-17T12:00:00+00:00"
+      }
+    },
+    {
+      "cgroup_memory_current_bytes": 82796544,
+      "cgroup_memory_peak_bytes": 86593536,
+      "current_rss_kib": 40412,
+      "existing": 10000,
+      "peak_rss_kib": 44824,
+      "phase": "replay_dedup",
+      "seconds": 0.9012
+    },
+    {
+      "cgroup_memory_current_bytes": 86990848,
+      "cgroup_memory_peak_bytes": 86990848,
+      "current_rss_kib": 40412,
+      "peak_rss_kib": 44824,
+      "phase": "repeat_filter_same_inputs",
+      "seconds": 0.8068
+    },
+    {
+      "cgroup_memory_current_bytes": 105263104,
+      "cgroup_memory_peak_bytes": 105263104,
+      "current_rss_kib": 40504,
+      "peak_rss_kib": 44864,
+      "phase": "metadata_update_and_reassessment",
+      "prior_selection": {
+        "assessed_at": "2026-10-17T20:12:44.355391+00:00",
+        "assessment_run_id": "091fa0da-9ae5-432f-aeec-8134f497458c",
+        "assessment_status": "current",
+        "counts": {
+          "deferred": 756,
+          "eligible": 6196,
+          "excluded": 2048,
+          "stale": 1000,
+          "unassessed": 0
+        },
+        "engine_version": "rules-v1",
+        "policy": {
+          "future_tolerance_minutes": 15.0,
+          "max_age_hours": 72.0,
+          "min_description_chars": 40,
+          "require_publisher": false
+        },
+        "policy_hash": "67aa6a9341fb0f35e218854e8852eda3bd0d68f055eab91237cc73909915b6da",
+        "reference_time": "2026-10-17T12:00:00+00:00"
+      },
+      "seconds": 1.6748
+    },
+    {
+      "cgroup_memory_current_bytes": 110239744,
+      "cgroup_memory_peak_bytes": 177827840,
+      "current_rss_kib": 44860,
+      "exported": 50,
+      "peak_rss_kib": 110660,
+      "phase": "snapshot_validate_atomic_export",
+      "seconds": 0.5527
+    },
+    {
+      "cgroup_memory_current_bytes": 179146752,
+      "cgroup_memory_peak_bytes": 179183616,
+      "current_rss_kib": 44860,
+      "peak_rss_kib": 110660,
+      "phase": "sqlite_online_backup_verify",
+      "seconds": 0.2403
+    },
+    {
+      "backup_bytes": 67133440,
+      "cgroup_memory_current_bytes": 248381440,
+      "cgroup_memory_peak_bytes": 316256256,
+      "current_rss_kib": 44864,
+      "peak_rss_kib": 111116,
+      "phase": "large_managed_backup_and_retention",
+      "seconds": 0.9417,
+      "verified": 1
+    },
+    {
+      "cgroup_memory_current_bytes": 248381440,
+      "cgroup_memory_peak_bytes": 316256256,
+      "current_rss_kib": 44864,
+      "peak_rss_kib": 111116,
+      "phase": "sqlite_competing_writer_timeout",
+      "seconds": 0.0584
+    },
+    {
+      "cgroup_memory_current_bytes": 311074816,
+      "cgroup_memory_peak_bytes": 316256256,
+      "current_rss_kib": 44832,
+      "peak_rss_kib": 111116,
+      "phase": "restore_and_integrity",
+      "seconds": 0.5535
+    }
+  ],
+  "platform": "Linux-7.0.14-linuxkit-aarch64-with-glibc2.36",
+  "python": "3.13.16",
+  "reference_time": "2026-10-17T12:00:00+00:00",
+  "sqlite": {
+    "checkpoint": [
+      0,
+      1040,
+      1040
+    ],
+    "journal_mode": "wal",
+    "logical_bytes": 67133440,
+    "page_count": 16390,
+    "page_size": 4096,
+    "url_lookup_plan": [
+      [
+        3,
+        0,
+        0,
+        "SEARCH url_aliases USING INDEX sqlite_autoindex_url_aliases_1 (url=?)"
+      ]
+    ],
+    "wal_bytes_before_checkpoint": 5957552
+  },
+  "stats": {
+    "articles": 10000,
+    "enabled_sources": 10,
+    "observations": 30000,
+    "runs": 3,
+    "sources": 10
+  },
+  "total_seconds": 7.8867,
+  "workload": {
+    "articles": 10000,
+    "description_chars": 800,
+    "observations": 30000,
+    "sources": 10
+  },
+  "container_validation": {
+    "exit_code": 0,
+    "oom_killed": false,
+    "memory_limit_bytes": 536870912,
+    "cpu_limit": 1.0
+  }
+}

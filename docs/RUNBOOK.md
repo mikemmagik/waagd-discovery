@@ -111,7 +111,7 @@ provided for the handoff; development tests use a separate disposable project.
 **START** builds/reuses the same image and explicitly selects only the scheduler:
 
 ```sh
-docker compose --profile scheduler up -d scheduler
+docker compose --profile scheduler up -d --build scheduler
 ```
 
 **STOP** allows 30 seconds for graceful collection interruption. The data volume

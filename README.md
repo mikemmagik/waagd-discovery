@@ -100,3 +100,5 @@ Sprint 2 evidence: [independent QA](docs/SPRINT_2_QA_REVIEW.md),
 disposable data directory. Never run workloads against the operator database.
 
 All rights reserved. No open-source license is granted.
+
+Sprint 3 evidence: [Sprint report](docs/SPRINT_3_REPORT.md), [independent QA](docs/SPRINT_3_QA_REVIEW.md), [contracts](docs/SPRINT_3_CONTRACTS.md), [scheduler operations](docs/SCHEDULER.md).
