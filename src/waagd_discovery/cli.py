@@ -121,9 +121,13 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
             raise DiscoveryError("backup_directory_contains_database")
         retention = load_retention_policy(args.backup_policy)
         if args.command == "backup-rotate":
-            return rotate_backups(args.directory, retention, apply=args.apply), 0
+            rotation = rotate_backups(args.directory, retention, apply=args.apply)
+            return rotation, 1 if rotation["status"] == "blocked" else 0
         with snapshot(args.db) as repository:
-            return create_managed_backup(repository, args.directory, retention), 0
+            managed = create_managed_backup(repository, args.directory, retention)
+            rotation = managed["rotation"]
+            assert isinstance(rotation, dict)
+            return managed, 1 if rotation["status"] == "blocked" else 0
     if args.command == "restore":
         with database_lock(args.db):
             previous = restore(args.db, args.input)

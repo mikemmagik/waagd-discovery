@@ -11,10 +11,10 @@ dist/
 build/
 .env
 !.env.example
-data/
-exports/
-backups/
-work/
+/data/
+/exports/
+/backups/
+/work/
 *.sqlite*
 *.db*
 .DS_Store
