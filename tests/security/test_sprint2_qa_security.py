@@ -1,9 +1,11 @@
 """Independent retention safety and immutable-audit probes; all inputs local."""
 
+import hashlib
 import json
 import os
 import sqlite3
-from contextlib import closing
+import tempfile
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -218,6 +220,13 @@ def test_policy_recursion_is_safe_configuration_error(tmp_path):
         load_retention_policy(policy)
 
 
+def test_policy_huge_yaml_integer_is_safe_configuration_error(tmp_path):
+    policy = tmp_path / "backup.yaml"
+    policy.write_text("backup: {keep_last: " + "9" * 5000 + "}")
+    with pytest.raises(DiscoveryError):
+        load_retention_policy(policy)
+
+
 def test_filter_audit_cannot_be_rewritten_or_deleted():
     with Repository(":memory:") as repository:
         repository.sync_sources([SOURCE])
@@ -232,3 +241,69 @@ def test_filter_audit_cannot_be_rewritten_or_deleted():
             with pytest.raises(sqlite3.IntegrityError, match="filter_audit_is_immutable"):
                 repository.connection.execute(statement)
         repository.verify()
+
+
+def test_large_backup_verification_does_not_require_temporary_disk(tmp_path, monkeypatch):
+    """A valid history larger than the production 32 MiB tmpfs must remain usable."""
+    directory = tmp_path / "backups"
+    directory.mkdir()
+    large = managed(directory, 0)
+
+    def digest(path):
+        with path.open("rb") as stream:
+            return hashlib.file_digest(stream, "sha256").hexdigest()
+
+    def unavailable(*args, **kwargs):
+        raise OSError("temporary disk intentionally unavailable")
+
+    with Repository(":memory:") as repository:
+        repository.sync_sources([SOURCE])
+        item = ArticleCandidate(
+            "https://example.org/retained-large-history",
+            title="Large history fixture",
+            description="x" * 4000,
+        )
+        for _ in range(9):
+            ingest(repository, [item] * 1000)
+        repository.backup(large)
+        assert large.stat().st_size > 32 * 1024 * 1024
+        before = digest(large)
+        monkeypatch.setattr(tempfile, "TemporaryDirectory", unavailable)
+        preview = rotate_backups(directory, RetentionPolicy(1, 1), as_of=REFERENCE)
+        assert preview["valid"] == 1
+        assert preview["keep"] == [large.name]
+        assert digest(large) == before
+        report = create_managed_backup(repository, directory, RetentionPolicy(2, 1))
+        assert report["status"] == "created"
+        assert report["rotation"]["valid"] == 2
+        assert report["rotation"]["deleted"] == []
+        assert (directory / report["created"]).stat().st_size > 32 * 1024 * 1024
+        assert digest(large) == before
+        assert sorted(path.name for path in directory.iterdir()) == sorted(
+            [large.name, report["created"]]
+        )
+
+
+def test_backup_substitution_during_immutable_snapshot_is_rejected(tmp_path, monkeypatch):
+    original = managed(tmp_path, 0)
+    create_backup(original)
+    external = tmp_path / "manual.sqlite3"
+    create_backup(external)
+    before = external.read_bytes()
+    original_snapshot = backups.snapshot
+
+    @contextmanager
+    def substitute(path, **kwargs):
+        original.unlink()
+        original.symlink_to(external)
+        with original_snapshot(path, **kwargs) as repository:
+            yield repository
+
+    monkeypatch.setattr(backups, "snapshot", substitute)
+    report = rotate_backups(tmp_path, RetentionPolicy(1, 1), apply=True, as_of=REFERENCE)
+    assert report["status"] == "blocked"
+    assert report["reason"] == "no_valid_survivor"
+    assert report["valid"] == 0
+    assert report["deleted"] == []
+    assert original.is_symlink()
+    assert external.read_bytes() == before
