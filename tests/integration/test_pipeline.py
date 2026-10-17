@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from contextlib import closing
 
 import pytest
 from waagd_discovery.storage import Repository
@@ -119,13 +120,13 @@ def test_cli_diagnostics_and_export_backup_restore(tmp_path, capsys):
 @pytest.mark.parametrize("command", ["stats", "verify", "export"])
 def test_diagnostics_refuse_future_schema(tmp_path, command):
     db = tmp_path / "db"
-    with sqlite3.connect(db) as connection:
+    with closing(sqlite3.connect(db)) as connection:
         connection.execute("PRAGMA user_version=999")
     args = ["--db", str(db), command]
     if command == "export":
         args += ["--output", str(tmp_path / "out.json")]
     assert main(args) == 1
-    with sqlite3.connect(db) as connection:
+    with closing(sqlite3.connect(db)) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 999
 
 
