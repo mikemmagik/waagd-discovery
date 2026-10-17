@@ -1,0 +1,6 @@
+# Deterministic discovery quality and freshness rules; no topic/editorial scoring.
+filter:
+  max_age_hours: 72
+  future_tolerance_minutes: 15
+  min_description_chars: 40
+  require_publisher: false
