@@ -18,15 +18,15 @@ gate completes; local test results below do not substitute for remote CI.
 2. Eligible/deferred/excluded decisions preserve all eight check outcomes and
    stable reason codes. Original articles and provenance are never discarded
    for a failed quality check. No editorial truth/interest score is implied.
-3. Additive schema3 stores immutable complete audit batches, full policy/hash,
+3. Additive schema 3 stores immutable complete audit batches, full policy/hash,
    engine version, chosen reference time, actual assessment time and input hashes.
    The latest complete batch defines current state. Changed metadata/policy/source
    settings require reassessment; cancellation rolls back an incomplete batch.
-4. Selected JSON schema2 exports only matching persisted eligible decisions,
+4. Selected JSON schema 2 exports only matching persisted eligible decisions,
    rechecks age/current registry in a consistent read-only snapshot and ranks
    all eligible inputs before applying the limit. Priority is publication time,
    metadata completeness and stable article ID. Empty output is explicit and
-   explained. The historical schema1 file is retained.
+   explained. The historical schema 1 file is retained.
 5. Successful/partial collection assesses once automatically; fully failed or
    interrupted runs preserve the previous filter batch. Manual filter/report and
    fixed-reference-time inspection are available. Dry-run never writes the real DB.
@@ -48,10 +48,10 @@ backups, collector resilience and independent QA. QA reviewed feature branches i
 its own integration tree before main integration. See SPRINT_2_QA_REVIEW.md.
 
 Final integrated local result: **472 tests PASS, no warnings, 96.01% statement
-coverage (1,542/1,606)** on Python3.14.8. Ruff without cache, format checks and
+coverage (1,542/1,606)** on Python 3.14.8. Ruff without cache, format checks and
 strict mypy over 18 production files pass. The frozen dependency lock passes.
 All original 222 safety scenarios remain; only the intentional selected-export
-contract required valid assessed export fixtures and the schema2 expectation.
+contract required valid assessed export fixtures and the schema 2 expectation.
 
 New coverage includes full-scan ranking/time boundaries, engine/policy/input
 invalidation, audit immutability, interrupted transactions, real SIGTERM/SIGKILL,
@@ -73,11 +73,11 @@ the unchanged 32 MiB temporary filesystem. No full temporary disk copy remains.
 Both linux/arm64 (native) and linux/amd64 (emulated) images build and pass offline
 container acceptance. It covers non-root UID10001, read-only root filesystem,
 zero capabilities, no-new-privileges, no Docker socket/network, persistence across
-recreated containers, replay deduplication, filtering/report, selected JSON2,
+recreated containers, replay deduplication, filtering/report, selected JSON 2,
 backup/restore and managed retention preview/apply. No public port is published.
 
-Final larger run: native arm64 Python3.13.16 in Docker, one CPU, memory limit
-536,870,912 bytes, /tmp33,554,432 bytes, no networking. Synthetic RSS fixture:
+Final larger run: native arm64 Python 3.13.16 in Docker, one CPU, memory limit
+536,870,912 bytes, /tmp 33,554,432 bytes, no networking. Synthetic RSS fixture:
 10 sources, 10,000 unique articles, 800-character normal descriptions, three
 collection passes / 30,000 observations. Reference time is fixed to
 2026-10-17T12:00:00Z, independent of machine date. Measured on 2026-10-17.
@@ -98,34 +98,34 @@ collection passes / 30,000 observations. Reference time is fixed to
 
 Process peak RSS: **110,936 KiB / 108.34 MiB**. Cgroup peak including charged file
 cache: **325,484,544 bytes / 310.41 MiB**, below the 512 MiB limit. Docker reports
-exit0, OOMKilled=false, one CPU. These are one measured fixture run, not an SLA or
+exit 0, OOMKilled=false, one CPU. These are one measured fixture run, not an SLA or
 a long-running soak result. Raw measurements are in SPRINT_2_BENCHMARK.json.
 
-Initial filter counts: eligible6,896 / deferred840 / excluded2,264, with all10,000
+Initial filter counts: eligible 6,896 / deferred 840 / excluded 2,264, with all 10,000
 articles retained. Changing 1,000 titles makes those assessments stale until
-reassessment. Selected export contains50 eligible records with explanations.
+reassessment. Selected export contains 50 eligible records with explanations.
 
-SQLite remained in WAL mode. Logical database/backup size:67,092,480 bytes
-(63.98 MiB), 16,380 pages of4,096 bytes. WAL before checkpoint:5,957,552 bytes
-(5.68 MiB). Passive checkpoint completed with no busy result and1,040/1,040 frames.
+SQLite remained in WAL mode. Logical database/backup size: 67,092,480 bytes
+(63.98 MiB), 16,380 pages of 4,096 bytes. WAL before checkpoint: 5,957,552 bytes
+(5.68 MiB). Passive checkpoint completed with no busy result and 1,040/1,040 frames.
 The URL identity lookup uses sqlite_autoindex_url_aliases_1. A second writer waits
-and times out under an explicit50 ms test timeout, then can acquire a transaction
+and times out under an explicit 50 ms test timeout, then can acquire a transaction
 after the first writer rolls back. Integrity/foreign-key checks and restored
 article/source/run/observation counts all pass.
 
 ## Real v0.1 archive migration
 
-On 2026-10-18 at02:45 Bangkok, an isolated Docker volume restored a closed v0.1
-archive, migrated schema2→3, assessed and exported selected candidates. The live
+On 2026-10-18 at 02:45 Bangkok, an isolated Docker volume restored a closed v0.1
+archive, migrated schema 2→3, assessed and exported selected candidates. The live
 stable volume and original archive were never modified. Input SHA256:
 73a7635afd4aa75d630b085c28e2d8adca1ab1288be2ff087f9f765a3b31f146.
 
-All original rows match before/after:94 articles,96 article-source links,
-127 observations,2 discovery runs,3 sources,96 source GUIDs,94 URL aliases,
+All original rows match before/after: 94 articles, 96 article-source links,
+127 observations, 2 discovery runs, 3 sources, 96 source GUIDs, 94 URL aliases,
 6 per-source outcomes. Canonical legacy-row SHA256 before and after:
 5170fa16f13530fc766de28d8f727cfe2dac376c11561c7e548ff4001c840915.
-At reference2026-10-17T19:45:25.894038Z,74 were eligible and20 excluded by policy;
-all94 remain stored. Selected export returned50. A new schema3 backup verifies.
+At reference 2026-10-17T19:45:25.894038Z, 74 were eligible and 20 excluded by policy;
+all 94 remain stored. Selected export returned 50. A new schema 3 backup verifies.
 The original archive hash is unchanged. See SPRINT_2_MIGRATION.json.
 
 The read-only mounted archive was staged as a known closed file on the disposable
@@ -162,16 +162,15 @@ docker compose run --rm discovery restore --input /backups/manual.sqlite3 --conf
 ```
 
 The managed-creation command applies configured retention after the new copy is
-verified/durable. Standalone rotation previews by default. Blocked rotation exits1
+verified/durable. Standalone rotation previews by default. Blocked rotation exits 1
 with reasons and preserves usable copies. Retain off-device backups separately.
-For stopping/logs, start with --name waagd-manual, use `docker stop --time30
-waagd-manual`, `docker logs waagd-manual`, then remove the stopped container.
+For stopping/logs, start with --name waagd-manual, use `docker stop --time 30 waagd-manual`, `docker logs waagd-manual`, then remove the stopped container.
 Never use `docker compose down -v` against the operator volume.
 
 Rollback to v0.1 requires a preserved current v0.2 backup AND the matching
-pre-upgrade schema2 backup. Switch/build the target v0.1 code/image first, then
-restore the schema2 archive with that older image's restore command. Restoring
-through v0.2 would migrate the archive to schema3; v0.1 deliberately refuses it.
+pre-upgrade schema 2 backup. Switch/build the target v0.1 code/image first, then
+restore the schema 2 archive with that older image's restore command. Restoring
+through v0.2 would migrate the archive to schema 3; v0.1 deliberately refuses it.
 See RUNBOOK.md, FILTERING.md, BACKUPS.md and DEPLOYMENT.md for full procedures.
 
 ## Limits and architectural handoff
@@ -189,9 +188,9 @@ Consistent snapshots use memory; significantly larger datasets need separate
 resource measurement. The measured 64 MiB database is not an unbounded-size claim.
 Advisory locks assume local storage and cooperating tools. Backup retention does
 not replace off-device protection. A force kill can leave a discovery run marked
-running; stale-run reconciliation is deferred to Sprint3. No sustained uptime,
+running; stale-run reconciliation is deferred to Sprint 3. No sustained uptime,
 power-loss hardware or long soak test is claimed.
 
 Architectural review should accept the policy defaults, the eligibility/audit
-boundary, JSON schema2 and conservative retention/operating limits. Sprint3 does
+boundary, JSON schema 2 and conservative retention/operating limits. Sprint 3 does
 not start automatically after this release.
