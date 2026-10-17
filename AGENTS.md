@@ -33,3 +33,9 @@ The lead owns CLI, versioned selected export and benchmarks. Independent QA must
 review both before integration. Keep all legacy scenarios; adapt only export
 fixtures/schema assertions required by the intentionally changed export contract.
 Never run tests or benchmarks against the operator's stable database volume.
+
+Sprint 3 is now authorized: see docs/SPRINT_3_CONTRACTS.md for ownership and
+interfaces. Scheduler may run only in isolated development tests; never activate
+the persistent operator service without separate permission. Lead owns schema4,
+shared collection orchestration, CLI/recovery/diagnostics. Scheduler and Docker
+changes require independent QA before release. Sprint 4 remains unapproved.
