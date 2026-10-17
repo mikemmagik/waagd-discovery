@@ -57,6 +57,8 @@ numbers, validated against candidate-v2 schema. It must be generated within two
 hours, no more than five minutes into the future, with coherent eligible decisions
 and passed checks. Publication freshness is checked against actual UTC and the
 export's filtering policy. Historical reference times cannot bypass this check.
+Independent bridge ceilings are 72 hours of age and 15 minutes into the future;
+looser input policy cannot override those ceilings.
 
 Default delivery is 10 candidates, configurable from 1 to 50. Projection caps
 titles at 300 characters, descriptions at 1000, publishers at 150, provenance at

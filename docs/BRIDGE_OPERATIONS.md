@@ -64,6 +64,9 @@ ledger and backups outside the real workspace. Do not expose them through agent
 tools or mounts. The operator supplies the actual approved workspace path; this
 document guesses none. Verify host export readability and private-root ownership.
 Stop on permission errors; do not bypass checks with root or world permissions.
+The export may belong to container UID 10001 if it is host-readable, regular,
+single-linked and not group/world-writable. Workspace/state ownership must match
+the host bridge user; state/inbox directories are private 0700 and files 0600.
 
 ## Offline fake-workspace acceptance
 
@@ -148,6 +151,9 @@ Stop watch before maintenance. Copy the whole private state directory coherently
 while no bridge process runs, keep owner-only access and an off-device copy, and
 never commit it or place it in the workspace/export directory. It includes exact
 prepared payloads and processed canonical URL identities.
+Include `initialized.json`, the ledger and `bridge.lock`; the initialization
+marker prevents treating a vanished ledger as a fresh installation. Do not copy
+only the ledger or remove the marker to bypass a missing-state error.
 
 After ordinary interruption, rerun sync: PREPARE/publish and ACK/publish recovery
 uses trusted ledger state. Missing/tampered inboxes can be repaired; missing or
