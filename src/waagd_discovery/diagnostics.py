@@ -134,6 +134,9 @@ def service_status(db: Path) -> dict[str, object]:
             "last_successful_run": dict(success) if success else None,
             "recent_runs": [dict(row) for row in rows],
             "latest_sources": latest_outcomes,
+            "sources_checked": len(latest_outcomes),
+            "sources_successful": sum(row["status"] == "success" for row in latest_outcomes),
+            "sources_failed": sum(row["status"] == "failed" for row in latest_outcomes),
             "latest_counts": {
                 key: sum(row[key] for row in latest_outcomes)
                 for key in (

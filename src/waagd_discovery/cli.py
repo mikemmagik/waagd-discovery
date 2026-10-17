@@ -20,7 +20,7 @@ from waagd_discovery.backups import (
 )
 from waagd_discovery.collection import run_once
 from waagd_discovery.config import load_sources
-from waagd_discovery.diagnostics import service_status
+from waagd_discovery.diagnostics import filtering_statistics, service_status
 from waagd_discovery.export import export_candidates
 from waagd_discovery.filtering import assess, filter_report, load_policy
 from waagd_discovery.locking import database_lock
@@ -57,7 +57,7 @@ def parser() -> argparse.ArgumentParser:
         default=Path(os.getenv("WAAGD_SCHEDULER_CONFIG", "config/scheduler.yaml")),
     )
     commands = result.add_subparsers(dest="command", required=True)
-    for name in ("init-db", "stats", "verify", "scheduler", "status", "health"):
+    for name in ("init-db", "stats", "verify", "scheduler", "status", "health", "filter-stats"):
         commands.add_parser(name)
     collection = commands.add_parser("collect")
     collection.add_argument(
@@ -170,6 +170,8 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
             repository.sync_sources(sources)
             return assess(repository, policy, args.at), 0
     with snapshot(args.db) as repository:
+        if args.command == "filter-stats":
+            return filtering_statistics(repository.connection), 0
         if args.command == "stats":
             return repository.stats(), 0
         if args.command == "verify":

@@ -1,0 +1,88 @@
+{
+  "observed_at_utc": "2026-10-17T20:08:23.889812+00:00",
+  "collection_status": "success",
+  "items_received": 96,
+  "unique_articles": 95,
+  "policy": {
+    "future_tolerance_minutes": 15.0,
+    "max_age_hours": 72.0,
+    "min_description_chars": 40,
+    "require_publisher": false
+  },
+  "global_filter_statistics": {
+    "assessment": {
+      "id": "4dab32d1-5364-4121-a2a3-fa3ffe6e11cd",
+      "assessed_at": "2026-10-17T20:08:23.890088+00:00",
+      "reference_time": "2026-10-17T20:08:23.890015+00:00",
+      "policy_hash": "67aa6a9341fb0f35e218854e8852eda3bd0d68f055eab91237cc73909915b6da"
+    },
+    "counts": {
+      "eligible": 75,
+      "deferred": 0,
+      "excluded": 20
+    },
+    "reasons": {
+      "deferred": {},
+      "excluded": {
+        "publication_too_old": 20
+      }
+    },
+    "scope": "latest_persisted_assessment_not_current_export_eligibility"
+  },
+  "sources": [
+    {
+      "id": "ars_technica",
+      "name": "Ars Technica",
+      "url": "https://feeds.arstechnica.com/arstechnica/index",
+      "articles": 20,
+      "filter_counts": {
+        "eligible": 20,
+        "deferred": 0,
+        "excluded": 0
+      },
+      "failure_reasons": {},
+      "known_valid_publication_dates": 20,
+      "descriptions_below_40_chars": 0,
+      "description_length_min": 46,
+      "description_length_median": 80.5
+    },
+    {
+      "id": "guardian_technology",
+      "name": "The Guardian Technology",
+      "url": "https://www.theguardian.com/technology/rss",
+      "articles": 31,
+      "filter_counts": {
+        "eligible": 17,
+        "deferred": 0,
+        "excluded": 14
+      },
+      "failure_reasons": {
+        "publication_too_old": 14
+      },
+      "known_valid_publication_dates": 31,
+      "descriptions_below_40_chars": 0,
+      "description_length_min": 407,
+      "description_length_median": 676
+    },
+    {
+      "id": "guardian_world",
+      "name": "The Guardian World",
+      "url": "https://www.theguardian.com/world/rss",
+      "articles": 45,
+      "filter_counts": {
+        "eligible": 39,
+        "deferred": 0,
+        "excluded": 6
+      },
+      "failure_reasons": {
+        "publication_too_old": 6
+      },
+      "known_valid_publication_dates": 45,
+      "descriptions_below_40_chars": 0,
+      "description_length_min": 374,
+      "description_length_median": 596
+    }
+  ],
+  "decision": "Keep all default thresholds unchanged; this one snapshot shows no date/description exclusions, only age exclusions. Not evidence for every future RSS feed.",
+  "data_isolation": "Fresh development database; operator data untouched; no scheduler activated."
+}
