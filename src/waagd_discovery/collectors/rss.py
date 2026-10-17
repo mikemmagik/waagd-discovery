@@ -135,7 +135,7 @@ def parse_feed(body: bytes, source: Source, max_items: int = 1000) -> ParseResul
         root = ElementTree.fromstring(
             body, forbid_dtd=True, forbid_entities=True, forbid_external=True
         )
-    except (ParseError, DefusedXmlException, ValueError):
+    except (ParseError, DefusedXmlException, ValueError, LookupError):
         raise DiscoveryError("feed_xml") from None
     _check_structure(root)
     if root.tag == "rss" and root.get("version") == "2.0":
