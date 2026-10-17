@@ -1,0 +1,5 @@
+# Keep the union: at least seven verified backups, plus every verified backup
+# from the last thirty days. Rotation is a preview unless --apply is explicit.
+backup:
+  keep_last: 7
+  max_age_days: 30
