@@ -3,12 +3,12 @@ import sqlite3
 from contextlib import closing
 
 import pytest
-from waagd_discovery.storage import Repository
 
 from waagd_discovery.cli import main
 from waagd_discovery.models import DiscoveryError, FetchResult, Source
 from waagd_discovery.operations import snapshot
 from waagd_discovery.pipeline import collect
+from waagd_discovery.storage import Repository
 
 RSS = b"""<rss version="2.0"><channel><title>Fixture</title><item>
 <guid>one</guid><title>Actual discovery</title>

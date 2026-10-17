@@ -94,6 +94,8 @@ run_container "$image" verify
 run_container "$image" stats
 run_container "$image" export --output /exports/smoke.json
 run_container "$image" backup --output /backups/smoke.sqlite3
+run_container "$image" restore --input /backups/smoke.sqlite3 --confirm
+run_container "$image" verify
 run_container --entrypoint python "$image" - <<'PY'
 import json
 from pathlib import Path
