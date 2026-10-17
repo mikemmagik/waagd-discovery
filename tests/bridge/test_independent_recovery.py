@@ -232,9 +232,14 @@ def test_qa_concurrent_processes_share_one_delivery_and_history(layout):
 import json, sys
 from pathlib import Path
 from datetime import datetime
-from waagd_discovery.bridge import Bridge
-result = Bridge(*(Path(value) for value in sys.argv[1:])).sync(
-    now=datetime.fromisoformat('2026-10-18T12:00:00+00:00'))
+from waagd_discovery.bridge import Bridge, BridgeError
+try:
+    result = Bridge(*(Path(value) for value in sys.argv[1:])).sync(
+        now=datetime.fromisoformat('2026-10-18T12:00:00+00:00'))
+except BridgeError as error:
+    if str(error) != 'bridge_busy':
+        raise
+    result = {'status': 'bridge_busy'}
 print(json.dumps(result))
 """
     processes = [
@@ -251,6 +256,70 @@ print(json.dumps(result))
         stdout, stderr = process.communicate(timeout=15)
         assert process.returncode == 0, stderr
         results.append(json.loads(stdout))
-    assert len({result["pending_delivery_id"] for result in results}) == 1
-    assert all(result["known"] == 1 and result["delivered"] == 1 for result in results)
+    successful = [result for result in results if result["status"] != "bridge_busy"]
+    assert successful
+    assert len({result["pending_delivery_id"] for result in successful}) == 1
+    assert all(result["known"] == 1 and result["delivered"] == 1 for result in successful)
+    assert (
+        Bridge(*layout).sync(now=NOW)["pending_delivery_id"] == successful[0]["pending_delivery_id"]
+    )
     assert len(json.loads(inbox(layout).read_text())["candidates"]) == 1
+
+
+def test_qa_expired_dismissal_preserves_history_without_claiming_processing(layout):
+    first = Bridge(*layout).sync(now=NOW)
+    late = NOW + timedelta(hours=3)
+    result = Bridge(*layout).dismiss(first["pending_delivery_id"], now=late)
+    assert result["dismissed"] == 1 and result["processed"] == 0 and result["known"] == 1
+    assert result["pending_delivery_id"] is None
+    ledger = layout[2] / "ledger.json"
+    before = ledger.read_bytes()
+    repeated = Bridge(*layout).dismiss(first["pending_delivery_id"], now=late)
+    assert repeated["dismissed"] == 1 and ledger.read_bytes() == before
+    with pytest.raises(BridgeError, match="differently"):
+        Bridge(*layout).ack(first["pending_delivery_id"], now=late)
+    document = export_document()
+    document["generated_at"] = late.isoformat()
+    next_candidate = copy.deepcopy(document["candidates"][0])
+    next_candidate.update(id=2, url="https://example.org/next")
+    document["candidates"].append(next_candidate)
+    document["selection"]["counts"]["eligible"] = 2
+    layout[0].write_text(json.dumps(document))
+    following = Bridge(*layout).sync(now=late)
+    assert following["known"] == 2 and following["dismissed"] == 1 and following["processed"] == 0
+    assert following["delivered"] == 1
+    assert [item["url"] for item in json.loads(inbox(layout).read_text())["candidates"]] == [
+        "https://example.org/next"
+    ]
+
+
+@pytest.mark.parametrize("operation", ["status", "sync"])
+def test_qa_busy_kernel_lock_is_bounded_and_never_mutates_state(layout, operation):
+    import fcntl
+
+    Bridge(*layout).sync(now=NOW)
+    ledger = layout[2] / "ledger.json"
+    before = ledger.read_bytes(), inbox(layout).read_bytes()
+    program = """
+import json, sys
+from pathlib import Path
+from datetime import datetime
+from waagd_discovery.bridge import Bridge, BridgeError
+try:
+    bridge = Bridge(*(Path(value) for value in sys.argv[2:]))
+    getattr(bridge, sys.argv[1])(now=datetime.fromisoformat('2026-10-18T12:00:00+00:00'))
+except BridgeError as error:
+    print(json.dumps({'error': str(error)}))
+    sys.exit(7)
+"""
+    with (layout[2] / "bridge.lock").open("rb") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        result = subprocess.run(
+            [sys.executable, "-c", program, operation, *(str(path) for path in layout)],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    assert result.returncode == 7, result.stderr
+    assert json.loads(result.stdout)["error"] == "bridge_busy"
+    assert before == (ledger.read_bytes(), inbox(layout).read_bytes())
