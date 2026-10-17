@@ -1,0 +1,5 @@
+# Explicit operator opt-in; collection/scheduler continue while disabled.
+handoff:
+  enabled: false
+  output: /exports/candidates.json
+  limit: 50

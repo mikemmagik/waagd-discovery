@@ -34,6 +34,12 @@ def export_candidates(
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(
         data
     )
+    write_json_atomic(destination, data)
+    return len(candidates)
+
+
+def write_json_atomic(destination: Path, data: dict[str, object]) -> None:
+    """Durable same-directory publication; callers validate their own contracts."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     descriptor, name = tempfile.mkstemp(prefix=".candidates-", dir=destination.parent)
     try:
@@ -50,4 +56,3 @@ def export_candidates(
             os.close(directory)
     finally:
         Path(name).unlink(missing_ok=True)
-    return len(candidates)

@@ -23,6 +23,7 @@ from waagd_discovery.config import load_sources
 from waagd_discovery.diagnostics import filtering_statistics, service_status
 from waagd_discovery.export import export_candidates
 from waagd_discovery.filtering import assess, filter_report, load_policy
+from waagd_discovery.handoff import integration_status, load_handoff_policy
 from waagd_discovery.locking import database_lock
 from waagd_discovery.logging import configure
 from waagd_discovery.models import DiscoveryError
@@ -56,8 +57,22 @@ def parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path(os.getenv("WAAGD_SCHEDULER_CONFIG", "config/scheduler.yaml")),
     )
+    result.add_argument(
+        "--handoff-config",
+        type=Path,
+        default=Path(os.getenv("WAAGD_HANDOFF_CONFIG", "config/handoff.yaml")),
+    )
     commands = result.add_subparsers(dest="command", required=True)
-    for name in ("init-db", "stats", "verify", "scheduler", "status", "health", "filter-stats"):
+    for name in (
+        "init-db",
+        "stats",
+        "verify",
+        "scheduler",
+        "status",
+        "health",
+        "filter-stats",
+        "integration-status",
+    ):
         commands.add_parser(name)
     collection = commands.add_parser("collect")
     collection.add_argument(
@@ -113,15 +128,19 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
             args.policy.resolve(),
             args.backup_policy.resolve(),
             args.scheduler_config.resolve(),
+            args.handoff_config.resolve(),
         }
         protected.update(
             Path(str(args.db.resolve()) + suffix).resolve()
-            for suffix in ("-wal", "-shm", ".lock", ".scheduler.lock")
+            for suffix in ("-wal", "-shm", ".lock", ".scheduler.lock", ".handoff.json")
         )
         protected.update(
             Path(str(args.db) + suffix).resolve()
-            for suffix in ("-wal", "-shm", ".lock", ".scheduler.lock")
+            for suffix in ("-wal", "-shm", ".lock", ".scheduler.lock", ".handoff.json")
         )
+        handoff = load_handoff_policy(args.handoff_config)
+        if handoff.enabled and args.output.resolve() == handoff.output.resolve():
+            raise DiscoveryError("export_target_reserved")
         if args.output.resolve() in protected or args.output.suffix.lower() in (
             ".sqlite",
             ".sqlite3",
@@ -144,6 +163,9 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
         with database_lock(args.db):
             previous = restore(args.db, args.input)
         return {"status": "restored", "pre_restore_backup": previous.name if previous else None}, 0
+    if args.command == "integration-status":
+        integration = integration_status(args.db, args.handoff_config)
+        return integration, 0 if integration["healthy"] else 1
     if args.command in ("status", "health"):
         status_result = service_status(args.db)
         return status_result, 0 if args.command == "status" or status_result["healthy"] else 1
@@ -151,12 +173,23 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
         from waagd_discovery.scheduler import load_scheduler_policy, run_scheduler
 
         state = run_scheduler(
-            args.db, args.sources, args.policy, load_scheduler_policy(args.scheduler_config)
+            args.db,
+            args.sources,
+            args.policy,
+            load_scheduler_policy(args.scheduler_config),
+            handoff_config=args.handoff_config,
+            protected_paths=(args.backup_policy, args.scheduler_config),
         )
         return state, 0
     if args.command == "collect":
         result = run_once(
-            args.db, args.sources, args.policy, selected=args.source, dry_run=args.dry_run
+            args.db,
+            args.sources,
+            args.policy,
+            selected=args.source,
+            dry_run=args.dry_run,
+            handoff_config=args.handoff_config,
+            protected_paths=(args.backup_policy, args.scheduler_config),
         )
         status = result["status"]
         return result, 130 if status == "interrupted" else 0 if status == "success" else 1

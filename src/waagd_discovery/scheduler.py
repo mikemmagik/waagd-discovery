@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from uuid import uuid4
 
@@ -202,6 +203,8 @@ def run_scheduler(
     scheduler_policy: SchedulerPolicy,
     *,
     runtime: SchedulerRuntime | None = None,
+    handoff_config: Path | None = None,
+    protected_paths: tuple[Path, ...] = (),
 ) -> dict[str, object]:
     """Run until interrupted; lifetime lock prevents duplicate scheduler processes.
 
@@ -209,6 +212,12 @@ def run_scheduler(
     exception, is followed by a fresh fixed delay. Heartbeats run while waiting;
     collection stays synchronous and owns its own ordinary operation lock.
     """
+    if runtime is None and (handoff_config is not None or protected_paths):
+        from waagd_discovery.collection import run_once
+
+        runtime = SchedulerRuntime(
+            cycle=partial(run_once, handoff_config=handoff_config, protected_paths=protected_paths)
+        )
     runtime = runtime or SchedulerRuntime()
     db = db.resolve()
     with _lifetime_lock(db):
