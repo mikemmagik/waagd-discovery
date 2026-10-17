@@ -2,32 +2,32 @@
   "arm64": {
     "status": "PASS",
     "image": "waagd-discovery:sprint3",
-    "elapsed_seconds": 27.477,
-    "memory_peak_bytes": 55058432,
+    "elapsed_seconds": 59.629,
+    "memory_peak_bytes": 55758848,
     "memory_peak_scope": "final_recreated_scheduler_cgroup",
     "memory_limit_bytes": 536870912,
     "cpu_limit": 1.0,
     "sqlite": {
       "articles": 2,
-      "observations": 22,
-      "runs": 12,
-      "source_runs": 22,
+      "observations": 50,
+      "runs": 26,
+      "source_runs": 50,
       "run_interruptions": 1,
-      "success": 10,
+      "success": 24,
       "running": 0,
       "interrupted": 2,
       "eligible": 2,
       "session": {
         "consecutive_failures": 0,
-        "heartbeat_at": "2026-10-17T20:14:25.122474+00:00",
-        "last_cycle_at": "2026-10-17T20:14:24.098837+00:00",
-        "last_cycle_finished_at": "2026-10-17T20:14:24.120333+00:00",
+        "heartbeat_at": "2026-10-17T20:23:24.654297+00:00",
+        "last_cycle_at": "2026-10-17T20:23:23.626675+00:00",
+        "last_cycle_finished_at": "2026-10-17T20:23:23.646851+00:00",
         "last_error": null,
         "last_result": {
           "dry_run": false,
           "filter": {
             "articles_evaluated": 2,
-            "assessed_at": "2026-10-17T20:14:24.118219+00:00",
+            "assessed_at": "2026-10-17T20:23:23.644750+00:00",
             "counts": {
               "deferred": 0,
               "eligible": 2,
@@ -41,21 +41,21 @@
               "require_publisher": false
             },
             "policy_hash": "67aa6a9341fb0f35e218854e8852eda3bd0d68f055eab91237cc73909915b6da",
-            "reference_time": "2026-10-17T20:14:24.118147+00:00",
-            "run_id": "7191e567-5c91-4a78-840a-518639051c31"
+            "reference_time": "2026-10-17T20:23:23.644662+00:00",
+            "run_id": "899caa13-1d62-4302-ad90-9ae35d99f4cf"
           },
-          "finished_at": "2026-10-17T20:14:24.117205+00:00",
+          "finished_at": "2026-10-17T20:23:23.643836+00:00",
           "items_added": 0,
           "items_existing": 2,
           "items_failed": 0,
           "items_received": 2,
           "items_skipped": 0,
           "recovered_runs": [],
-          "run_id": "8d11a50e-ed42-4b01-b3c8-d81be187f910",
+          "run_id": "15fd2a70-e4d2-418c-b48a-87a653e00886",
           "sources": [
             {
               "error_code": null,
-              "finished_at": "2026-10-17T20:14:24.112406+00:00",
+              "finished_at": "2026-10-17T20:23:23.639703+00:00",
               "items_added": 0,
               "items_existing": 1,
               "items_failed": 0,
@@ -66,7 +66,7 @@
             },
             {
               "error_code": null,
-              "finished_at": "2026-10-17T20:14:24.115284+00:00",
+              "finished_at": "2026-10-17T20:23:23.642274+00:00",
               "items_added": 0,
               "items_existing": 1,
               "items_failed": 0,
@@ -79,13 +79,13 @@
           "sources_checked": 2,
           "sources_failed": 0,
           "sources_successful": 2,
-          "started_at": "2026-10-17T20:14:24.108748+00:00",
+          "started_at": "2026-10-17T20:23:23.635823+00:00",
           "status": "success"
         },
-        "last_success_at": "2026-10-17T20:14:24.120272+00:00",
-        "next_run_at": "2026-10-17T20:14:26.120333+00:00",
-        "session_id": "b71701ce-c839-4d7b-be1c-28b93aaf5f03",
-        "started_at": "2026-10-17T20:14:22.052706+00:00",
+        "last_success_at": "2026-10-17T20:23:23.646762+00:00",
+        "next_run_at": "2026-10-17T20:23:25.646851+00:00",
+        "session_id": "3551c8ea-61e8-4dd1-8768-77df3a46ca51",
+        "started_at": "2026-10-17T20:22:53.064593+00:00",
         "status": "waiting"
       }
     },
@@ -104,37 +104,38 @@
       "hardening",
       "integrity"
     ],
-    "image_id": "sha256:1c9b807bc457355c701aeee66dc8499feb9a497415acb7c3eeddab4d99f318d7"
+    "image_id": "sha256:1c9b807bc457355c701aeee66dc8499feb9a497415acb7c3eeddab4d99f318d7",
+    "harness_revision": "708c96b (integrated as cdeee57)"
   },
   "amd64": {
     "status": "PASS",
     "image": "waagd-discovery:sprint3-amd64",
-    "elapsed_seconds": 37.853,
-    "memory_peak_bytes": 109400064,
+    "elapsed_seconds": 66.647,
+    "memory_peak_bytes": 90558464,
     "memory_peak_scope": "final_recreated_scheduler_cgroup",
     "memory_limit_bytes": 536870912,
     "cpu_limit": 1.0,
     "sqlite": {
       "articles": 2,
-      "observations": 24,
-      "runs": 13,
-      "source_runs": 24,
+      "observations": 50,
+      "runs": 26,
+      "source_runs": 50,
       "run_interruptions": 1,
-      "success": 11,
+      "success": 24,
       "running": 0,
       "interrupted": 2,
       "eligible": 2,
       "session": {
         "consecutive_failures": 0,
-        "heartbeat_at": "2026-10-17T20:14:41.448693+00:00",
-        "last_cycle_at": "2026-10-17T20:14:41.416917+00:00",
-        "last_cycle_finished_at": "2026-10-17T20:14:41.448693+00:00",
+        "heartbeat_at": "2026-10-17T20:24:51.190308+00:00",
+        "last_cycle_at": "2026-10-17T20:24:50.159670+00:00",
+        "last_cycle_finished_at": "2026-10-17T20:24:50.186838+00:00",
         "last_error": null,
         "last_result": {
           "dry_run": false,
           "filter": {
             "articles_evaluated": 2,
-            "assessed_at": "2026-10-17T20:14:41.441752+00:00",
+            "assessed_at": "2026-10-17T20:24:50.182017+00:00",
             "counts": {
               "deferred": 0,
               "eligible": 2,
@@ -148,21 +149,21 @@
               "require_publisher": false
             },
             "policy_hash": "67aa6a9341fb0f35e218854e8852eda3bd0d68f055eab91237cc73909915b6da",
-            "reference_time": "2026-10-17T20:14:41.441630+00:00",
-            "run_id": "ab137f17-a7bf-4e0e-9fd2-04ea27adf41d"
+            "reference_time": "2026-10-17T20:24:50.181897+00:00",
+            "run_id": "94ecdff8-09c4-4ef7-84e8-70465960ea8e"
           },
-          "finished_at": "2026-10-17T20:14:41.440293+00:00",
+          "finished_at": "2026-10-17T20:24:50.179987+00:00",
           "items_added": 0,
           "items_existing": 2,
           "items_failed": 0,
           "items_received": 2,
           "items_skipped": 0,
           "recovered_runs": [],
-          "run_id": "d15eac3f-f555-4d69-81f2-bb53c43958f7",
+          "run_id": "919059f6-c9ed-419b-aa2f-01cd7240a870",
           "sources": [
             {
               "error_code": null,
-              "finished_at": "2026-10-17T20:14:41.433729+00:00",
+              "finished_at": "2026-10-17T20:24:50.175747+00:00",
               "items_added": 0,
               "items_existing": 1,
               "items_failed": 0,
@@ -173,7 +174,7 @@
             },
             {
               "error_code": null,
-              "finished_at": "2026-10-17T20:14:41.437333+00:00",
+              "finished_at": "2026-10-17T20:24:50.178259+00:00",
               "items_added": 0,
               "items_existing": 1,
               "items_failed": 0,
@@ -186,13 +187,13 @@
           "sources_checked": 2,
           "sources_failed": 0,
           "sources_successful": 2,
-          "started_at": "2026-10-17T20:14:41.430769+00:00",
+          "started_at": "2026-10-17T20:24:50.171392+00:00",
           "status": "success"
         },
-        "last_success_at": "2026-10-17T20:14:41.448566+00:00",
-        "next_run_at": "2026-10-17T20:14:43.448693+00:00",
-        "session_id": "f32ea974-81df-4559-8f33-6da5ecd71d49",
-        "started_at": "2026-10-17T20:14:37.225437+00:00",
+        "last_success_at": "2026-10-17T20:24:50.186736+00:00",
+        "next_run_at": "2026-10-17T20:24:52.186838+00:00",
+        "session_id": "88cbfb73-dcad-4b7c-8757-100361a18b93",
+        "started_at": "2026-10-17T20:24:19.442974+00:00",
         "status": "waiting"
       }
     },
@@ -211,6 +212,7 @@
       "hardening",
       "integrity"
     ],
-    "image_id": "sha256:b1a080a3ca46410ba7accbf85a36dd653a0d3c537ec44fce98803bb19112ad42"
+    "image_id": "sha256:b1a080a3ca46410ba7accbf85a36dd653a0d3c537ec44fce98803bb19112ad42",
+    "harness_revision": "708c96b (integrated as cdeee57)"
   }
 }

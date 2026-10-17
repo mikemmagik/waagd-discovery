@@ -90,6 +90,21 @@ with the same volume, singleton/manual exclusion, CLI/Docker health and integrit
 The test-only loopback HTTP wrapper is bind-mounted outside the image/build context;
 production SSRF protection and CLI contain no hidden fixture bypass.
 
+The first remote ARM64 lifecycle attempt timed out before observing two cycles,
+while its image build and earlier one-shot smoke passed. CLI startup under that
+QEMU runner took about seven seconds; the test's two-second health cadence and
+five-second timeout were an implausible startup load/budget. This was a plausible
+cause, not proven by the original incomplete failure logs. The harness now uses
+30-second probes/start grace, a 20-second emulation budget and bounded 180-second
+waits, with the same resource limits and every lifecycle assertion unchanged.
+Failure inspect (including health/OOM/restarts), both log streams and DB state are
+captured before cleanup. No production timing or application behavior changed.
+A temporary once-only 65-second startup delay also passed the full lifecycle in
+126.726 seconds; a forced failure independently verified diagnostics before
+cleanup. The corrected exact-commit full CI remains mandatory before release. Final local
+lifecycle evidence below uses the corrected harness; the earlier independent QA
+run remains separately recorded as historical acceptance evidence.
+
 ## Resources and SQLite
 
 SPRINT_3_BENCHMARK.json records a synthetic native arm64 Linux/Python 3.13.16
