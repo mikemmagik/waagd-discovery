@@ -21,11 +21,13 @@ def verify_connection(connection: sqlite3.Connection) -> None:
 
 
 @contextmanager
-def snapshot(path: Path) -> Iterator[Repository]:
+def snapshot(path: Path, *, immutable: bool = False) -> Iterator[Repository]:
+    """Copy a consistent DB into memory; immutable is for guarded standalone backups only."""
     if not path.is_file():
         raise DiscoveryError("database_missing")
     with Repository(":memory:") as repository:
-        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as source:
+        suffix = "?mode=ro&immutable=1" if immutable else "?mode=ro"
+        with closing(sqlite3.connect(path.resolve().as_uri() + suffix, uri=True)) as source:
             source.backup(repository.connection)
         # Re-run schema validation after replacing the in-memory initial schema.
         from waagd_discovery.storage.migrations import migrate
