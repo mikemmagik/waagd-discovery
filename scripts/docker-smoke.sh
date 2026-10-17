@@ -21,6 +21,12 @@ fi
 docker image inspect "$image" >/dev/null
 docker volume create --label com.waagd-discovery.smoke=true "$volume" >/dev/null
 mkdir "$scratch/exports" "$scratch/backups"
+cat > "$scratch/sources.yaml" <<'YAML'
+sources:
+  - id: smoke_fixture
+    name: Offline fixture
+    url: https://example.org/feed.xml
+YAML
 # These contain only disposable fixture output; support nonroot containers on
 # both Linux runners and Docker Desktop without changing real operator folders.
 chmod 1777 "$scratch/exports" "$scratch/backups"
@@ -36,6 +42,7 @@ run_container() {
         --mount "type=volume,src=$volume,dst=/data" \
         --mount "type=bind,src=$scratch/exports,dst=/exports" \
         --mount "type=bind,src=$scratch/backups,dst=/backups" \
+        --mount "type=bind,src=$scratch/sources.yaml,dst=/app/config/sources.yaml,readonly" \
         "$@"
 }
 
@@ -69,7 +76,8 @@ body = b'''<?xml version="1.0"?>
 <link>https://example.org/</link><description>Smoke test</description>
 <item><title>Deterministic offline discovery</title>
 <link>https://example.org/story?utm_source=fixture#fragment</link>
-<guid>smoke-story-1</guid><description>A fixture, not a live article.</description>
+<guid>smoke-story-1</guid>
+<description>Sufficient synthetic feed metadata for a repeatable eligible fixture.</description>
 <pubDate>Thu, 15 Oct 2026 12:00:00 GMT</pubDate></item>
 </channel></rss>'''
 source = Source("smoke_fixture", "Offline fixture", "https://example.org/feed.xml")
@@ -92,17 +100,26 @@ done
 
 run_container "$image" verify
 run_container "$image" stats
-run_container "$image" export --output /exports/smoke.json
+run_container "$image" filter --at 2026-10-17T12:00:00Z
+run_container "$image" filter-report --limit 10
+run_container "$image" export --output /exports/smoke.json --at 2026-10-17T12:00:00Z
 run_container "$image" backup --output /backups/smoke.sqlite3
 run_container "$image" restore --input /backups/smoke.sqlite3 --confirm
 run_container "$image" verify
+run_container "$image" backup-managed --directory /backups/managed
+run_container "$image" backup-rotate --directory /backups/managed
+run_container "$image" backup-rotate --directory /backups/managed --apply
 run_container --entrypoint python "$image" - <<'PY'
 import json
 from pathlib import Path
 
 from waagd_discovery.storage import Repository
 
-assert json.loads(Path("/exports/smoke.json").read_text())
+data = json.loads(Path("/exports/smoke.json").read_text())
+assert data["schema_version"] == 2 and len(data["candidates"]) == 1
+assert data["candidates"][0]["selection"]["status"] == "eligible"
+assert all(data["candidates"][0]["selection"]["checks"].values())
+assert len(list(Path("/backups/managed").glob("waagd-backup-*.sqlite3"))) == 1
 with Repository(Path("/backups/smoke.sqlite3")) as backup:
     backup.verify()
     assert backup.stats()["articles"] == 1
