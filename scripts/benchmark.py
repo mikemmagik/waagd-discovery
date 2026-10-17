@@ -12,6 +12,7 @@ from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from waagd_discovery.backups import RetentionPolicy, create_managed_backup, rotate_backups
 from waagd_discovery.export import export_candidates
 from waagd_discovery.filtering import FilterPolicy, assess, select_candidates
 from waagd_discovery.models import FetchResult, Source
@@ -137,6 +138,18 @@ def main() -> None:
         started = time.monotonic()
         repository.backup(args.directory / "verified.sqlite3")
         record("sqlite_online_backup_verify", started)
+
+        started = time.monotonic()
+        managed = create_managed_backup(repository, args.directory / "managed", RetentionPolicy())
+        assert managed["rotation"]["status"] == "rotated"
+        preview = rotate_backups(args.directory / "managed", RetentionPolicy())
+        assert preview["valid"] == 1 and preview["would_delete"] == []
+        record(
+            "large_managed_backup_and_retention",
+            started,
+            verified=preview["valid"],
+            backup_bytes=(args.directory / "verified.sqlite3").stat().st_size,
+        )
 
         repository.connection.execute("BEGIN IMMEDIATE")
         with closing(sqlite3.connect(database, timeout=0.05)) as contender:
