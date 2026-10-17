@@ -146,7 +146,7 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
         with database_lock(args.db) if not args.dry_run else nullcontext():
             with context as repository, HttpClient() as client:
                 result = collect(repository, sources, client, args.source)
-                if result["status"] != "interrupted":
+                if result["status"] in ("success", "partial"):
                     result["filter"] = assess(repository, policy)
                 result["dry_run"] = args.dry_run
         status = result["status"]

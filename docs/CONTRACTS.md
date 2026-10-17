@@ -1,5 +1,10 @@
 # Shared contracts — v1
 
+These original collection/storage contracts remain supported. Sprint 2 additions
+and the versioned selected export are defined in SPRINT_2_CONTRACTS.md and
+FILTERING.md. Raw Repository.candidates is a storage primitive; the public CLI
+export now uses persisted eligible decisions and schema v2.
+
 `models.py` is authoritative. Datetimes are aware UTC. Missing or invalid
 publication dates remain null with date_status; discovery time is actual UTC.
 Source IDs match `[a-z0-9_]+`; only configured HTTP(S) feeds are fetched.
