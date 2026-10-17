@@ -1,0 +1,9 @@
+# Allow only runtime inputs into the build context. Databases and credentials
+# remain excluded even when a developer creates them outside ignored folders.
+**
+!pyproject.toml
+!uv.lock
+!src/
+!src/**
+!config/
+!config/sources.yaml
