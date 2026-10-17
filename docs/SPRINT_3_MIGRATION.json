@@ -1,0 +1,51 @@
+{
+  "result": "PASS",
+  "source_release": "v0.2.0",
+  "source_schema": 3,
+  "target_schema": 4,
+  "legacy_before": {
+    "counts": {
+      "articles": 1,
+      "sources": 1,
+      "runs": 2,
+      "source_runs": 1,
+      "observations": 1,
+      "article_sources": 1,
+      "source_guids": 1,
+      "url_aliases": 1,
+      "filter_batches": 1,
+      "filter_decisions": 1
+    },
+    "rows_sha256": "28108f5534c0c7193f91bc8a4b80c9ffaebd8d143577fcab5c2f75e5ed4b59e7",
+    "orphan_run_id": "0b3eae57-9ad7-406d-b653-7cf6c704fb57",
+    "archive_sha256": "11c91794a41954148f674c0440d65e87d16406e6cbf909316e0b53e79bc2ce98"
+  },
+  "legacy_after_migration": {
+    "counts": {
+      "articles": 1,
+      "sources": 1,
+      "runs": 2,
+      "source_runs": 1,
+      "observations": 1,
+      "article_sources": 1,
+      "source_guids": 1,
+      "url_aliases": 1,
+      "filter_batches": 1,
+      "filter_decisions": 1
+    },
+    "rows_sha256": "28108f5534c0c7193f91bc8a4b80c9ffaebd8d143577fcab5c2f75e5ed4b59e7"
+  },
+  "recovery_audit": {
+    "run_id": "0b3eae57-9ad7-406d-b653-7cf6c704fb57",
+    "detected_at": "2026-10-17T20:11:27.332347+00:00",
+    "reason": "operation_lock_reacquired"
+  },
+  "archive_unchanged": true,
+  "post_recovery_stats": {
+    "articles": 1,
+    "sources": 1,
+    "runs": 3,
+    "observations": 1,
+    "enabled_sources": 1
+  }
+}
