@@ -46,7 +46,8 @@ def parser() -> argparse.ArgumentParser:
         "--policy", type=Path, default=Path(os.getenv("WAAGD_FILTER", "config/filter.yaml"))
     )
     result.add_argument(
-        "--backup-policy", type=Path,
+        "--backup-policy",
+        type=Path,
         default=Path(os.getenv("WAAGD_BACKUP_POLICY", "config/backup.yaml")),
     )
     commands = result.add_subparsers(dest="command", required=True)
@@ -71,7 +72,9 @@ def parser() -> argparse.ArgumentParser:
     report.add_argument("--limit", type=int, default=100)
     backup = commands.add_parser("backup")
     backup.add_argument("--output", type=Path, required=True)
-    managed = commands.add_parser("backup-managed", help="Create a verified backup and rotate safely")
+    managed = commands.add_parser(
+        "backup-managed", help="Create a verified backup and rotate safely"
+    )
     managed.add_argument("--directory", type=Path, required=True)
     rotation = commands.add_parser("backup-rotate", help="Preview managed backup retention")
     rotation.add_argument("--directory", type=Path, required=True)
@@ -99,14 +102,18 @@ def interrupt(signum: int, frame: FrameType | None) -> None:
 def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
     if args.command == "export":
         protected = {
-            args.db.resolve(), args.sources.resolve(), args.policy.resolve(),
+            args.db.resolve(),
+            args.sources.resolve(),
+            args.policy.resolve(),
             args.backup_policy.resolve(),
         }
         protected.update(
             Path(str(args.db) + suffix).resolve() for suffix in ("-wal", "-shm", ".lock")
         )
         if args.output.resolve() in protected or args.output.suffix.lower() in (
-            ".sqlite", ".sqlite3", ".db",
+            ".sqlite",
+            ".sqlite3",
+            ".db",
         ):
             raise DiscoveryError("export_target_protected")
     if args.command in ("backup-managed", "backup-rotate"):

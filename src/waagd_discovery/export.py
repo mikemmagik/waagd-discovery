@@ -18,12 +18,12 @@ def export_candidates(
     destination: Path,
     limit: int = 50,
     *,
-    policy: FilterPolicy = FilterPolicy(),
+    policy: FilterPolicy | None = None,
     as_of: datetime | None = None,
 ) -> int:
     if not 1 <= limit <= 500:
         raise ValueError("export_limit_invalid")
-    candidates, selection = select_candidates(repository, policy, as_of, limit)
+    candidates, selection = select_candidates(repository, policy or FilterPolicy(), as_of, limit)
     data = {
         "schema_version": 2,
         "generated_at": datetime.now(UTC).isoformat(),

@@ -1,11 +1,13 @@
 import json
 import sqlite3
+from datetime import UTC, datetime
 
 import pytest
 from test_pipeline import SOURCES, Client, collect
 
 from waagd_discovery.config import load_sources
 from waagd_discovery.export import export_candidates
+from waagd_discovery.filtering import FilterPolicy, assess
 from waagd_discovery.locking import database_lock
 from waagd_discovery.models import DiscoveryError
 from waagd_discovery.operations import restore, snapshot
@@ -88,9 +90,12 @@ def test_restore_keeps_previous_database(tmp_path):
 
 def test_export_bounded_schema_and_atomic_failure(tmp_path, monkeypatch):
     output = tmp_path / "candidates.json"
+    policy = FilterPolicy(min_description_chars=0)
+    at = datetime(2026, 10, 17, 12, tzinfo=UTC)
     with Repository(":memory:") as repository:
         collect(repository, SOURCES, Client())
-        assert export_candidates(repository, output, 1) == 1
+        assess(repository, policy, at)
+        assert export_candidates(repository, output, 1, policy=policy, as_of=at) == 1
         data = json.loads(output.read_text())
         assert len(data["candidates"]) == 1
         assert data["candidates"][0]["description"] == "Untrusted data"
@@ -99,6 +104,6 @@ def test_export_bounded_schema_and_atomic_failure(tmp_path, monkeypatch):
             "waagd_discovery.export.os.replace", lambda *a: (_ for _ in ()).throw(OSError())
         )
         with pytest.raises(OSError):
-            export_candidates(repository, output)
+            export_candidates(repository, output, policy=policy, as_of=at)
         assert output.read_bytes() == before
         assert not list(tmp_path.glob(".candidates-*"))

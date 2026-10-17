@@ -108,7 +108,7 @@ def test_cli_diagnostics_and_export_backup_restore(tmp_path, capsys):
     assert main([*args, "stats"]) == 0
     output = tmp_path / "exports" / "candidates.json"
     assert main([*args, "export", "--output", str(output)]) == 0
-    assert json.loads(output.read_text())["schema_version"] == 1
+    assert json.loads(output.read_text())["schema_version"] == 2
     backup = tmp_path / "backup"
     assert main([*args, "backup", "--output", str(backup)]) == 0
     assert main([*args, "restore", "--input", str(backup), "--confirm"]) == 0

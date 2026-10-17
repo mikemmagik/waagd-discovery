@@ -8,11 +8,13 @@ import subprocess
 import sys
 import time
 from contextlib import closing
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from waagd_discovery.cli import main
+from waagd_discovery.filtering import FilterPolicy, assess
 from waagd_discovery.logging import configure
 from waagd_discovery.models import ArticleCandidate, DiscoveryError, FetchResult, Source
 from waagd_discovery.operations import restore, snapshot
@@ -21,7 +23,13 @@ from waagd_discovery.storage import Repository
 from waagd_discovery.storage.migrations import MIGRATIONS, SCHEMA_VERSION
 
 SOURCE = Source("qa", "QA source", "https://feeds.example.org/rss")
-ARTICLE = ArticleCandidate("https://example.org/retained", title="Retained")
+ARTICLE = ArticleCandidate(
+    "https://example.org/retained",
+    title="Retained",
+    description="Sufficient metadata for a technically eligible discovery fixture.",
+    published_at=datetime(2026, 10, 17, 10, tzinfo=UTC),
+    date_status="valid",
+)
 
 
 def seed(path: Path) -> None:
@@ -30,6 +38,7 @@ def seed(path: Path) -> None:
         run_id = repository.start_run()
         repository.save_source(run_id, SOURCE, [ARTICLE], FetchResult(200, etag='"old"'))
         repository.finish_run(run_id, "success")
+        assess(repository, FilterPolicy(), datetime(2026, 10, 17, 12, tzinfo=UTC))
 
 
 def files_under(path: Path) -> dict[str, bytes]:
@@ -108,7 +117,10 @@ def test_export_replaces_hardlink_alias_without_touching_database(tmp_path, caps
     output = tmp_path / "export.json"
     output.hardlink_to(db)
     before = db.read_bytes()
-    assert main(["--db", str(db), "export", "--output", str(output)]) == 0
+    assert (
+        main(["--db", str(db), "export", "--output", str(output), "--at", "2026-10-17T12:00:00Z"])
+        == 0
+    )
     assert json.loads(output.read_text())["candidates"][0]["title"] == "Retained"
     assert db.read_bytes() == before
     assert output.stat().st_ino != db.stat().st_ino
