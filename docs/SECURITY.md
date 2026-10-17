@@ -37,3 +37,12 @@ All original observations remain even when a story is deferred or excluded.
 Managed retention handles only its dedicated filename namespace, rejects linked
 or changing files and never counts a corrupt/newer-schema file as a survivor.
 See BACKUPS.md for standalone immutable-read safeguards and off-device policy.
+
+Sprint 3 retains these boundaries. Scheduling requires an explicit command/profile
+and mounts no agent workspace. Canonical DB-side lock paths are protected against
+export replacement, including when the database is reached through a symlink.
+Read-only diagnostics do not recover or migrate an operator database. Development
+restart/kill tests use disposable volumes, fixture networking and no production
+credentials. A kernel lock is evidence only for cooperating local processes;
+direct out-of-band SQLite writers remain unsupported. The service cannot collect
+while the Mac is asleep/powered off or Docker Desktop is stopped.

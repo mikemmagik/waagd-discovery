@@ -30,3 +30,24 @@
     Corrupt or incompatible files cannot count as survivors. Manual copies are
     outside automatic management. Rotation requires explicit operator action,
     not a scheduler. Runtime measurement uses isolated fixture volumes only.
+
+13. Sprint 3/v0.3 is explicitly authorized after v0.2 acceptance. Use the same
+    modular application and pipeline, with an opt-in Compose scheduler profile.
+    Do not activate permanent operator scheduling during development.
+14. Separate lifetime scheduler ownership from per-operation database locks.
+    Lock acquisition, rather than age or PID, proves running records are orphaned.
+    Append interruption audit and preserve source commits; never auto-restore.
+15. Fixed delay starts after completion. UTC plus monotonic deadlines support
+    wall jumps/sleep with one current cycle and no backlog. Every failure waits
+    the ordinary delay. Manual collection remains independent between cycles.
+16. Health means scheduler ownership plus readable recognized SQLite schema.
+    Upstream failures/streaks are separate diagnostics; synchronous collection
+    does not emit background heartbeats. No broker, queue or metrics web server.
+17. Backups remain explicit daily verified managed operations, weekly off-device
+    copies. Reuse Sprint 2 retention, avoid per-cycle SSD writes. Audit/observation
+    growth remains operator-monitored; no automatic pruning of provenance.
+18. Live three-feed snapshot retained default filtering: 95 unique articles,
+    75 eligible, 20 excluded only by age; no missing date/short-description issue.
+    This is bounded evidence, not a guarantee for arbitrary future sources.
+19. Sprint 4 deployment/integration requires separate agreement; no OpenClaw,
+    WAAGD-agent, Telegram, LLM or publication integration in v0.3.

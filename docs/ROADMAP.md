@@ -10,12 +10,13 @@ preliminary filtering decisions; selected JSON v2; backup retention; additional
 network/corruption/interruption tests; measured constrained workload and migration
 regressions. No editorial truth/interest scoring or publication approval.
 
-Sprint 3 / proposed v0.3: opt-in configurable scheduler, process shutdown/recovery,
+Sprint 3 / v0.3.0 — Automated Discovery: opt-in configurable scheduler, process shutdown/recovery,
 stale-run reconciliation, health monitoring, restart policy and extended soak test.
-This sprint must not start until the operator accepts the Sprint 2 architecture
-and release report. Do not enable an automatic schedule as part of v0.2.
+Sprint 2 was accepted on 2026-10-18; Sprint 3 development and isolated tests are
+authorized. Permanent operator activation is still a separate approval. See
+SPRINT_3_CONTRACTS.md; no new integration or deployment is authorized.
 
-Sprint 4: separately agreed read-only candidate handoff to the WAAGD agent,
+Sprint 4 (not authorized; stop after Sprint 3): separately agreed read-only candidate handoff to the WAAGD agent,
 bounded free OpenRouter evaluation, quota/error handling and Telegram integration.
 No changes to Shmul or shared OpenClaw state.
 

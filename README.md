@@ -1,7 +1,7 @@
 # WAAGD Discovery
 
 Independent RSS/Atom discovery for We Are All Gonna Die. Python modular monolith,
-Docker Compose and persistent SQLite. Manual collection only; no AI requests or
+Docker Compose and persistent SQLite. Manual collection and an explicitly enabled scheduler; no AI requests or
 automatic publication. This repository is private and separate from the website.
 
 ```sh
@@ -65,8 +65,14 @@ discoveries. Reference time can be fixed with `filter --at ISO8601` and
 `export --at ISO8601` for reproducible inspection. See [Filtering](docs/FILTERING.md)
 and [Backups](docs/BACKUPS.md).
 
-Sprint 3 is held for architectural acceptance. No scheduler, agent integration
-or publication is enabled. No agent workspace is mounted.
+v0.3 adds opt-in fixed-delay scheduling (30 minutes by default), lock-based orphan
+run recovery, read-only JSON service diagnostics and filter reason statistics.
+Scheduler is excluded from default Compose startup. See [Scheduler operations](docs/SCHEDULER.md)
+for explicit START/STOP/RESTART/STATUS/LOGS/HEALTH commands and sleep/restart behavior.
+`status`, `health` and `filter-stats` are also available through the one-shot CLI.
+A failed feed does not make the service unhealthy. Daily backups remain an explicit
+operator task. No permanent operator scheduler was activated during development.
+No agent integration or publication exists; Sprint 4 requires separate agreement.
 
 ## Development
 
@@ -78,6 +84,7 @@ uv run mypy src
 uv run pytest
 python3 scripts/check-secrets.py
 bash scripts/docker-smoke.sh
+sh scripts/scheduler-smoke.sh
 ```
 
 Offline tests use fixtures and mocked networking. Real source availability is

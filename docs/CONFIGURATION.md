@@ -25,6 +25,14 @@ Publication date is distinct from event date. Unknown dates remain null.
 candidate.schema.json remains the historical raw v1 contract. --policy overrides
 WAAGD_FILTER (default config/filter.yaml); --backup-policy overrides
 WAAGD_BACKUP_POLICY (default config/backup.yaml). Docker uses /app/config paths
-and mounts all three trusted YAML files read-only. See FILTERING.md and BACKUPS.md
+and mounts all four trusted YAML files read-only. See FILTERING.md and BACKUPS.md
 for exact defaults, reason codes, reassessment and survivor-preserving retention.
 No API keys are required. HTTP retry/ETag/Last-Modified behavior is reused.
+
+Scheduler policy: config/scheduler.yaml, overridable with --scheduler-config or
+WAAGD_SCHEDULER_CONFIG. interval_seconds defaults to 1800 (1..86400),
+heartbeat_seconds to 15 (1..60 and no greater than interval). Booleans, NaN,
+unknown/duplicate keys and malformed/oversized YAML fail safely. This policy does
+not activate scheduling: only the explicit scheduler command/profile does.
+Sources and filtering policy reload for each cycle; scheduler timing policy is
+read at startup, requiring restart after changes. All persisted timestamps use UTC.
