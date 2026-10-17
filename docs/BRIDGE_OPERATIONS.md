@@ -111,6 +111,9 @@ For the fake consumer test only, acknowledge its exact displayed UUID:
 
 Ack asserts all items were processed. Never acknowledge real data merely to clear
 a queue. This release performs no real editorial processing.
+For an unwanted/expired batch that was not processed, use the explicit
+`dismiss --delivery-id UUID` command instead. Dismissed is a separate terminal
+state; it preserves delivery deduplication and never claims editorial completion.
 
 ## Enable automatic export separately
 
@@ -154,6 +157,12 @@ prepared payloads and processed canonical URL identities.
 Include `initialized.json`, the ledger and `bridge.lock`; the initialization
 marker prevents treating a vanished ledger as a fresh installation. Do not copy
 only the ledger or remove the marker to bypass a missing-state error.
+
+Discovery's separate private `discovery.sqlite3.handoff.json` diagnostic sidecar
+records automatic-export status/last success. It stays beside SQLite, outside
+all bridge/consumer mounts, and is not a delivery ledger or article database.
+The SQLite backup command backs up the database; the external bridge ledger
+needs its own coherent stopped-process backup as described above.
 
 After ordinary interruption, rerun sync: PREPARE/publish and ACK/publish recovery
 uses trusted ledger state. Missing/tampered inboxes can be repaired; missing or

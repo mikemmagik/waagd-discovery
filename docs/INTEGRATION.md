@@ -73,6 +73,8 @@ Candidate identity is SHA-256 of the canonical article URL, independent of row I
 assessment UUID or metadata edits. New candidates have no ledger identity;
 delivered candidates belong to a pending batch; processed candidates were
 explicitly acknowledged. Restarts and metadata edits do not make them new.
+Explicitly dismissed candidates form a separate terminal state and are not
+reported as processed. Dismissal also preserves their URL identities.
 
 There is at most one pending batch. The exact delivery UUID and payload are
 persisted before publishing the inbox. Retry after interruption uses that same
@@ -82,7 +84,10 @@ processed state before publishing an empty/replacement snapshot, allowing recove
 when interrupted. Wrong IDs fail; retrying the same completed ack is safe.
 
 Expired pending batches block new batches. Expiry never means processed or new.
-Resolve explicitly using the trusted ID after checking consumer state. External
+Resolve explicitly using the trusted ID after checking consumer state. A trusted
+operator can `dismiss --delivery-id UUID` to abandon an expired/unwanted batch
+without falsely marking it processed. Dismissed URLs remain deduplicated; expiry
+alone never triggers dismissal. External
 source strings and workspace receipt files cannot acknowledge anything.
 
 This provides at-least-once physical publication with stable identifiers, not
