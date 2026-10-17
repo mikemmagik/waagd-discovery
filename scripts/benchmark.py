@@ -31,7 +31,12 @@ def memory() -> dict[str, int]:
         for line in Path("/proc/self/status").read_text().splitlines():
             if line.startswith("VmRSS:"):
                 current = int(line.split()[1])
-    return {"peak_rss_kib": int(peak), "current_rss_kib": current}
+    result = {"peak_rss_kib": int(peak), "current_rss_kib": current}
+    for metric in ("current", "peak"):
+        path = Path(f"/sys/fs/cgroup/memory.{metric}")
+        if path.exists():
+            result[f"cgroup_memory_{metric}_bytes"] = int(path.read_text().strip())
+    return result
 
 
 class FixtureClient:

@@ -14,7 +14,7 @@ def load_sources(path: Path) -> list[Source]:
         if path.stat().st_size > 262_144:
             raise DiscoveryError("registry_too_large")
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+    except (OSError, UnicodeError, yaml.YAMLError, RecursionError) as exc:
         raise DiscoveryError("registry_unreadable") from exc
     if not isinstance(data, dict) or set(data) != {"sources"}:
         raise DiscoveryError("registry_invalid")
