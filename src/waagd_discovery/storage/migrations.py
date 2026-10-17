@@ -1,6 +1,7 @@
 """Ordered additive schema migrations; pending versions commit atomically."""
 
 import sqlite3
+from functools import lru_cache
 
 from waagd_discovery.models import DiscoveryError
 
@@ -103,6 +104,37 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
+def _schema(connection: sqlite3.Connection) -> dict[tuple[str, str, str], str]:
+    rows = connection.execute(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'"
+    ).fetchall()
+    return {(row[0], row[1], row[2]): " ".join((row[3] or "").split()) for row in rows}
+
+
+@lru_cache(maxsize=SCHEMA_VERSION)
+def _expected_schema(version: int) -> dict[tuple[str, str, str], str]:
+    # Derive the schema from the actual ordered migrations rather than maintain
+    # a weaker duplicate list of table names. This also covers constraints,
+    # immutable-identity triggers, indexes, and unexpected extra objects.
+    reference = sqlite3.connect(":memory:")
+    try:
+        for statements in MIGRATIONS[:version]:
+            for statement in statements:
+                reference.execute(statement)
+        return _schema(reference)
+    finally:
+        reference.close()
+
+
+def validate_schema(connection: sqlite3.Connection, version: int | None = None) -> None:
+    if version is None:
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    if version > SCHEMA_VERSION:
+        raise DiscoveryError("database_schema_newer")
+    if version < 1 or _schema(connection) != _expected_schema(version):
+        raise DiscoveryError("database_schema_invalid")
+
+
 def migrate(connection: sqlite3.Connection) -> None:
     # Read the version under the same write reservation used for DDL. Two
     # openers cannot both conclude that the same migration is still pending.
@@ -111,16 +143,21 @@ def migrate(connection: sqlite3.Connection) -> None:
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         if version > SCHEMA_VERSION:
             raise DiscoveryError("database_schema_newer")
+        if version < 0:
+            raise DiscoveryError("database_schema_invalid")
         if version == 0:
             existing = connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                "SELECT name FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'"
             ).fetchone()
             if existing is not None:
                 raise DiscoveryError("database_schema_unversioned")
+        else:
+            validate_schema(connection, version)
         for target in range(version + 1, SCHEMA_VERSION + 1):
             for statement in MIGRATIONS[target - 1]:
                 connection.execute(statement)
             connection.execute(f"PRAGMA user_version = {target}")
+        validate_schema(connection, SCHEMA_VERSION)
         connection.commit()
     except BaseException:
         connection.rollback()

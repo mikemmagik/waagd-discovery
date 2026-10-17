@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -244,6 +245,7 @@ def test_unexpected_error_rolls_back_entire_source_but_preserves_prior_source() 
         assert summary["items_added"] == 1
         assert summary["sources_failed"] == 1
         assert summary["sources_checked"] == 2
+        repository.connection.execute("DROP TRIGGER reject_second")
         repository.verify()
 
 
@@ -374,10 +376,21 @@ def test_verify_detects_foreign_key_corruption(tmp_path: Path) -> None:
     path = tmp_path / "db.sqlite3"
     with Repository(path) as repository:
         repository.sync_sources([SOURCE])
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(
             "INSERT INTO source_guids (source_id, guid, article_id) VALUES ('one', 'dangling', 999)"
         )
     with Repository(path) as repository:
         with pytest.raises(DiscoveryError, match="database_foreign_key_failed"):
             repository.verify()
+
+
+def test_verify_and_backup_reject_changed_schema(tmp_path: Path) -> None:
+    with Repository(":memory:") as repository:
+        repository.connection.execute("DROP TRIGGER observations_no_update")
+        with pytest.raises(DiscoveryError, match="database_schema_invalid"):
+            repository.verify()
+        destination = tmp_path / "invalid.sqlite3"
+        with pytest.raises(DiscoveryError, match="database_schema_invalid"):
+            repository.backup(destination)
+        assert not destination.exists()
