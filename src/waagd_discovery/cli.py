@@ -115,6 +115,10 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
             args.scheduler_config.resolve(),
         }
         protected.update(
+            Path(str(args.db.resolve()) + suffix).resolve()
+            for suffix in ("-wal", "-shm", ".lock", ".scheduler.lock")
+        )
+        protected.update(
             Path(str(args.db) + suffix).resolve()
             for suffix in ("-wal", "-shm", ".lock", ".scheduler.lock")
         )
