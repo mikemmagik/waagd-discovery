@@ -38,7 +38,7 @@ def load_sources(path: Path) -> list[Source]:
             raise DiscoveryError("registry_invalid")
         try:
             url = urlsplit(row["url"])
-            if url.scheme not in ("http", "https") or not url.hostname or url.username:
+            if url.scheme not in ("http", "https") or not url.hostname or url.username is not None:
                 raise ValueError
             if url.fragment or any(c.isspace() for c in row["url"]):
                 raise ValueError

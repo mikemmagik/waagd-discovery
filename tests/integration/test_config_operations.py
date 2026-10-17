@@ -22,6 +22,7 @@ from waagd_discovery.operations import restore, snapshot
         "sources: [{id: X, name: X, url: 'https://example.com'}]",
         "sources: [{id: x, name: X, url: 'file:///tmp/feed'}]",
         "sources: [{id: x, name: X, url: 'https://user:password@example.com'}]",
+        "sources: [{id: x, name: X, url: 'https://:password@example.com'}]",
         "sources: [{id: x, name: X, url: 'https://example.com', enabled: 'yes'}]",
         "sources: [{id: x, name: X, url: 'https://example.com', type: html}]",
         "sources: [{id: x, name: X, url: 'https://example.com', token: secret}]",
