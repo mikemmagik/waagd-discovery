@@ -155,3 +155,25 @@ A successful creation can have a blocked nested rotation if subsequent filesyste
 rechecks fail. Inspect `rotation.status` as well as the outer status. Errors before
 creation/verification/durability completes raise a fixed `DiscoveryError` code;
 they do not report a successful creation.
+
+
+## Scheduler-era operational policy
+
+Take one verified managed backup daily and inspect `rotation.status`. Default
+retention keeps the union of seven newest valid copies and the 30-day window,
+while preserving manual/pre-restore files and the last usable managed copy.
+Copy a verified backup to separate operator-controlled storage weekly and perform
+periodic restore tests on a disposable volume. Neither the discovery scheduler nor
+its healthcheck schedules a backup, copies files off-device or restores data.
+Do not create a backup after every discovery cycle.
+
+The SQLite online-backup API supports a consistent snapshot while collection is
+running. A long backup consumes additional memory/I/O; schedule the explicit
+operator operation for a quiet period. Stop the scheduler before restore, migration,
+update or rollback, and preserve a uniquely named current backup first. A failed
+feed/cycle is not a reason for automatic restore. See RUNBOOK.md for commands.
+
+Articles, provenance, observations and filter audit history accumulate. Monitor
+host free space, Docker volume allocation, database/WAL size and backup-directory
+size. Managed rotation alone cannot bound growth of the working database. Do not
+delete observations, WAL files or the sole valid copy to resolve capacity pressure.

@@ -1,7 +1,7 @@
 name: waagd-discovery
 
 services:
-  discovery:
+  discovery: &discovery-runtime
     image: waagd-discovery:local
     build:
       context: .
@@ -19,6 +19,7 @@ services:
       WAAGD_SOURCES: /app/config/sources.yaml
       WAAGD_FILTER: /app/config/filter.yaml
       WAAGD_BACKUP_POLICY: /app/config/backup.yaml
+      WAAGD_SCHEDULER_CONFIG: /app/config/scheduler.yaml
     volumes:
       - discovery-data:/data
       - type: bind
@@ -49,6 +50,12 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - type: bind
+        source: ./config/scheduler.yaml
+        target: /app/config/scheduler.yaml
+        read_only: true
+        bind:
+          create_host_path: false
     mem_limit: 512m
     cpus: 1.0
     pids_limit: 64
@@ -60,6 +67,18 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+
+  scheduler:
+    <<: *discovery-runtime
+    profiles: [scheduler]
+    command: ["scheduler"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "waagd-discovery", "health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
 
 volumes:
   discovery-data:

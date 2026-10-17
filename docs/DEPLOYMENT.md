@@ -1,6 +1,7 @@
 # Deployment and manual operation
 
-v0.2 is a one-shot command, with no background scheduler. Use Docker Desktop on
+The default service remains a one-shot command. Sprint 3 adds an opt-in scheduler
+profile; activation of the persistent operator scheduler needs separate permission. Use Docker Desktop on
 the MacBook or Docker Engine with the Compose plugin on Linux. Docker provides
 Python; a global Python installation is unnecessary. Nothing in these commands
 connects to OpenClaw, Telegram, Cloudflare or the existing WAAGD website.
@@ -31,7 +32,8 @@ running discovery as root. Host access to files owned by UID 10001 may require
 `sudo`. Keep the directory ownership consistent across upgrades.
 
 The registry file must exist at `config/sources.yaml`; filtering/backup policy
-files at config/filter.yaml and config/backup.yaml are also mounted read-only.
+files at config/filter.yaml, config/backup.yaml and config/scheduler.yaml are also
+mounted read-only.
 No `.env` file, API key or other credential is needed. `.env.example` documents
 native CLI paths; Compose sets its own fixed paths. Run from the repository root:
 
@@ -124,12 +126,13 @@ Do not overwrite a working database manually or remove it to repair a migration.
 An unknown newer schema is rejected. Keep the last working code revision and its
 pre-upgrade backup together; an older application cannot read every newer schema.
 
-For an update, back up with the current image first, then fetch and build the new
-revision. No force update or automatic database reset is part of this procedure:
+For an update, back up with the current image first, then fetch and build the
+reviewed release tag. No force update or automatic database reset is part of this procedure:
 
 ```sh
 docker compose run --rm discovery backup --output /backups/before-update-001.sqlite3
-git pull --ff-only
+git fetch --tags
+git checkout --detach v0.3.0
 docker compose build
 docker compose run --rm discovery verify
 docker compose run --rm discovery stats
@@ -185,11 +188,39 @@ requires credential revocation and separate history review.
 
 Public-feed smoke checks are deliberately separate from CI and require an
 explicit manual collection command. A green offline smoke does not establish
-that every external publisher is currently reachable. There is no scheduler,
-health endpoint, restart loop, LLM integration or publication service in v0.1.
+that every external publisher is currently reachable. Sprint 3 adds an opt-in scheduler and CLI health check, described in
+[SCHEDULER.md](SCHEDULER.md); it adds no public endpoint, LLM or publication service.
 
 For v0.2, selected export uses JSON schema2 and requires persisted current filter
 eligibility. Run `filter` after upgrade. Filtering adds schema3 without changing
 existing discoveries/provenance. The v0.1 binary refuses schema3; rollback requires
 an appropriate pre-upgrade backup. Preserve a new backup before any rollback.
-Use managed backups/rotation as described in BACKUPS.md; no scheduler is involved.
+Use managed backups/rotation as described in BACKUPS.md; backups remain explicit
+operator work and are not performed every scheduler cycle.
+
+
+## Sprint 3 scheduler deployment
+
+The `scheduler` profile reuses the one-shot runtime image, registry, policies and
+named database volume. It changes only the command, restart policy and healthcheck;
+all resource and security restrictions remain. `docker compose up` by itself does
+not start this profile. Configuring the profile is not permission to activate the
+operator's persistent service. After separate approval, use the commands in
+[RUNBOOK.md](RUNBOOK.md) to START, STOP, RESTART, inspect STATUS/LOGS/HEALTH, BACKUP,
+UPDATE and ROLLBACK. Never use `down --volumes` against the operator installation.
+
+Schema 4 adds scheduler state and immutable interruption audit, without rewriting
+legacy discoveries or provenance. Back up with the current image before migration.
+Keep the prior image/commit and its matching schema-3 backup for rollback. A new
+binary restores older backups forward to its own schema; rollback needs the target
+older binary and the corresponding pre-upgrade backup.
+
+Run actual-container scheduler acceptance on a disposable volume:
+
+```sh
+WAAGD_SMOKE_IMAGE=waagd-discovery:local WAAGD_SMOKE_SKIP_BUILD=1 python3 scripts/docker-scheduler-smoke.py
+```
+
+The offline fixture wrapper is mounted only by this script and never installed in
+the runtime. CI runs the existing one-shot smoke and the new lifecycle smoke on
+both architectures. See SCHEDULER.md for exact scenarios and limits of the proof.

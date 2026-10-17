@@ -77,3 +77,9 @@ jobs:
           WAAGD_SMOKE_SKIP_BUILD: "1"
           DOCKER_DEFAULT_PLATFORM: linux/${{ matrix.arch }}
         run: sh scripts/docker-smoke.sh
+      - name: Offline scheduler restart and recovery smoke
+        env:
+          WAAGD_SMOKE_IMAGE: waagd-discovery:ci
+          WAAGD_SMOKE_SKIP_BUILD: "1"
+          DOCKER_DEFAULT_PLATFORM: linux/${{ matrix.arch }}
+        run: python3 scripts/docker-scheduler-smoke.py
