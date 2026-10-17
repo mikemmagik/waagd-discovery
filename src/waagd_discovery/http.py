@@ -18,6 +18,7 @@ from waagd_discovery.models import DiscoveryError, FetchResult, HttpSettings, So
 
 _REDIRECTS = {301, 302, 303, 307, 308}
 _DEFAULT_SETTINGS = HttpSettings()
+_DNS_WORKERS = threading.BoundedSemaphore(4)
 
 
 def _validate_url(value: str) -> httpx.URL:
@@ -46,8 +47,7 @@ def _resolve_public(host: str, port: int, timeout: float) -> str:
     """Resolve once, reject mixed public/private answers, and return a pinned IP.
 
     A daemon worker bounds caller DNS latency even if the OS resolver stalls.
-    At most one resolver worker is used per request; the client never retries DNS
-    timeouts, preventing an unresponsive resolver from accumulating retry workers.
+    At most four resolver workers may remain outstanding across all clients.
     """
     try:
         address = ipaddress.ip_address(host)
@@ -58,19 +58,29 @@ def _resolve_public(host: str, port: int, timeout: float) -> str:
             raise DiscoveryError("http_private_address")
         return str(address)
     result: queue.Queue[list[str] | None] = queue.Queue(maxsize=1)
+    deadline = time.monotonic() + timeout
+    if not _DNS_WORKERS.acquire(timeout=timeout):
+        raise DiscoveryError("http_dns_timeout")
 
     def resolve() -> None:
         try:
-            records = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-            addresses = list(dict.fromkeys(str(record[4][0]) for record in records))
-        except OSError:
-            result.put(None)
-        else:
-            result.put(addresses)
+            try:
+                records = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+                addresses = list(dict.fromkeys(str(record[4][0]) for record in records))
+            except (OSError, UnicodeError):
+                result.put(None)
+            else:
+                result.put(addresses)
+        finally:
+            _DNS_WORKERS.release()
 
-    threading.Thread(target=resolve, name="feed-dns", daemon=True).start()
     try:
-        addresses = result.get(timeout=timeout)
+        threading.Thread(target=resolve, name="feed-dns", daemon=True).start()
+    except RuntimeError:
+        _DNS_WORKERS.release()
+        raise DiscoveryError("http_dns") from None
+    try:
+        addresses = result.get(timeout=max(0.0, deadline - time.monotonic()))
     except queue.Empty:
         raise DiscoveryError("http_dns_timeout") from None
     if not addresses:

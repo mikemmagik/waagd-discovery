@@ -1,5 +1,6 @@
 import socket
 import ssl
+import threading
 from collections.abc import Iterator
 
 import httpx
@@ -90,6 +91,22 @@ def test_dns_timeout_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
             pass
 
     monkeypatch.setattr(http.threading, "Thread", NoWorker)
+    monkeypatch.setattr(http, "_DNS_WORKERS", threading.BoundedSemaphore(1))
+    with pytest.raises(DiscoveryError, match="^http_dns_timeout$"):
+        _resolve_public("feeds.example", 443, 0.001)
+
+
+def test_dns_worker_cap_fails_without_spawning_more_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slots = threading.BoundedSemaphore(1)
+    assert slots.acquire(blocking=False)
+    monkeypatch.setattr(http, "_DNS_WORKERS", slots)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("no worker may be created while DNS capacity is exhausted")
+
+    monkeypatch.setattr(http.threading, "Thread", forbidden)
     with pytest.raises(DiscoveryError, match="^http_dns_timeout$"):
         _resolve_public("feeds.example", 443, 0.001)
 
