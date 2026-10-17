@@ -5,10 +5,9 @@ from __future__ import annotations
 import fcntl
 import os
 import re
-import shutil
 import sqlite3
 import stat
-import tempfile
+import sys
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass
@@ -64,10 +63,12 @@ _PolicyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _u
 
 def load_retention_policy(path: Path) -> RetentionPolicy:
     try:
-        if path.stat().st_size > 65_536:
+        with path.open("rb") as source:
+            content = source.read(65_537)
+        if len(content) > 65_536:
             raise DiscoveryError("backup_policy_invalid")
-        data = yaml.load(path.read_text(encoding="utf-8"), Loader=_PolicyLoader)
-    except (OSError, UnicodeError, yaml.YAMLError, TypeError, RecursionError) as exc:
+        data = yaml.load(content.decode("utf-8"), Loader=_PolicyLoader)
+    except (OSError, UnicodeError, yaml.YAMLError, TypeError, RecursionError, ValueError) as exc:
         raise DiscoveryError("backup_policy_unreadable") from exc
     if not isinstance(data, dict) or set(data) != {"backup"}:
         raise DiscoveryError("backup_policy_invalid")
@@ -179,11 +180,12 @@ class _Backup:
 def _verify(
     descriptor: int, name: str, expected: _Identity | None = None
 ) -> tuple[_Backup | None, str | None]:
-    """Pin a regular inode and validate a byte copy, leaving the original untouched.
+    """Validate a pinned standalone backup without making a temporary disk copy.
 
-    Even SQLite mode=ro can create WAL/SHM files. A private temporary byte copy
-    prevents such writes in the backup directory. The existing snapshot engine
-    validates/migrates only its in-memory copy; no backup is migrated in place.
+    Immutable read-only SQLite access prevents WAL/SHM writes. Only managed files
+    without sidecars qualify; the existing snapshot engine validates/migrates
+    its in-memory copy. Neither the backup nor the container's small /tmp tmpfs
+    is used as a writable database during verification.
     """
     timestamp = _timestamp(name)
     if timestamp is None:
@@ -205,21 +207,23 @@ def _verify(
         with os.fdopen(source_fd, "rb") as source:
             if _identity(os.fstat(source.fileno())) != identity:
                 return None, "file_changed"
-            with tempfile.TemporaryDirectory(prefix="waagd-backup-verify-") as temporary:
-                copied = Path(temporary) / "verify.sqlite3"
-                with copied.open("xb") as target:
-                    shutil.copyfileobj(source, target)
-                if _identity(os.fstat(source.fileno())) != identity:
-                    return None, "file_changed"
-                # An empty/unversioned SQLite file must not become a valid backup
-                # merely because snapshot() initializes an empty database.
-                with closing(
-                    sqlite3.connect(copied.as_uri() + "?mode=ro&immutable=1", uri=True)
-                ) as raw:
-                    validate_schema(raw)
-                with snapshot(copied) as restored:
-                    restored.verify()
+            handles = Path("/proc/self/fd" if sys.platform == "linux" else "/dev/fd")
+            pinned = handles / str(source.fileno())
             if not _unchanged(descriptor, name, identity):
+                return None, "file_changed"
+            # An empty/unversioned SQLite file must not become a valid backup
+            # merely because snapshot() initializes an empty database.
+            with closing(
+                sqlite3.connect(pinned.as_uri() + "?mode=ro&immutable=1", uri=True)
+            ) as raw:
+                validate_schema(raw)
+            if not _unchanged(descriptor, name, identity):
+                return None, "file_changed"
+            with snapshot(pinned, immutable=True) as restored:
+                restored.verify()
+            if _identity(os.fstat(source.fileno())) != identity or not _unchanged(
+                descriptor, name, identity
+            ):
                 return None, "file_changed"
         return _Backup(name, timestamp, identity), None
     except DiscoveryError as exc:
