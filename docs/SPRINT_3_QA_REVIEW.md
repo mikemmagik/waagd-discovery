@@ -115,3 +115,47 @@ and final lifecycle gates, strengthening the collection-to-filter proof.
 **Infrastructure pre-integration verdict: PASS.** The persistent operator scheduler
 remains inactive. Both architecture final builds/smokes and exact-commit CI remain
 separate release gates; no result from an older image substitutes for those gates.
+
+## Follow-up: emulated CI lifecycle timing and failure evidence
+
+The initial remote ARM64 lifecycle job timed out while waiting for two cycles.
+The preceding one-shot smoke passed; individual CLI invocations under QEMU took
+approximately seven seconds. The lifecycle harness had used health probes every
+two seconds with a five-second timeout inside the same one-CPU cgroup, and a
+60-second phase deadline. Its failure path retained only one Docker log stream,
+without inspect or database state, so the original cause cannot be established
+from that run. Import-heavy probes competing with startup are a plausible cause,
+not a confirmed application defect.
+
+Independently reviewed harness-only fix `708c96b`. Probes now use the production
+30-second cadence, an explicit 30-second start interval/period, and a test-only
+20-second probe timeout to accommodate emulation. Phase waits are bounded at
+180 seconds, singleton CLI startup at 60 seconds, and polling runs once per second.
+Production Compose, application code, one-CPU/512-MiB limits and all functional
+assertions are unchanged. Production health timeout remains ten seconds.
+
+Before cleanup, failure diagnostics now retain selected container inspect data
+(including exit, OOM, health results, restart count and limits), both Docker log
+streams and best-effort database state. The independent reviewer exercised this
+function against a deliberately failed, isolated container: exit 23, OOM false,
+restart count zero, both synthetic stdout/stderr markers and the empty database
+state were captured correctly. Its temporary container and volume were removed.
+
+On the exact revised tree, independent native quality checks passed: **543 tests
+in 8.76 seconds**, coverage **1,819/1,901 (95.69%)**, Ruff lint/format for 55 files
+and strict mypy over 22 source files. The owner supplied complete actual lifecycle
+results, inspected by QA: native ARM64 **59.629 seconds**, local AMD64 emulation
+**66.647 seconds**, all 13 checks passing. Both retained two eligible articles,
+50 observations, 26 runs (24 success, two interrupted), one crash audit and no
+running orphan. Final recreated-session cgroup peaks were 55,758,848 and
+90,558,464 bytes respectively, below the unchanged memory limit.
+
+A separate disposable wrapper copy delayed its first startup by 65 seconds,
+exceeding the former phase deadline. The full revised lifecycle passed in
+126.726 seconds with two eligible articles. The tracked fixture and image were
+unchanged, and all test resources were removed. This validates the larger bounded
+startup allowance; it does not reproduce the original unobserved CI cause.
+
+The revised harness is approved for integration. Final corrected-commit remote CI
+remains mandatory; local emulation and extended deadlines do not by themselves
+establish the cause of the original remote failure or satisfy that release gate.
