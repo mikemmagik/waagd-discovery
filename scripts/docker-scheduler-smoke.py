@@ -4,6 +4,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -27,13 +28,13 @@ def docker(*args: str, check: bool = True, timeout: int = 60) -> subprocess.Comp
     return result
 
 
-def wait_for(predicate: Any, label: str, timeout: int = 60) -> Any:
+def wait_for(predicate: Any, label: str, timeout: int = 180) -> Any:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         result = predicate()
         if result:
             return result
-        time.sleep(0.25)
+        time.sleep(1)
     raise AssertionError(f"Timed out: {label}")
 
 
@@ -128,10 +129,16 @@ def start(scratch: Path) -> None:
         "30",
         "--health-cmd",
         "waagd-discovery health",
+        # Python CLI imports are slower under QEMU. Probe at the production
+        # cadence to avoid import-heavy probes competing with scheduler startup.
         "--health-interval",
-        "2s",
+        "30s",
         "--health-timeout",
-        "5s",
+        "20s",
+        "--health-start-period",
+        "30s",
+        "--health-start-interval",
+        "30s",
         "--health-retries",
         "3",
         "--mount",
@@ -142,6 +149,34 @@ def start(scratch: Path) -> None:
         "/fixture.py",
         "scheduler",
     )
+
+
+def failure_diagnostics(scratch: Path) -> None:
+    """Retain evidence before cleanup without replacing the original failure."""
+    try:
+        result = docker("inspect", CONTAINER, check=False, timeout=20)
+        if result.returncode == 0:
+            inspected = json.loads(result.stdout)[0]
+            details = {key: inspected.get(key) for key in ("State", "RestartCount")}
+            details["Healthcheck"] = inspected["Config"].get("Healthcheck")
+            details["limits"] = {
+                key: inspected["HostConfig"].get(key) for key in ("Memory", "NanoCpus", "PidsLimit")
+            }
+            print("Failure container inspect: " + json.dumps(details), file=sys.stderr)
+        else:
+            print("Failure inspect error: " + result.stderr, file=sys.stderr)
+    except Exception as error:
+        print("Failure inspect unavailable: " + type(error).__name__, file=sys.stderr)
+    try:
+        result = docker("logs", "--tail", "80", CONTAINER, check=False, timeout=20)
+        print("Failure container stdout:\n" + result.stdout, file=sys.stderr)
+        print("Failure container stderr:\n" + result.stderr, file=sys.stderr)
+    except Exception as error:
+        print("Failure logs unavailable: " + type(error).__name__, file=sys.stderr)
+    try:
+        print("Failure database state: " + json.dumps(state(scratch)), file=sys.stderr)
+    except Exception as error:
+        print("Failure state unavailable: " + type(error).__name__, file=sys.stderr)
 
 
 def main() -> None:
@@ -179,7 +214,7 @@ def main() -> None:
             assert config["Config"]["User"] == "10001:10001"
             assert not config["NetworkSettings"]["Ports"]
             duplicate = docker(
-                "run", "--rm", *flags(scratch), IMAGE, "scheduler", check=False, timeout=20
+                "run", "--rm", *flags(scratch), IMAGE, "scheduler", check=False, timeout=60
             )
             assert duplicate.returncode != 0, "A second scheduler acquired the lifetime lock"
 
@@ -347,7 +382,7 @@ while True:
                 )
             )
         except BaseException:
-            print(docker("logs", "--tail", "80", CONTAINER, check=False).stderr)
+            failure_diagnostics(scratch)
             raise
         finally:
             docker("rm", "-f", CONTAINER, check=False)
