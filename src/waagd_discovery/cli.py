@@ -125,9 +125,9 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
             return rotation, 1 if rotation["status"] == "blocked" else 0
         with snapshot(args.db) as repository:
             managed = create_managed_backup(repository, args.directory, retention)
-            rotation = managed["rotation"]
-            assert isinstance(rotation, dict)
-            return managed, 1 if rotation["status"] == "blocked" else 0
+            managed_rotation = managed["rotation"]
+            assert isinstance(managed_rotation, dict)
+            return managed, 1 if managed_rotation["status"] == "blocked" else 0
     if args.command == "restore":
         with database_lock(args.db):
             previous = restore(args.db, args.input)
