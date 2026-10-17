@@ -1,8 +1,10 @@
 import fcntl
 import json
 import os
+import shutil
 import sqlite3
 import stat
+import tempfile
 from contextlib import closing
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta
@@ -84,6 +86,7 @@ def test_policy_rejects_nonpositive_or_noninteger_values(value: object, field: s
         "backup: !!python/object:subprocess.Popen {}",
         "backup: [",
         "backup: " + "[" * 1500 + "0" + "]" * 1500,
+        "backup: {keep_last: " + "9" * 6000 + "}",
         "#" + "x" * 65_536,
     ],
 )
@@ -453,3 +456,65 @@ def test_interrupted_rotation_leaves_verified_survivor(
     # The directory lock is released on exceptional exit.
     monkeypatch.setattr(backups.os, "unlink", original)
     assert rotate_backups(tmp_path, RetentionPolicy(1, 1), as_of=REFERENCE)["status"] == "preview"
+
+
+def test_immutable_verification_preserves_standalone_wal_bytes_and_creates_no_sidecars(
+    tmp_path: Path,
+) -> None:
+    path = fixture(tmp_path, 20)
+    with closing(sqlite3.connect(path)) as connection:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+    assert path.read_bytes()[18:20] == b"\x02\x02"
+    before = contents(tmp_path)
+    result = rotate_backups(tmp_path, RetentionPolicy(1, 1), as_of=REFERENCE)
+    assert result["valid"] == 1 and result["keep"] == [path.name]
+    assert contents(tmp_path) == before
+    assert sorted(os.listdir(tmp_path)) == [path.name]
+
+
+def test_backup_larger_than_container_tmpfs_needs_no_temporary_disk_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    managed = tmp_path / "managed"
+    with Repository(tmp_path / "working.sqlite3") as repository:
+        repository.connection.execute("BEGIN")
+        repository.connection.executemany(
+            """INSERT INTO articles
+            (url, title, description, date_status, first_seen_at, last_seen_at)
+            VALUES (?, 'Large backup fixture', ?, 'missing', ?, ?)""",
+            (
+                (
+                    f"https://example.org/large/{number}",
+                    "d" * 4000,
+                    REFERENCE.isoformat(),
+                    REFERENCE.isoformat(),
+                )
+                for number in range(9000)
+            ),
+        )
+        repository.connection.commit()
+        snapshots: list[bool] = []
+        original_snapshot = backups.snapshot
+
+        def recorded_snapshot(path: Path, *, immutable: bool = False):
+            snapshots.append(immutable)
+            return original_snapshot(path, immutable=immutable)
+
+        def forbid_disk_copy(*args, **kwargs):
+            raise AssertionError("Managed validation must not stage a complete temporary copy")
+
+        with monkeypatch.context() as guard:
+            # Actual tmpfs capacity is exercised by container acceptance. Here
+            # any old whole-file temporary-copy implementation fails directly.
+            guard.setenv("TMPDIR", str(tmp_path / "unavailable-temporary-storage"))
+            guard.setattr(tempfile, "TemporaryDirectory", forbid_disk_copy)
+            guard.setattr(shutil, "copyfileobj", forbid_disk_copy)
+            guard.setattr(backups, "snapshot", recorded_snapshot)
+            created = create_managed_backup(repository, managed, RetentionPolicy(1, 1))
+            rotated = rotate_backups(managed, RetentionPolicy(1, 1), as_of=REFERENCE)
+    target = managed / created["created"]
+    assert target.stat().st_size > 32 * 1024 * 1024
+    assert created["rotation"]["status"] == "rotated"
+    assert rotated["status"] == "preview" and rotated["valid"] == 1
+    assert snapshots and all(snapshots)
+    assert sorted(os.listdir(managed)) == [target.name]

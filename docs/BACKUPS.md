@@ -65,10 +65,19 @@ with SQLite WAL/SHM/journal sidecars are preserved. No recursive deletion occurs
 Manual and pre-restore files are outside managed retention.
 
 Every candidate is opened without following a symlink. Its inode and change
-metadata are checked before and after reading. Verification works on a private
-temporary byte copy, using the existing exact schema validator and in-memory
-snapshot/migration path, plus SQLite integrity and foreign-key checks. This
-prevents even read-only SQLite WAL bookkeeping from appearing beside originals.
+metadata are checked before and after reading. Verification opens a pinned file
+descriptor with SQLite's read-only immutable option, using the existing exact
+schema validator and in-memory snapshot/migration path, plus SQLite integrity and
+foreign-key checks. The immutable option is used only for closed standalone managed
+backups without sidecars, never the working WAL database. It prevents even
+read-only SQLite WAL bookkeeping from appearing beside originals. No complete
+temporary disk copy is made, so a backup larger than the container's 32 MiB
+temporary filesystem can still be verified within the container's memory limit.
+SQLite documents the [immutable URI option](https://www.sqlite.org/uri.html) as
+an assurance that the underlying file cannot change. The dedicated directory
+lock and before/after inode, change-metadata and sidecar checks enforce that
+assumption for cooperating backup operations; use ordinary snapshots for a live
+working database.
 Recognized older schemas are accepted if their in-memory migration and full
 verification succeed; backup bytes are never migrated. Corrupt, unversioned,
 unrecognized and newer schemas are reported and preserved, and do not count as
