@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Offline Atom fixture</title>
+  <author><name>Feed Publisher</name></author>
+  <entry>
+    <id>tag:example.org,2026:1</id>
+    <title>Unexpected side effects</title>
+    <link rel="self" href="https://news.example/atom/1" />
+    <link href="https://news.example/articles/1" />
+    <published>2026-10-17T16:30:00+07:00</published>
+    <summary type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>One <em>actual</em> event.</p><script>bad()</script></div></summary>
+    <author><name>Entry Publisher</name></author>
+  </entry>
+  <entry><id>urn:entry:2</id><link href="https://news.example/articles/2" /><updated>2026-10-17T10:00:00Z</updated></entry>
+</feed>
