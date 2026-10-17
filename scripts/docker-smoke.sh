@@ -21,6 +21,7 @@ fi
 docker image inspect "$image" >/dev/null
 docker volume create --label com.waagd-discovery.smoke=true "$volume" >/dev/null
 mkdir "$scratch/exports" "$scratch/backups"
+mkdir "$scratch/backups/managed"
 cat > "$scratch/sources.yaml" <<'YAML'
 sources:
   - id: smoke_fixture
@@ -29,7 +30,10 @@ sources:
 YAML
 # These contain only disposable fixture output; support nonroot containers on
 # both Linux runners and Docker Desktop without changing real operator folders.
-chmod 1777 "$scratch/exports" "$scratch/backups"
+# Precreate the managed fixture as the host owner too. Otherwise UID10001 creates
+# it mode0700 and a Linux runner with another UID cannot clean up its contents.
+# This permission applies only to disposable test directories, never production.
+chmod 1777 "$scratch/exports" "$scratch/backups" "$scratch/backups/managed"
 
 run_container() {
     docker run --rm -i \

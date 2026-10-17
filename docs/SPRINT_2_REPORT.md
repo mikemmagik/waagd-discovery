@@ -68,6 +68,14 @@ reads plus the existing memory snapshot. Working WAL snapshots retain normal
 WAL-aware behavior. Independent 41.8 MB and final 67.1 MB backup proofs pass with
 the unchanged 32 MiB temporary filesystem. No full temporary disk copy remains.
 
+The first remote Docker job passed every application assertion but failed in its
+EXIT cleanup: the host runner could not traverse a mode 0700 fixture directory
+created by container UID 10001. The smoke harness now precreates that disposable
+managed directory as the host owner, with the same fixture-only 1777 permissions
+as its existing export/backup test directories. Production permissions are unchanged.
+The fix is independently reviewed and both architecture smokes are rerun; the
+release still requires the corrected commit's complete remote CI to be green.
+
 ## Docker and constrained workload
 
 Both linux/arm64 (native) and linux/amd64 (emulated) images build and pass offline
