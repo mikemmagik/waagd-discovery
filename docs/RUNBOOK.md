@@ -1,5 +1,10 @@
 # Operations
 
+The operator-owned Intel Mac's v0.3 → v0.4 update, optional automatic export,
+native host bridge and fake-workspace checks are in
+[BRIDGE_OPERATIONS.md](BRIDGE_OPERATIONS.md). Read [INTEGRATION.md](INTEGRATION.md)
+first. Compose does not start the bridge or mount any OpenClaw workspace.
+
 Run these commands from the repository directory with Docker Desktop running.
 The default service is a one-shot job. Sprint 3 adds an explicitly selected scheduler
 profile; the persistent operator service must not be activated without permission.

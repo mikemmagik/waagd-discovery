@@ -20,6 +20,7 @@ services:
       WAAGD_FILTER: /app/config/filter.yaml
       WAAGD_BACKUP_POLICY: /app/config/backup.yaml
       WAAGD_SCHEDULER_CONFIG: /app/config/scheduler.yaml
+      WAAGD_HANDOFF_CONFIG: /app/config/handoff.yaml
     volumes:
       - discovery-data:/data
       - type: bind
@@ -53,6 +54,12 @@ services:
       - type: bind
         source: ./config/scheduler.yaml
         target: /app/config/scheduler.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./config/handoff.yaml
+        target: /app/config/handoff.yaml
         read_only: true
         bind:
           create_host_path: false

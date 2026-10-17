@@ -10,6 +10,7 @@
 !config/filter.yaml
 !config/backup.yaml
 !config/scheduler.yaml
+!config/handoff.yaml
 **/__pycache__/
 **/*.py[cod]
 **/.env

@@ -1,5 +1,12 @@
 # Deployment and manual operation
 
+Sprint 4 adds a disabled-by-default handoff configuration and a native data-only
+bridge. Discovery mounts only its existing data/export/backup directories and
+read-only configuration; it never mounts the agent workspace or bridge ledger.
+The separate Intel Mac update from accepted v0.3.0 and fake-workspace acceptance
+are operator-only procedures in [BRIDGE_OPERATIONS.md](BRIDGE_OPERATIONS.md).
+See [INTEGRATION.md](INTEGRATION.md) for protocol, limits and trust boundaries.
+
 The default service remains a one-shot command. Sprint 3 adds an opt-in scheduler
 profile; activation of the persistent operator scheduler needs separate permission. Use Docker Desktop on
 the MacBook or Docker Engine with the Compose plugin on Linux. Docker provides

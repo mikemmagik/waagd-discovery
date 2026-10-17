@@ -83,3 +83,9 @@ jobs:
           WAAGD_SMOKE_SKIP_BUILD: "1"
           DOCKER_DEFAULT_PLATFORM: linux/${{ matrix.arch }}
         run: python3 scripts/docker-scheduler-smoke.py
+      - name: Offline automatic export and fake workspace bridge smoke
+        env:
+          WAAGD_SMOKE_IMAGE: waagd-discovery:ci
+          WAAGD_SMOKE_SKIP_BUILD: "1"
+          DOCKER_DEFAULT_PLATFORM: linux/${{ matrix.arch }}
+        run: python3 scripts/docker-bridge-smoke.py
