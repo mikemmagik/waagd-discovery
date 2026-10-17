@@ -167,6 +167,7 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
             repository.verify()
             return {"status": "ok"}, 0
         if args.command == "export":
+            repository.sync_sources(load_sources(args.sources))
             count = export_candidates(
                 repository, args.output, args.limit, policy=load_policy(args.policy), as_of=args.at
             )

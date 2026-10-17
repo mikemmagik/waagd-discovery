@@ -116,9 +116,25 @@ def test_export_replaces_hardlink_alias_without_touching_database(tmp_path, caps
     seed(db)
     output = tmp_path / "export.json"
     output.hardlink_to(db)
+    registry = tmp_path / "sources.yaml"
+    registry.write_text(
+        "sources: [{id: qa, name: QA source, url: 'https://feeds.example.org/rss'}]"
+    )
     before = db.read_bytes()
     assert (
-        main(["--db", str(db), "export", "--output", str(output), "--at", "2026-10-17T12:00:00Z"])
+        main(
+            [
+                "--db",
+                str(db),
+                "--sources",
+                str(registry),
+                "export",
+                "--output",
+                str(output),
+                "--at",
+                "2026-10-17T12:00:00Z",
+            ]
+        )
         == 0
     )
     assert json.loads(output.read_text())["candidates"][0]["title"] == "Retained"
