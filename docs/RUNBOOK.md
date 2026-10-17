@@ -1,7 +1,7 @@
 # Operations
 
 Run these commands from the repository directory with Docker Desktop running.
-The v0.1 service is a one-shot job; there is no continuously running scheduler.
+The v0.2 service is a one-shot job; there is no continuously running scheduler.
 
 Start collection: `docker compose run --name waagd-manual discovery collect --once`.
 Logs: `docker logs waagd-manual`. Stop: `docker stop waagd-manual` (SIGTERM).
@@ -15,7 +15,7 @@ DEBUG logs: `docker compose run --rm discovery --log-level DEBUG collect --once`
 
 `docker compose run --rm discovery backup --output /backups/before-update.sqlite3`
 creates a consistent SQLite API backup and verifies it. Use a new filename each
-time. Copy the file off this machine/volume; backup retention is manual in v0.1.
+time. Copy the file off this machine/volume; manual backups are outside managed retention.
 
 Restore: `docker compose run --rm discovery restore --input /backups/before-update.sqlite3 --confirm`.
 Stop other jobs first. Restore checks the input, stages and validates the result,
@@ -50,3 +50,40 @@ previous data remains. database_busy means another supported write command owns
 the advisory lock. Abrupt SIGKILL may leave a run in running state; prior committed
 source data remains and SQLite recovers WAL on next open. Scheduler recovery and
 stale-run reconciliation are deferred to Sprint 3.
+
+## Sprint 2 filtering and retention
+
+After upgrade, metadata correction or registry/policy change:
+
+```sh
+docker compose run --rm discovery filter
+docker compose run --rm discovery filter-report --limit 100
+docker compose run --rm discovery export --output /exports/candidates.json --limit 50
+```
+
+Ordinary successful/partial collection filters automatically. A fully failed or
+interrupted collection preserves the prior filter batch. Export is read-only and
+does not create missing assessments; its JSON selection context explains empty
+results. Changed inputs/policy, unavailable assessments or aged-out articles are
+withheld. Inspect reasons and explicitly rerun `filter`; do not erase articles
+to resolve a failed check. Technical eligibility is not editorial verification.
+
+Managed backup and explicit rotation:
+
+```sh
+docker compose run --rm discovery backup-managed --directory /backups/managed
+docker compose run --rm discovery backup-rotate --directory /backups/managed
+docker compose run --rm discovery backup-rotate --directory /backups/managed --apply
+```
+
+The first command creates/verifies a new unique backup, then applies the configured
+retention. Standalone rotation previews unless --apply is given. A blocked
+rotation returns exit1 with fixed reasons; a newly created verified backup may
+still exist when later rotation is blocked. Keep it and inspect the result.
+No valid survivor means nothing is deleted. Do not put the working SQLite in a
+managed backup directory. Keep off-device copies and test restoration separately.
+
+An interrupted assessment rolls back the entire batch. On restart, `verify`,
+`filter-report`, a fresh manual `filter` and selected export are safe recovery
+steps. Already committed article/provenance transactions remain. There is no
+automatic restart job, stale-run rewriting or scheduled collection in v0.2.

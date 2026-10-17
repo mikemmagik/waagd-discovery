@@ -1,6 +1,6 @@
 # Deployment and manual operation
 
-v0.1 is a one-shot command, with no background scheduler. Use Docker Desktop on
+v0.2 is a one-shot command, with no background scheduler. Use Docker Desktop on
 the MacBook or Docker Engine with the Compose plugin on Linux. Docker provides
 Python; a global Python installation is unnecessary. Nothing in these commands
 connects to OpenClaw, Telegram, Cloudflare or the existing WAAGD website.
@@ -30,7 +30,8 @@ or backup reports a permission error, check those two bind mounts rather than
 running discovery as root. Host access to files owned by UID 10001 may require
 `sudo`. Keep the directory ownership consistent across upgrades.
 
-The registry file must exist at `config/sources.yaml`; Compose mounts it read-only.
+The registry file must exist at `config/sources.yaml`; filtering/backup policy
+files at config/filter.yaml and config/backup.yaml are also mounted read-only.
 No `.env` file, API key or other credential is needed. `.env.example` documents
 native CLI paths; Compose sets its own fixed paths. Run from the repository root:
 
@@ -39,6 +40,8 @@ docker compose config --quiet
 docker compose run --rm discovery init-db
 docker compose run --rm discovery verify
 docker compose run --rm discovery stats
+docker compose run --rm discovery filter
+docker compose run --rm discovery filter-report --limit 100
 ```
 
 The default `docker compose run --rm discovery` command is `stats` and exits.
@@ -130,6 +133,7 @@ git pull --ff-only
 docker compose build
 docker compose run --rm discovery verify
 docker compose run --rm discovery stats
+docker compose run --rm discovery filter
 ```
 
 ## Reproducibility and verification
@@ -183,3 +187,9 @@ Public-feed smoke checks are deliberately separate from CI and require an
 explicit manual collection command. A green offline smoke does not establish
 that every external publisher is currently reachable. There is no scheduler,
 health endpoint, restart loop, LLM integration or publication service in v0.1.
+
+For v0.2, selected export uses JSON schema2 and requires persisted current filter
+eligibility. Run `filter` after upgrade. Filtering adds schema3 without changing
+existing discoveries/provenance. The v0.1 binary refuses schema3; rollback requires
+an appropriate pre-upgrade backup. Preserve a new backup before any rollback.
+Use managed backups/rotation as described in BACKUPS.md; no scheduler is involved.
