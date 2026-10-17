@@ -88,6 +88,9 @@ else:
   counts['running']=c.execute("SELECT count(*) FROM runs WHERE status='running'").fetchone()[0]
   query="SELECT count(*) FROM runs WHERE status='interrupted'"
   counts['interrupted']=c.execute(query).fetchone()[0]
+  batch=c.execute('SELECT eligible_count FROM filter_batches ORDER BY sequence DESC LIMIT 1')
+  latest=batch.fetchone()
+  counts['eligible']=latest[0] if latest else 0
   counts['session']=c.execute('SELECT state_json FROM service_state WHERE id=1').fetchone()
   counts['session']=json.loads(counts['session'][0]) if counts['session'] else {}
   print(json.dumps(counts))
@@ -163,7 +166,8 @@ def main() -> None:
             start(scratch)
             wait_for(lambda: state(scratch).get("success", 0) >= 2, "two real cycles")
             initial = state(scratch)
-            assert initial["articles"] == 2 and initial["observations"] >= 4, initial
+            assert initial["articles"] == initial["eligible"] == 2, initial
+            assert initial["observations"] >= 4, initial
             assert command(scratch, "health").returncode == 0
             config = json.loads(docker("inspect", CONTAINER).stdout)[0]
             host = config["HostConfig"]
@@ -297,7 +301,8 @@ while True:
             diagnostic = command(scratch, "status")
             assert json.loads(diagnostic.stdout), diagnostic.stdout
             final = state(scratch)
-            assert final["articles"] == 2 and final["run_interruptions"] >= 1, final
+            assert final["articles"] == final["eligible"] == 2, final
+            assert final["run_interruptions"] >= 1, final
             memory_peak = int(
                 docker(
                     "exec",

@@ -15,7 +15,10 @@ filter configuration is loaded by the shared collection path for each cycle.
 The first cycle starts immediately. After completion, the scheduler waits the
 configured interval; it does not replay missed work after downtime. Both UTC and
 monotonic time are checked so clock changes or sleep/resume cause at most one fresh
-cycle before the next delay. Feed failures wait for the ordinary interval. A busy
+cycle before the next delay. On a Mac, Docker Desktop must be running, and the
+machine must be powered on and awake. A powered-off or sleeping Mac executes no
+container work. After wake/restart, one fresh cycle runs without replaying missed
+intervals. Feed failures wait for the ordinary interval. A busy
 manual operation skips a cycle safely instead of overlapping or retrying in a loop.
 
 Two locks have different lifetimes: `<database>.scheduler.lock` prevents a second

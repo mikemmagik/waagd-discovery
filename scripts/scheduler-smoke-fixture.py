@@ -7,6 +7,8 @@ import sys
 import threading
 import time
 import urllib.request
+from datetime import UTC, datetime
+from email.utils import format_datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -24,12 +26,13 @@ class FixtureHandler(BaseHTTPRequestHandler):
             (DATA / "smoke-blocked").write_text("ready")
             while (DATA / "smoke-block").exists():
                 time.sleep(0.1)
+        published = format_datetime(datetime.now(UTC))
         body = f"""<rss version="2.0"><channel><title>Offline fixture</title>
 <link>https://example.org/</link><description>Local test</description>
 <item><title>Offline discovery {slug}</title>
 <link>https://example.org/story/{slug}</link><guid>fixture-{slug}</guid>
 <description>Sufficient synthetic metadata to exercise real discovery and filtering.</description>
-<pubDate>Sun, 18 Oct 2026 00:00:00 GMT</pubDate></item></channel></rss>""".encode()
+<pubDate>{published}</pubDate></item></channel></rss>""".encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/rss+xml")
         self.send_header("Content-Length", str(len(body)))
