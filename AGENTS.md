@@ -39,3 +39,10 @@ interfaces. Scheduler may run only in isolated development tests; never activate
 the persistent operator service without separate permission. Lead owns schema4,
 shared collection orchestration, CLI/recovery/diagnostics. Scheduler and Docker
 changes require independent QA before release. Sprint 4 remains unapproved.
+
+Sprint 4 is authorized as a DATA-ONLY integration interface; see
+docs/SPRINT_4_CONTRACTS.md. The actual Intel Mac/OpenClaw deployment is inaccessible
+and operator-owned. Development uses fake workspaces; never access or alter any
+real agent/workspace/gateway. Lead owns auto-export, bridge specialist owns host
+bridge, infrastructure owns Docker/docs, QA reviews independently before merge.
+No LLM/Telegram/publication/production or Sprint 5 work is authorized.
