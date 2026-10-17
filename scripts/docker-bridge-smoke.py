@@ -211,9 +211,57 @@ print('Real collection/filter/automatic export: PASS')
             "assert set(p.name for p in Path('/workspace/waagd-discovery').iterdir()) "
             "== {'inbox.json'}"
         )
+        runtime = json.loads(
+            workspace("""import json, os
+from pathlib import Path
+mounts = {line.split()[4]: line.split()[5] for line in
+          Path('/proc/self/mountinfo').read_text().splitlines()}
+status = Path('/proc/self/status').read_text()
+result = {
+    'uid': os.getuid(),
+    'memory_limit_bytes': int(Path('/sys/fs/cgroup/memory.max').read_text()),
+    'cpu_max': Path('/sys/fs/cgroup/cpu.max').read_text().strip(),
+    'pids_max': int(Path('/sys/fs/cgroup/pids.max').read_text()),
+    'export_readonly': 'ro' in mounts['/input'].split(','),
+    'database_mounted': '/data' in mounts,
+    'docker_socket_present': Path('/var/run/docker.sock').exists(),
+    'no_new_privileges': 'NoNewPrivs:\\t1' in status,
+    'effective_capabilities_zero': 'CapEff:\\t0000000000000000' in status,
+}
+print(json.dumps(result))
+""")
+        )
+        assert runtime["uid"] == 10001
+        assert runtime["memory_limit_bytes"] == 512 * 1024 * 1024
+        quota, period = (int(part) for part in runtime["cpu_max"].split())
+        assert quota == period
+        assert runtime["pids_max"] == 64
+        assert runtime["export_readonly"]
+        assert not runtime["database_mounted"] and not runtime["docker_socket_present"]
+        assert runtime["no_new_privileges"] and runtime["effective_capabilities_zero"]
         print(
             "Docker data-only bridge smoke: PASS "
             "(25 exported, 10 pending, duplicate/restart/ack/new batch)"
+        )
+        print(
+            json.dumps(
+                {
+                    "status": "pass",
+                    "image": IMAGE,
+                    "image_id": docker(
+                        "image", "inspect", IMAGE, "--format", "{{.Id}}"
+                    ).stdout.strip(),
+                    "exported_candidates": 25,
+                    "pending_limit": 10,
+                    "duplicate_without_rewrite": True,
+                    "restart_same_delivery": True,
+                    "wrong_ack_rejected": True,
+                    "repeated_ack_idempotent": True,
+                    "next_batch_disjoint": True,
+                    "bridge_runtime": runtime,
+                },
+                sort_keys=True,
+            )
         )
     finally:
         for volume in VOLUMES.values():
