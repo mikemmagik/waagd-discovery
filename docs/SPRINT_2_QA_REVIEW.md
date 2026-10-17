@@ -2,7 +2,7 @@
 
 Date: 2026-10-17. Review performed on the isolated
 `test/sprint2-independent-qa` worktree before the feature branches were merged
-into main. Reviewed lead changes through `abe2a45`, filtering `c2d0390`, managed
+into main. Reviewed lead changes through `abe2a45`, filtering `1383239`, managed
 backups `94666e0`, and resilience `99aed57`.
 
 **Verdict: no unresolved blocking defect found; the reviewed changes are suitable
@@ -71,9 +71,9 @@ On macOS/Python 3.14.8, the isolated combined tree passed:
 
 - Ruff lint with its cache disabled and formatting checks for all 45 Python files.
 - Strict mypy over all 18 production source files.
-- **463 tests in 4.23 seconds, no warnings**, including all baseline scenarios,
+- **466 tests in 3.81 seconds, no warnings**, including all baseline scenarios,
   feature-owned tests and 30 independent additions.
-- Statement coverage: **1,532/1,598 (95.87%, displayed as 96%)**.
+- Statement coverage: **1,539/1,603 (96.01%, displayed as 96%)**.
 
 All added tests use temporary databases and local synthetic inputs. No stable
 operator volume, live feed, LLM, publication, scheduler or external integration
