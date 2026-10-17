@@ -3,13 +3,13 @@ import sqlite3
 
 import pytest
 from test_pipeline import SOURCES, Client, collect
-from waagd_discovery.storage import Repository
 
 from waagd_discovery.config import load_sources
 from waagd_discovery.export import export_candidates
 from waagd_discovery.locking import database_lock
 from waagd_discovery.models import DiscoveryError
 from waagd_discovery.operations import restore, snapshot
+from waagd_discovery.storage import Repository
 
 
 @pytest.mark.parametrize(

@@ -92,10 +92,14 @@ Logs for an ongoing or retained container can also be read with
 ## Stop, restore and update
 
 There is no resident process to stop after a one-shot run. During an attached run,
-Ctrl-C interrupts collection. For an active Compose container in another terminal:
+Ctrl-C interrupts collection. To retain a named job for logs and stopping from
+another terminal, start it with `docker compose run --name waagd-manual discovery
+collect --once`, then use:
 
 ```sh
-docker compose stop --timeout 30 discovery
+docker stop --time 30 waagd-manual
+docker logs waagd-manual
+docker rm waagd-manual
 ```
 
 Normal stops and `docker compose down` retain the named database volume. Never
@@ -156,7 +160,7 @@ sh scripts/docker-smoke.sh
 It builds the image, disables networking for every runtime container, parses an
 embedded RSS fixture, ingests it in two separate containers against one temporary
 volume, checks deduplication and persistence, invokes CLI verification/export/
-backup, and verifies the resulting backup in another container. It also asserts
+backup/restore, and verifies the resulting backup in another container. It also asserts
 the nonroot UID, read-only root, no effective capabilities, no-new-privileges and
 absence of the Docker socket. Its disposable volume and files are cleaned up even
 on failure. Set `WAAGD_SMOKE_IMAGE` to an existing local image and
