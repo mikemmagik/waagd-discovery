@@ -1,0 +1,26 @@
+{
+  "dismissed_not_processed": true,
+  "fake_workspace_only": true,
+  "hostile_text_not_executed": true,
+  "lost_ledger_fail_closed": true,
+  "no_database_or_docker_socket": true,
+  "no_sqlite_or_http_client_import": true,
+  "stable_delivery_id": true,
+  "status": "PASS",
+  "tampered_inbox_exact_recovery": true,
+  "uid": 10001,
+  "image_id": "sha256:5f57e4cb584f35eaaa0561c7fecb9e3e2a0b5f49aa23c3e3323c83a7b78f8052",
+  "architecture": "arm64",
+  "image_reference_pinned_for_execution": true,
+  "security_flags": {
+    "network": "none",
+    "read_only": true,
+    "cap_drop": "ALL",
+    "no_new_privileges": true,
+    "tmpfs_bytes": 33554432,
+    "memory_bytes": 536870912,
+    "cpus": 1,
+    "pids": 64,
+    "mounts": []
+  }
+}
