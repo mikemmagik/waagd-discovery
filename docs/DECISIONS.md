@@ -15,3 +15,18 @@
    retaining original Host and TLS certificate/SNI checks.
 8. Restoration requires a recognized application schema, not merely a valid
    SQLite container. Preserve the target if schema validation fails.
+9. v0.2.0 is Reliable Discovery as requested for Sprint 2; the scheduler moves
+   to a separately accepted Sprint 3/proposed v0.3 release. v0.1.0 remains stable.
+10. Filter technical quality/freshness only. No keyword/topic gate. Persist all
+    checks in immutable complete batches; never delete low-eligibility articles.
+    Fingerprints exclude changing discovery timestamps but cover quality metadata
+    and provenance configuration. Export requires matching persisted eligibility
+    and rechecks current age. Unknown/stale assessments fail closed.
+11. JSON schema v2 intentionally changes the export contract. Retain the v1
+    schema and all legacy safety scenarios; update only fixtures/schema assertions
+    necessary for selected-candidate behavior. Working DB diagnostics/export remain
+    read-only, including legacy schema snapshots.
+12. Backup retention keeps the union of newest valid copies and the age window.
+    Corrupt or incompatible files cannot count as survivors. Manual copies are
+    outside automatic management. Rotation requires explicit operator action,
+    not a scheduler. Runtime measurement uses isolated fixture volumes only.

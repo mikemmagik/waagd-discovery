@@ -5,14 +5,15 @@ Sprint 1 / v0.1: RSS/Atom discovery, HTTP limits and conditionals, SQLite migrat
 identity/provenance, CLI, container and offline integration/persistence tests.
 Baseline online backup, explicit restore and JSON export are included early.
 
-Sprint 2: persist explainable deterministic preliminary filtering decisions
-(title/URL/age/source metadata), source error/backoff tuning, backup retention,
-export selection policy and expanded resource/long-running reliability evidence.
-The current discovery export is deliberately unfiltered and unverified.
+Sprint 2 / v0.2.0 — Reliable Discovery: persist explainable deterministic
+preliminary filtering decisions; selected JSON v2; backup retention; additional
+network/corruption/interruption tests; measured constrained workload and migration
+regressions. No editorial truth/interest scoring or publication approval.
 
-Sprint 3 / v0.2: opt-in configurable scheduler, process shutdown/recovery,
+Sprint 3 / proposed v0.3: opt-in configurable scheduler, process shutdown/recovery,
 stale-run reconciliation, health monitoring, restart policy and extended soak test.
-Do not enable an automatic schedule as part of v0.1.
+This sprint must not start until the operator accepts the Sprint 2 architecture
+and release report. Do not enable an automatic schedule as part of v0.2.
 
 Sprint 4: separately agreed read-only candidate handoff to the WAAGD agent,
 bounded free OpenRouter evaluation, quota/error handling and Telegram integration.
