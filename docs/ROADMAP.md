@@ -16,10 +16,12 @@ Sprint 2 was accepted on 2026-10-18; Sprint 3 development and isolated tests are
 authorized. Permanent operator activation is still a separate approval. See
 SPRINT_3_CONTRACTS.md; no new integration or deployment is authorized.
 
-Sprint 4 (not authorized; stop after Sprint 3): separately agreed read-only candidate handoff to the WAAGD agent,
-bounded free OpenRouter evaluation, quota/error handling and Telegram integration.
-No changes to Shmul or shared OpenClaw state.
+Sprint 4 / v0.4.0 — Data-only OpenClaw integration interface: opt-in automatic
+selected export, bounded host-side JSON bridge, durable delivery/acknowledgement,
+fake workspace tests and operator-only update/integration instructions. The actual
+Intel Mac/OpenClaw deployment is inaccessible; never modify the existing agent.
+No OpenRouter/LLM, Telegram or real editorial processing is authorized.
 
-Sprint 5: verification, drafts, human review queue, audit/version history. A future
+Sprint 5 (not authorized; stop after Sprint 4): verification, drafts, human review queue, audit/version history. A future
 limited publish service and staging rollout require separate approval. Discovery
 collection and publication must always remain distinct capabilities.

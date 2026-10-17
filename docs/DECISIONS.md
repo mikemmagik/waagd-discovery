@@ -51,3 +51,29 @@
     This is bounded evidence, not a guarantee for arbitrary future sources.
 19. Sprint 4 deployment/integration requires separate agreement; no OpenClaw,
     WAAGD-agent, Telegram, LLM or publication integration in v0.3.
+
+20. Sprint 4 is authorized as a file-only boundary. The deployed Intel Mac is
+    operator-owned and inaccessible here; no agent/gateway/production changes.
+    Use the same modular Python project, no new service/API or LLM dependency.
+21. Reuse selected JSON v2 and atomic export after a completed successful/partial
+    collection assessment. Export errors do not roll back discovery. Opt-in
+    handoff configuration keeps rollout separate from the working v0.3 service.
+    Schema 4 remains unchanged; diagnostics use a private metadata sidecar.
+22. A separate host entrypoint reads only validated bounded JSON, writes only a
+    fixed workspace child, and keeps its atomic delivery ledger outside workspace
+    and export roots. No DB, Docker, socket or secret capability is handed off.
+    Existing agent privileges cannot be revoked by this interface; the operator
+    must verify actual read-only access and consumer behavior separately.
+23. Stable identity is the canonical article URL hash, not database IDs or mutable
+    metadata. Prepare durably before publication; replay the same pending payload
+    after interruption. One pending batch, default ten candidates, no automatic
+    pagination or acknowledgement. ACK means explicitly reported processed;
+    dismiss is a separate terminal resolution. Both preserve deduplication history.
+24. Prompt-injection text remains untrusted JSON data, never a command/template or
+    filename. Static handling metadata, text/byte ceilings, no tool/network use and
+    explicit expiry checks limit exposure; no claim of semantic injection removal
+    or exactly-once LLM execution. The unchanged agent does not auto-consume data.
+25. State loss/corruption fails closed rather than reset delivery history. Keep
+    initialized marker, ledger and lock together in private backups; rollback of
+    this state requires replay-risk review. The ledger caps at 10,000 URL keys and
+    stops instead of pruning idempotency history. Sprint 5 needs separate approval.
