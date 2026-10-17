@@ -1,0 +1,51 @@
+name: waagd-discovery
+
+services:
+  discovery:
+    image: waagd-discovery:local
+    build:
+      context: .
+    user: "10001:10001"
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    environment:
+      WAAGD_DB: /data/discovery.sqlite3
+      WAAGD_SOURCES: /app/config/sources.yaml
+    volumes:
+      - discovery-data:/data
+      - type: bind
+        source: ./exports
+        target: /exports
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./backups
+        target: /backups
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./config/sources.yaml
+        target: /app/config/sources.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 64
+    stop_grace_period: 30s
+    restart: "no"
+    command: ["stats"]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  discovery-data:
