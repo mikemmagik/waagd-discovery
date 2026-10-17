@@ -82,7 +82,7 @@ def validate_target(db: Path, output: Path, protected: tuple[Path, ...]) -> None
             Path(str(spelling) + suffix).resolve()
             for suffix in ("-wal", "-shm", ".lock", ".scheduler.lock")
         )
-    if output.resolve() in forbidden or output.resolve().parent == canonical.parent:
+    if output.resolve() in forbidden or canonical.parent in output.resolve().parents:
         raise DiscoveryError("handoff_target_protected")
     # This directory belongs to the trusted export producer, never the consumer.
     for path in (output, *output.absolute().parents):
@@ -192,6 +192,19 @@ def integration_status(db: Path, config: Path) -> dict[str, object]:
     policy = load_handoff_policy(config)
     if not policy.enabled:
         return {"enabled": False, "status": "disabled", "healthy": True}
+    attempt: dict[str, object] | None = None
+    try:
+        attempt = _read_json(Path(str(db.resolve()) + ".handoff.json"), 16_384)
+    except FileNotFoundError:
+        pass
+    except (DiscoveryError, OSError, ValueError, RecursionError):
+        return {
+            "enabled": True,
+            "status": "error",
+            "healthy": False,
+            "code": "handoff_state_unavailable",
+            "last_attempt": None,
+        }
     try:
         data = _read_json(policy.output, 8 * 1024 * 1024)
         schema = json.loads(
@@ -205,10 +218,6 @@ def integration_status(db: Path, config: Path) -> dict[str, object]:
         generated = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
         age = (datetime.now(UTC) - generated).total_seconds()
         status = "current" if -300 <= age <= 7200 else "stale" if age > 7200 else "future"
-        try:
-            attempt = _read_json(Path(str(db.resolve()) + ".handoff.json"), 16_384)
-        except FileNotFoundError:
-            attempt = None
         candidates = data["candidates"]
         assert isinstance(candidates, list)
         return {
@@ -223,11 +232,18 @@ def integration_status(db: Path, config: Path) -> dict[str, object]:
             "last_attempt": attempt,
         }
     except DiscoveryError as error:
-        return {"enabled": True, "status": "error", "healthy": False, "code": error.code}
+        return {
+            "enabled": True,
+            "status": "error",
+            "healthy": False,
+            "code": error.code,
+            "last_attempt": attempt,
+        }
     except (OSError, ValueError, RecursionError, jsonschema.ValidationError):
         return {
             "enabled": True,
             "status": "error",
             "healthy": False,
             "code": "handoff_export_unavailable",
+            "last_attempt": attempt,
         }

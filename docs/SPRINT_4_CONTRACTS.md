@@ -107,3 +107,10 @@ native host bridge install, opt-in watch/manual transfer, state backup/recovery,
 Intel Mac container update from v0.3 without replacing SQLite volume, rollback,
 and explicit operator-only real integration test. Exact final commit green CI
 before v0.4 tag/release. No Sprint5, no actual target Mac or agent access.
+
+Review clarification: explicit `dismiss --delivery-id UUID` resolves an unprocessed
+(including expired) pending batch as dismissed, preserving URL history separately
+from processed. No automatic expiry acknowledgement. Bridge lock contention must
+fail promptly with bridge_busy, including status, rather than wait indefinitely.
+Auto-export must reject every descendant of the private DB directory. Failed first
+export diagnostics must expose the saved last_attempt even when no export exists.
