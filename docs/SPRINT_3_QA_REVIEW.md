@@ -5,9 +5,9 @@ lead changes through `1e67016` and scheduler `eab7ada`, before scheduler feature
 integration into main. The reviewer made no production source changes. Fixes were
 made by the owning agents and independently retested.
 
-**Scheduler, shared collection, recovery, diagnostics and schema-4 verdict: PASS;
-no unresolved blocking defect remains in the reviewed code.** Infrastructure has
-its own review gate below. Release readiness additionally requires the lead's
+**Scheduler, shared collection, recovery, diagnostics, schema-4 and infrastructure
+verdict: PASS; no unresolved blocking defect remains in the reviewed changes.**
+Infrastructure evidence is recorded below. Release readiness additionally requires the lead's
 exact-commit CI, both architecture Docker checks, migration and resource evidence.
 This review does not activate the persistent operator service or authorize Sprint 4.
 
@@ -69,11 +69,11 @@ by these tests. Controlled clocks remove external-time dependencies.
 
 Reviewed combined tree on macOS/Python 3.14.8:
 
-- **543 tests PASS in 6.71 seconds**, no warnings: 472 legacy, 39 scheduler-owned,
+- **543 tests PASS in 6.43 seconds**, no warnings: 472 legacy, 39 scheduler-owned,
   five lead-owned operator tests and 27 independent adversarial cases.
 - Coverage: **1,819 / 1,901 statements (95.69%)**.
 - Ruff lint with cache disabled: PASS.
-- Ruff formatting: PASS, 53 Python files.
+- Ruff formatting: PASS, 55 Python files including the lifecycle scripts.
 - Strict mypy: PASS, 22 production source files.
 
 Legacy scenario assertions remain in place. The reviewed changes to their
@@ -82,7 +82,36 @@ relax source, storage, interruption, export or security expectations.
 
 ## Infrastructure gate
 
-Review of Compose, Dockerfile, CI, offline lifecycle fixture and operator docs is
-in progress separately. The lead must not treat the code verdict above as evidence
-of an infrastructure acceptance run. Final architecture, lifecycle and CI results
-belong in the release report.
+Independently reviewed infrastructure commits `0d6d65c` and `391b311`: Compose,
+Dockerfile, CI, offline lifecycle fixture and operator documentation. Default
+`docker compose config --services` contains only `discovery`; the scheduler requires
+an explicit profile. The same image and database volume retain UID 10001, read-only
+root, dropped capabilities, no-new-privileges, one CPU, 512 MiB, 64 processes,
+32 MiB temporary filesystem, bounded logs, no public port or Docker socket.
+Scheduler adds `unless-stopped`, CLI healthcheck and a 30-second graceful timeout.
+
+The reviewer independently ran the actual offline Docker lifecycle script twice
+with unique disposable volumes. The final run used both reviewed commits and
+passed **all 13 checks in 26.746 seconds**: repeated cycles, deduplication, singleton,
+manual-lock exclusion, SIGTERM, restart, explicit Docker SIGKILL/restart, actual
+Python-process SIGKILL with Engine automatic restart, orphan recovery, recreation,
+health, hardening and SQLite integrity. The two fixture articles remained eligible
+after every lifecycle transition. Final counts were two articles, 22 observations,
+12 runs (ten success and two interrupted), one immutable crash audit and no running
+orphan. All test containers and volumes were removed; no operator volume was used.
+
+The final recreated scheduler cgroup peak was **55,341,056 bytes (52.78 MiB)**,
+below the 536,870,912-byte bound, with no OOM. This is a small lifecycle proof,
+not a throughput or full-run peak claim. The release coordinator separately records
+the realistic workload and final image/architecture/CI measurements.
+
+Review requested and verified explicit Mac sleep/off and Docker Desktop availability
+instructions, checkout of the reviewed release during UPDATE, and exact v0.2
+ROLLBACK commands using the older binary and matching schema-3 backup. Rollback
+returns to manual operation. One fixture originally used a fixed future date;
+`391b311` now emits current UTC and asserts two eligible candidates at the initial
+and final lifecycle gates, strengthening the collection-to-filter proof.
+
+**Infrastructure pre-integration verdict: PASS.** The persistent operator scheduler
+remains inactive. Both architecture final builds/smokes and exact-commit CI remain
+separate release gates; no result from an older image substitutes for those gates.
