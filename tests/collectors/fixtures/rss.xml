@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Offline fixture</title>
+    <item>
+      <title>Committee automates committee formation</title>
+      <link>https://news.example/articles/committee?utm_source=rss</link>
+      <guid isPermaLink="false">committee-001</guid>
+      <pubDate>Sat, 17 Oct 2026 09:00:00 -0400</pubDate>
+      <description><![CDATA[<p>A <b>new</b> committee &amp; its report.</p><script>bad()</script>]]></description>
+      <source url="https://news.example/feed">Example News</source>
+    </item>
+    <item><link>https://news.example/articles/no-title</link></item>
+    <item><title>No link</title><guid isPermaLink="false">opaque-id</guid></item>
+    <item><link>https://news.example/articles/invalid-date</link><pubDate>eventually</pubDate></item>
+  </channel>
+</rss>
