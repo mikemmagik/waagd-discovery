@@ -1,0 +1,307 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mikemmagik/waagd-discovery/schemas/candidates-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "candidates",
+    "selection"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "candidates": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "url",
+          "publisher",
+          "published_at",
+          "description",
+          "date_status",
+          "first_seen_at",
+          "last_seen_at",
+          "sources",
+          "selection"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 1000
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 4096,
+            "pattern": "^https?://"
+          },
+          "publisher": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 300
+          },
+          "published_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 4000
+          },
+          "date_status": {
+            "enum": [
+              "valid",
+              "missing",
+              "invalid"
+            ]
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sources": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "url"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri",
+                  "maxLength": 4096
+                }
+              }
+            }
+          },
+          "selection": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "assessment_run_id",
+              "policy_hash",
+              "reasons",
+              "checks"
+            ],
+            "properties": {
+              "status": {
+                "const": "eligible"
+              },
+              "assessment_run_id": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "policy_hash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "reasons": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "type": "string",
+                  "maxLength": 100
+                }
+              },
+              "checks": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "canonical_url",
+                  "title",
+                  "enabled_source",
+                  "description",
+                  "publisher",
+                  "publication_date",
+                  "future_tolerance",
+                  "freshness"
+                ],
+                "properties": {
+                  "canonical_url": {
+                    "const": true
+                  },
+                  "title": {
+                    "const": true
+                  },
+                  "enabled_source": {
+                    "const": true
+                  },
+                  "description": {
+                    "const": true
+                  },
+                  "publisher": {
+                    "const": true
+                  },
+                  "publication_date": {
+                    "const": true
+                  },
+                  "future_tolerance": {
+                    "const": true
+                  },
+                  "freshness": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_hash",
+        "engine_version",
+        "reference_time",
+        "assessment_run_id",
+        "counts",
+        "assessed_at",
+        "assessment_status",
+        "policy"
+      ],
+      "properties": {
+        "policy_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "engine_version": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "reference_time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "assessment_run_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "eligible",
+            "deferred",
+            "excluded",
+            "unassessed",
+            "stale"
+          ],
+          "properties": {
+            "eligible": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "deferred": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "excluded": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unassessed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "stale": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "assessed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "assessment_status": {
+          "enum": [
+            "unassessed",
+            "current",
+            "policy_mismatch",
+            "engine_mismatch"
+          ]
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_age_hours",
+            "future_tolerance_minutes",
+            "min_description_chars",
+            "require_publisher"
+          ],
+          "properties": {
+            "max_age_hours": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "future_tolerance_minutes": {
+              "type": "number",
+              "minimum": 0
+            },
+            "min_description_chars": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "require_publisher": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  }
+}

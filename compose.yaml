@@ -17,6 +17,8 @@ services:
     environment:
       WAAGD_DB: /data/discovery.sqlite3
       WAAGD_SOURCES: /app/config/sources.yaml
+      WAAGD_FILTER: /app/config/filter.yaml
+      WAAGD_BACKUP_POLICY: /app/config/backup.yaml
     volumes:
       - discovery-data:/data
       - type: bind
@@ -32,6 +34,18 @@ services:
       - type: bind
         source: ./config/sources.yaml
         target: /app/config/sources.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./config/filter.yaml
+        target: /app/config/filter.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./config/backup.yaml
+        target: /app/config/backup.yaml
         read_only: true
         bind:
           create_host_path: false

@@ -1,4 +1,4 @@
-"""Bounded atomic JSON discovery export. This is not editorial approval."""
+"""Bounded atomic selected-candidate export. This is not editorial approval."""
 
 import json
 import os
@@ -9,19 +9,28 @@ from pathlib import Path
 
 import jsonschema
 
+from waagd_discovery.filtering import FilterPolicy, select_candidates
 from waagd_discovery.storage import Repository
 
 
-def export_candidates(repository: Repository, destination: Path, limit: int = 50) -> int:
+def export_candidates(
+    repository: Repository,
+    destination: Path,
+    limit: int = 50,
+    *,
+    policy: FilterPolicy = FilterPolicy(),
+    as_of: datetime | None = None,
+) -> int:
     if not 1 <= limit <= 500:
         raise ValueError("export_limit_invalid")
-    candidates = repository.candidates(limit)
+    candidates, selection = select_candidates(repository, policy, as_of, limit)
     data = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": datetime.now(UTC).isoformat(),
+        "selection": selection,
         "candidates": candidates,
     }
-    schema = json.loads(files("waagd_discovery").joinpath("candidate.schema.json").read_text())
+    schema = json.loads(files("waagd_discovery").joinpath("candidate-v2.schema.json").read_text())
     jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker()).validate(
         data
     )

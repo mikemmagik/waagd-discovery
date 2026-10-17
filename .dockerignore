@@ -7,6 +7,8 @@
 !src/**
 !config/
 !config/sources.yaml
+!config/filter.yaml
+!config/backup.yaml
 **/__pycache__/
 **/*.py[cod]
 **/.env

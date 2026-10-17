@@ -22,7 +22,9 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     WAAGD_DB=/data/discovery.sqlite3 \
-    WAAGD_SOURCES=/app/config/sources.yaml
+    WAAGD_SOURCES=/app/config/sources.yaml \
+    WAAGD_FILTER=/app/config/filter.yaml \
+    WAAGD_BACKUP_POLICY=/app/config/backup.yaml
 RUN groupadd --gid 10001 discovery \
     && useradd --uid 10001 --gid discovery --no-create-home --shell /usr/sbin/nologin discovery \
     && mkdir -p /data /exports /backups /app/config \
@@ -30,7 +32,7 @@ RUN groupadd --gid 10001 discovery \
     && chmod 0700 /data /exports /backups
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
-COPY config/sources.yaml ./config/sources.yaml
+COPY config/sources.yaml config/filter.yaml config/backup.yaml ./config/
 USER 10001:10001
 ENTRYPOINT ["waagd-discovery"]
 CMD ["stats"]
