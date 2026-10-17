@@ -38,7 +38,7 @@ class RetentionPolicy:
     max_age_days: int = 30
 
     def __post_init__(self) -> None:
-        if any(type(value) is not int or value < 1 for value in asdict(self).values()):
+        if any(type(value) is not int or value < 1 for value in (self.keep_last, self.max_age_days)):
             raise DiscoveryError("backup_policy_invalid")
 
 

@@ -80,6 +80,7 @@ def test_policy_rejects_nonpositive_or_noninteger_values(value: object, field: s
         "backup: {}\nbackup: {keep_last: 1}",
         "backup: {7: 7}",
         "backup: &recursive {keep_last: *recursive}",
+        "backup: {keep_last: &recursive [*recursive]}",
         "backup: !!python/object:subprocess.Popen {}",
         "backup: [",
         "backup: " + "[" * 1500 + "0" + "]" * 1500,
