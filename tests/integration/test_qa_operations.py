@@ -230,7 +230,7 @@ def test_sigterm_finishes_interrupted_run_and_preserves_committed_source(tmp_pat
 import sys
 import time
 from pathlib import Path
-from waagd_discovery import cli
+from waagd_discovery import cli, collection
 from waagd_discovery.models import FetchResult
 
 class Client:

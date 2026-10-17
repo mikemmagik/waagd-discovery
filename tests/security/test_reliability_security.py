@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from waagd_discovery import cli, http
+from waagd_discovery import cli, collection, http
 from waagd_discovery.collectors.rss import parse_feed
 from waagd_discovery.http import HttpClient
 from waagd_discovery.locking import database_lock
@@ -159,7 +159,7 @@ def test_sigterm_closes_http_and_database_resources_and_retains_prior_source(
     if phase == "retry_delay":
         monkeypatch.setattr(time, "sleep", interrupted_sleep)
     client = HttpClient(transport=httpx.MockTransport(handle))
-    monkeypatch.setattr(cli, "HttpClient", lambda: client)
+    monkeypatch.setattr(collection, "HttpClient", lambda: client)
     registry = tmp_path / "sources.yaml"
     registry.write_text(
         "sources:\n"
