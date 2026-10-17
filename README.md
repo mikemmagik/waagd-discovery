@@ -108,3 +108,6 @@ All rights reserved. No open-source license is granted.
 Sprint 3 evidence: [Sprint report](docs/SPRINT_3_REPORT.md), [independent QA](docs/SPRINT_3_QA_REVIEW.md), [contracts](docs/SPRINT_3_CONTRACTS.md), [scheduler operations](docs/SCHEDULER.md).
 
 Sprint 4 interface: [contracts](docs/SPRINT_4_CONTRACTS.md), [integration](docs/INTEGRATION.md), [bridge operations](docs/BRIDGE_OPERATIONS.md).
+Acceptance: [Sprint report](docs/SPRINT_4_REPORT.md), [independent QA](docs/SPRINT_4_QA_REVIEW.md),
+[Docker matrix](docs/SPRINT_4_DOCKER.json), [native bridge](docs/SPRINT_4_NATIVE_HOST.json),
+[v0.3 compatibility](docs/SPRINT_4_COMPATIBILITY.json).

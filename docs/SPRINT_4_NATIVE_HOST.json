@@ -1,0 +1,21 @@
+{
+  "status": "PASS",
+  "scope": "native host CLI, fictional schema-v2 fixture, disposable fake workspace",
+  "host": "Darwin",
+  "architecture": "arm64",
+  "python": "3.14.8",
+  "uid": 501,
+  "input_candidates": 25,
+  "batch_limit": 10,
+  "first_sync_seconds": 0.62958,
+  "envelope_bytes": 5256,
+  "envelope_sha256": "e6653b020ca7eebd574bfcce2484829c0e4a9ad1085c7fb54f3dd0d54430d023",
+  "separate_process_each_command": true,
+  "repeat_does_not_rewrite": true,
+  "missing_inbox_exact_repair": true,
+  "ack_idempotent": true,
+  "next_batch_disjoint": true,
+  "dismissed_distinct_from_processed": true,
+  "real_openclaw_accessed": false,
+  "temporary_roots_removed_on_exit": true
+}

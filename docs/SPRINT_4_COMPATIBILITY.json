@@ -1,0 +1,148 @@
+{
+  "scope": "isolated disposable development volume; no target Mac access",
+  "old_image": "sha256:1c9b807bc457355c701aeee66dc8499feb9a497415acb7c3eeddab4d99f318d7",
+  "new_image": "sha256:5f57e4cb584f35eaaa0561c7fecb9e3e2a0b5f49aa23c3e3323c83a7b78f8052",
+  "seed_output": "Old image seed/backup: PASS",
+  "baseline": {
+    "schema": 4,
+    "integrity": "ok",
+    "foreign_keys": "ok",
+    "tables": {
+      "article_sources": {
+        "count": 4,
+        "sha256": "ae3dcebb0770a488a62b93544d0d9c299be4e5821d6f65db548a810a11efab87"
+      },
+      "articles": {
+        "count": 3,
+        "sha256": "cc0c7a559abb05f3b241bb2a9470341240c27ebcd31a8d2189ef474a95df0ad1"
+      },
+      "filter_batches": {
+        "count": 2,
+        "sha256": "84836922059b601707fcd8f0502086d7dfd53231478cb11a31043c389d846395"
+      },
+      "filter_decisions": {
+        "count": 6,
+        "sha256": "0457686a94fdaa9190bd42b5d8d467b7881e02c24abb5b02d296c189090a622e"
+      },
+      "observations": {
+        "count": 8,
+        "sha256": "bfa26d196d5d441959a60a159d34f1fa4dafa29ca57acc9bd78b3047f8121e54"
+      },
+      "run_interruptions": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "runs": {
+        "count": 2,
+        "sha256": "287d3da36cedc62ad7bc540441d3c6687b9ad30a34f8a5e66322ccfe7e0d00e8"
+      },
+      "service_state": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "source_guids": {
+        "count": 4,
+        "sha256": "3616097baa088ee0830d0f89adcf49aa33bbf35ec9b13207468fd2d4d4c59071"
+      },
+      "source_runs": {
+        "count": 4,
+        "sha256": "9467dddd34cd08581eb433a06ed530683b1cfa08d14f17cb1ef92f34d0ab9869"
+      },
+      "sources": {
+        "count": 2,
+        "sha256": "d69cad957f992b01dde8410d0047f8862267467be0f183233262d099e4bf5af9"
+      },
+      "url_aliases": {
+        "count": 3,
+        "sha256": "7c3fbe09ffb841dfb2c6e5597c30b650029090fe371b812f9a2817dabc2e9645"
+      }
+    }
+  },
+  "old_backup_matches_all_tables": true,
+  "new_open_preserves_all_table_hashes": true,
+  "configured_handoff_publish": {
+    "status": "exported",
+    "candidates": 3
+  },
+  "publication_and_old_reopen_preserve_all_table_hashes": true,
+  "new_real_cycle": {
+    "status": "success",
+    "items_added": 0,
+    "items_existing": 4,
+    "handoff": {
+      "status": "exported",
+      "candidates": 3,
+      "diagnostics_saved": true
+    }
+  },
+  "article_source_identities_and_first_seen_preserved": true,
+  "article_ids_urls_first_seen_preserved": true,
+  "last_seen_refresh_expected": true,
+  "post_cycle": {
+    "schema": 4,
+    "integrity": "ok",
+    "foreign_keys": "ok",
+    "tables": {
+      "article_sources": {
+        "count": 4,
+        "sha256": "f8bb09421e61d5f95e92d9235063792eec7c1ee855ed8a72729831bfe3ec51f6"
+      },
+      "articles": {
+        "count": 3,
+        "sha256": "746f4aeeec5e0cec9dc630b7350828e180bed017e1581238b3c4f589cf97e6e5"
+      },
+      "filter_batches": {
+        "count": 3,
+        "sha256": "a0c75e5578f41fa1200689b68d0137185eafa7b065fd72b8d0cc68a6b5f73f8d"
+      },
+      "filter_decisions": {
+        "count": 9,
+        "sha256": "467725ffd58efa83ceb894ce63ec90e96e83115d72baf79dfc784fe8529cc9bc"
+      },
+      "observations": {
+        "count": 12,
+        "sha256": "b113428a9495559ee6b8cf06e924174451b2a73af4937f3f26ac9b3f5b3cd871"
+      },
+      "run_interruptions": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "runs": {
+        "count": 3,
+        "sha256": "f24d011db02c44f58800e84f02ff6332fe35239c3dc5dc17d6e37ecf536ade83"
+      },
+      "service_state": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "source_guids": {
+        "count": 4,
+        "sha256": "3616097baa088ee0830d0f89adcf49aa33bbf35ec9b13207468fd2d4d4c59071"
+      },
+      "source_runs": {
+        "count": 6,
+        "sha256": "17bed9302989ffc4e685307f60ce188eb897c49176fb5f2519bf7f540c17d0d4"
+      },
+      "sources": {
+        "count": 2,
+        "sha256": "d69cad957f992b01dde8410d0047f8862267467be0f183233262d099e4bf5af9"
+      },
+      "url_aliases": {
+        "count": 3,
+        "sha256": "7c3fbe09ffb841dfb2c6e5597c30b650029090fe371b812f9a2817dabc2e9645"
+      }
+    }
+  },
+  "old_image_reopens_new_cycle_database": true,
+  "original_history_rows_preserved": [
+    "observations",
+    "source_guids",
+    "url_aliases",
+    "filter_batches",
+    "filter_decisions",
+    "runs",
+    "source_runs"
+  ],
+  "status": "PASS",
+  "disposable_volumes_removed": true
+}
