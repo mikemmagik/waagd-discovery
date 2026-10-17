@@ -82,7 +82,7 @@ def registry(tmp_path):
 
 
 def test_cli_dry_run_never_creates_or_changes_database(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr("waagd_discovery.cli.HttpClient", Client)
+    monkeypatch.setattr("waagd_discovery.collection.HttpClient", Client)
     db = tmp_path / "state" / "db"
     args = ["--db", str(db), "--sources", str(registry(tmp_path))]
     assert main([*args, "collect", "--once", "--dry-run"]) == 0
@@ -131,7 +131,7 @@ def test_diagnostics_refuse_future_schema(tmp_path, command):
 
 
 def test_bad_source_selection_is_not_a_run(tmp_path, monkeypatch):
-    monkeypatch.setattr("waagd_discovery.cli.HttpClient", Client)
+    monkeypatch.setattr("waagd_discovery.collection.HttpClient", Client)
     db = tmp_path / "db"
     args = [
         "--db",

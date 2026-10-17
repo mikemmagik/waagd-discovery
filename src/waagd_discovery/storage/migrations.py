@@ -135,6 +135,21 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         """CREATE TRIGGER filter_decisions_no_delete BEFORE DELETE ON filter_decisions
             BEGIN SELECT RAISE(ABORT, 'filter_audit_is_immutable'); END""",
     ),
+    (
+        """CREATE TABLE service_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            state_json TEXT NOT NULL
+        )""",
+        """CREATE TABLE run_interruptions (
+            run_id TEXT PRIMARY KEY REFERENCES runs(id),
+            detected_at TEXT NOT NULL,
+            reason TEXT NOT NULL
+        )""",
+        """CREATE TRIGGER run_interruptions_no_update BEFORE UPDATE ON run_interruptions
+            BEGIN SELECT RAISE(ABORT, 'recovery_audit_is_immutable'); END""",
+        """CREATE TRIGGER run_interruptions_no_delete BEFORE DELETE ON run_interruptions
+            BEGIN SELECT RAISE(ABORT, 'recovery_audit_is_immutable'); END""",
+    ),
 )
 
 SCHEMA_VERSION = len(MIGRATIONS)

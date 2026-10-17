@@ -7,7 +7,6 @@ import signal
 import sqlite3
 import sys
 from collections.abc import Sequence
-from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
@@ -19,20 +18,22 @@ from waagd_discovery.backups import (
     load_retention_policy,
     rotate_backups,
 )
+from waagd_discovery.collection import run_once
 from waagd_discovery.config import load_sources
+from waagd_discovery.diagnostics import service_status
 from waagd_discovery.export import export_candidates
 from waagd_discovery.filtering import assess, filter_report, load_policy
-from waagd_discovery.http import HttpClient
 from waagd_discovery.locking import database_lock
 from waagd_discovery.logging import configure
 from waagd_discovery.models import DiscoveryError
 from waagd_discovery.operations import restore, snapshot
-from waagd_discovery.pipeline import collect
 from waagd_discovery.storage import Repository
 
 
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(description="WAAGD RSS/Atom discovery — manual operation")
+    result = argparse.ArgumentParser(
+        description="WAAGD RSS/Atom discovery — manual and opt-in scheduled operation"
+    )
     result.add_argument(
         "--db", type=Path, default=Path(os.getenv("WAAGD_DB", "/data/discovery.sqlite3"))
     )
@@ -50,15 +51,20 @@ def parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path(os.getenv("WAAGD_BACKUP_POLICY", "config/backup.yaml")),
     )
+    result.add_argument(
+        "--scheduler-config",
+        type=Path,
+        default=Path(os.getenv("WAAGD_SCHEDULER_CONFIG", "config/scheduler.yaml")),
+    )
     commands = result.add_subparsers(dest="command", required=True)
-    for name in ("init-db", "stats", "verify"):
+    for name in ("init-db", "stats", "verify", "scheduler", "status", "health"):
         commands.add_parser(name)
     collection = commands.add_parser("collect")
     collection.add_argument(
         "--once",
         action="store_true",
         required=True,
-        help="Required: no automatic scheduling is available",
+        help="Required for an independent one-shot collection",
     )
     collection.add_argument("--source")
     collection.add_argument("--dry-run", action="store_true")
@@ -106,9 +112,11 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
             args.sources.resolve(),
             args.policy.resolve(),
             args.backup_policy.resolve(),
+            args.scheduler_config.resolve(),
         }
         protected.update(
-            Path(str(args.db) + suffix).resolve() for suffix in ("-wal", "-shm", ".lock")
+            Path(str(args.db) + suffix).resolve()
+            for suffix in ("-wal", "-shm", ".lock", ".scheduler.lock")
         )
         if args.output.resolve() in protected or args.output.suffix.lower() in (
             ".sqlite",
@@ -132,23 +140,20 @@ def execute(args: argparse.Namespace) -> tuple[dict[str, object], int]:
         with database_lock(args.db):
             previous = restore(args.db, args.input)
         return {"status": "restored", "pre_restore_backup": previous.name if previous else None}, 0
+    if args.command in ("status", "health"):
+        status_result = service_status(args.db)
+        return status_result, 0 if args.command == "status" or status_result["healthy"] else 1
+    if args.command == "scheduler":
+        from waagd_discovery.scheduler import load_scheduler_policy, run_scheduler
+
+        state = run_scheduler(
+            args.db, args.sources, args.policy, load_scheduler_policy(args.scheduler_config)
+        )
+        return state, 0
     if args.command == "collect":
-        sources = load_sources(args.sources)
-        policy = load_policy(args.policy)
-        if args.source and not any(s.id == args.source and s.enabled for s in sources):
-            raise DiscoveryError("source_unknown_or_disabled")
-        if not any(s.enabled for s in sources):
-            raise DiscoveryError("no_enabled_sources")
-        if args.dry_run:
-            context = snapshot(args.db) if args.db.exists() else Repository(":memory:")
-        else:
-            context = Repository(args.db)
-        with database_lock(args.db) if not args.dry_run else nullcontext():
-            with context as repository, HttpClient() as client:
-                result = collect(repository, sources, client, args.source)
-                if result["status"] in ("success", "partial"):
-                    result["filter"] = assess(repository, policy)
-                result["dry_run"] = args.dry_run
+        result = run_once(
+            args.db, args.sources, args.policy, selected=args.source, dry_run=args.dry_run
+        )
         status = result["status"]
         return result, 130 if status == "interrupted" else 0 if status == "success" else 1
     if args.command == "init-db":
@@ -189,6 +194,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
     configure(args.log_level)
     previous_handler = signal.signal(signal.SIGTERM, interrupt)
+    previous_int = signal.signal(signal.SIGINT, interrupt)
     try:
         result, code = execute(args)
         print(json.dumps(result, ensure_ascii=True, allow_nan=False))
@@ -204,6 +210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 130
     finally:
         signal.signal(signal.SIGTERM, previous_handler)
+        signal.signal(signal.SIGINT, previous_int)
 
 
 if __name__ == "__main__":

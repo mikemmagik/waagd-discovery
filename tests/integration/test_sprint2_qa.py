@@ -241,7 +241,7 @@ def test_all_failed_collect_preserves_previous_assessment(tmp_path, monkeypatch,
         def fetch(self, source):
             raise DiscoveryError("http_timeout")
 
-    monkeypatch.setattr("waagd_discovery.cli.HttpClient", Unavailable)
+    monkeypatch.setattr("waagd_discovery.collection.HttpClient", Unavailable)
     args = ["--db", str(db), "--sources", str(registry), "--policy", str(policy)]
     assert main([*args, "collect", "--once"]) == 1
     result = json.loads(capsys.readouterr().out)

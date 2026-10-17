@@ -67,7 +67,7 @@ def test_legacy_database_diagnostics_and_dry_run_do_not_migrate_disk(tmp_path, m
     registry.write_text(
         "sources: [{id: qa, name: QA source, url: 'https://feeds.example.org/rss'}]"
     )
-    monkeypatch.setattr("waagd_discovery.cli.HttpClient", NoNetworkClient)
+    monkeypatch.setattr("waagd_discovery.collection.HttpClient", NoNetworkClient)
     before = files_under(tmp_path)
     args = ["--db", str(db), "--sources", str(registry)]
     for command in (["stats"], ["verify"], ["collect", "--once", "--dry-run"]):
@@ -250,7 +250,7 @@ class Client:
             etag='"saved"',
         )
 
-cli.HttpClient = Client
+collection.HttpClient = Client
 sys.exit(cli.main([
     "--db", sys.argv[1], "--sources", sys.argv[2], "collect", "--once"
 ]))
