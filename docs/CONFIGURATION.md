@@ -25,7 +25,7 @@ Publication date is distinct from event date. Unknown dates remain null.
 candidate.schema.json remains the historical raw v1 contract. --policy overrides
 WAAGD_FILTER (default config/filter.yaml); --backup-policy overrides
 WAAGD_BACKUP_POLICY (default config/backup.yaml). Docker uses /app/config paths
-and mounts all four trusted YAML files read-only. See FILTERING.md and BACKUPS.md
+and mounts all five trusted YAML files read-only. See FILTERING.md and BACKUPS.md
 for exact defaults, reason codes, reassessment and survivor-preserving retention.
 No API keys are required. HTTP retry/ETag/Last-Modified behavior is reused.
 
@@ -36,3 +36,18 @@ unknown/duplicate keys and malformed/oversized YAML fail safely. This policy doe
 not activate scheduling: only the explicit scheduler command/profile does.
 Sources and filtering policy reload for each cycle; scheduler timing policy is
 read at startup, requiring restart after changes. All persisted timestamps use UTC.
+
+Handoff: --handoff-config / WAAGD_HANDOFF_CONFIG, default config/handoff.yaml
+(/app/config/handoff.yaml in Docker). Keys: handoff.enabled boolean(defaultfalse),
+output .json path(default/exports/candidates.json), limit integer1..500(default50).
+Only trusted operator config sets paths. Duplicate/unknown/malformed/oversized YAML
+fails safely. Enabled export targets cannot overlap the private DB tree/configs
+and are reserved against manual export replacement. Errors do not undo discovery.
+Use integration-status separately from health. Its diagnostic .handoff.json lives
+beside the DB, never in workspace; it is not delivery state.
+
+Host waagd-bridge flags precede sync/status/ack/dismiss/watch: --export ABS_PATH,
+--workspace-root ABS_EXISTING_ROOT, --state-dir ABS_PRIVATE_ROOT, --limit1..50
+(default10). Watch polling10..3600seconds(default60), explicit foreground command.
+There is no path autodetection or service installation. See INTEGRATION.md for
+field/byte/expiry limits and BRIDGE_OPERATIONS.md for state backup and rollout.

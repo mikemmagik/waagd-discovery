@@ -72,7 +72,10 @@ for explicit START/STOP/RESTART/STATUS/LOGS/HEALTH commands and sleep/restart be
 `status`, `health` and `filter-stats` are also available through the one-shot CLI.
 A failed feed does not make the service unhealthy. Daily backups remain an explicit
 operator task. No permanent operator scheduler was activated during development.
-No agent integration or publication exists; Sprint 4 requires separate agreement.
+v0.4 adds a data-only host bridge and opt-in automatic selected export. The
+existing WAAGD agent is unchanged. See [Integration](docs/INTEGRATION.md) and
+[operator handoff](docs/BRIDGE_OPERATIONS.md); the separate deployed Intel Mac
+is inaccessible here. No real LLM processing, publication or Sprint 5 is enabled.
 
 ## Development
 
@@ -85,6 +88,7 @@ uv run pytest
 python3 scripts/check-secrets.py
 bash scripts/docker-smoke.sh
 python3 scripts/docker-scheduler-smoke.py
+python3 scripts/docker-bridge-smoke.py
 ```
 
 Offline tests use fixtures and mocked networking. Real source availability is
@@ -102,3 +106,5 @@ disposable data directory. Never run workloads against the operator database.
 All rights reserved. No open-source license is granted.
 
 Sprint 3 evidence: [Sprint report](docs/SPRINT_3_REPORT.md), [independent QA](docs/SPRINT_3_QA_REVIEW.md), [contracts](docs/SPRINT_3_CONTRACTS.md), [scheduler operations](docs/SCHEDULER.md).
+
+Sprint 4 interface: [contracts](docs/SPRINT_4_CONTRACTS.md), [integration](docs/INTEGRATION.md), [bridge operations](docs/BRIDGE_OPERATIONS.md).

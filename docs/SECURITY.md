@@ -46,3 +46,23 @@ restart/kill tests use disposable volumes, fixture networking and no production
 credentials. A kernel lock is evidence only for cooperating local processes;
 direct out-of-band SQLite writers remain unsupported. The service cannot collect
 while the Mac is asleep/powered off or Docker Desktop is stopped.
+
+Sprint 4 publishes a bounded file-only interface; it grants no Discovery database,
+Docker, socket, backup or secret access. It does not modify the existing agent's
+preexisting tools/permissions: actual read-only consumer access is an operator
+review requirement. The host bridge is offline and does not import SQLite/Docker/
+HTTP clients; only its explicit export file, fixed workspace child and private
+state are used. Workspace/export/state roots cannot overlap; descriptor-relative
+nofollow reads reject links, unsafe types, mutation and oversized files. Private
+ledger initialization and checksums detect accidental missing/corrupt state;
+checksums/policy hashes are not authentication against a privileged local writer.
+Keep producer directories controlled and never expose the ledger to the consumer.
+
+News/source strings remain hostile data. The bridge never executes commands,
+fetches URLs, renders templates or promotes text into trusted instructions.
+Encoding/control replacement and a static policy warning do not remove semantic
+prompt injection. A future consumer must enforce expiry, data-only interpretation
+and durable candidate-key deduplication itself. At-least-once publication is not
+exactly-once external processing. ACK/dismiss are explicit trusted actions, never
+accepted from article text or automatic workspace receipts. No real agent/LLM is
+connected in this release; only mock workspaces and fictional news are tested.

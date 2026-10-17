@@ -1,4 +1,4 @@
-# Architecture — v0.3 Automated Discovery
+# Architecture — v0.4 Data-only Integration
 
 One synchronous Python modular monolith runs as a one-shot or opt-in scheduled non-root container.
 Trusted YAML registry → bounded HTTP → safe RSS/Atom parser → URL normalization
@@ -18,7 +18,7 @@ so the actual database, including schema and source registry, is never changed.
 Optional bounded JSON export is a data-only boundary for future integration.
 Backup uses SQLite's online backup API; restoration requires explicit operator
 action and a pre-restore backup. These reliability essentials were implemented
-in Sprint 1; all external integrations remain deferred.
+in Sprint 1; live editorial/LLM integration remains deferred.
 
 An advisory lock serializes mutating operations. OS release on process exit
 avoids stale lock files blocking recovery. This assumes a local Docker volume,
@@ -61,3 +61,21 @@ restarts. Health verifies scheduler ownership and database readability. The late
 filter audit's counts/reasons are explicitly distinguished from freshness-gated
 export eligibility. Default Compose keeps scheduling off. No operator deployment
 or integration with WAAGD/OpenClaw is included in this release.
+
+Sprint 4 keeps SQLite schema 4 and the existing pipeline. Completed successful/
+partial assessments can opt into automatic schema-v2 publication; failed/dry-run/
+interrupted collections do not publish. Export failures retain ingestion and are
+reported separately in result/logs and a private .handoff.json diagnostic sidecar.
+No handoff is enabled by default during operator rollout.
+
+The host-side waagd-bridge entrypoint is offline and imports no database/Docker/
+HTTP client. It validates the bounded export and independently rechecks actual
+freshness, projects text limits and publishes one fixed workspace inbox. A durable
+private JSON ledger outside workspace/export roots records canonical-URL hashes,
+prepared/delivered/processed/dismissed states and exact pending payload. Prepare
+precedes atomic publication; restart reuses its ID, ack/dismiss precedes clearing.
+One pending batch provides backpressure. Expiry blocks new work until explicit
+resolution; no LLM or editor execution is performed. The bridge only exposes data;
+it cannot revoke existing agent privileges or guarantee semantic injection removal.
+Operator installation and actual consumer behavior on the separate Intel Mac are
+explicitly outside development access. No agent, gateway or production change.

@@ -71,3 +71,8 @@ bind mounts ./exports:/exports, ./backups:/backups and registry read-only.
 Default container command stats. Root filesystem read-only; /tmp tmpfs.
 Python dependencies locked with uv.lock. `uv sync --frozen --no-dev` for runtime;
 `uv sync --frozen` for CI/dev. Native Python 3.13 and 3.14 tests; Docker Python 3.13.
+
+Sprint 3 and Sprint 4 later contracts are documented in SPRINT_3_CONTRACTS.md and
+SPRINT_4_CONTRACTS.md; the original CLI list above is historical. The public
+selected export remains schema2. The data-only bridge envelope has its own
+version1 schema and separate private ledger; Discovery SQLite remains schema4.
