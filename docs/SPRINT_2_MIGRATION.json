@@ -1,0 +1,47 @@
+{
+  "assessment": {
+    "articles_evaluated": 94,
+    "assessed_at": "2026-10-17T19:45:25.894107+00:00",
+    "counts": {
+      "deferred": 0,
+      "eligible": 74,
+      "excluded": 20
+    },
+    "engine_version": "rules-v1",
+    "policy": {
+      "future_tolerance_minutes": 15.0,
+      "max_age_hours": 72.0,
+      "min_description_chars": 40,
+      "require_publisher": false
+    },
+    "policy_hash": "67aa6a9341fb0f35e218854e8852eda3bd0d68f055eab91237cc73909915b6da",
+    "reference_time": "2026-10-17T19:45:25.894038+00:00",
+    "run_id": "1ce1389d-3570-47dc-9c2b-1b174cc9e4b5"
+  },
+  "input_sha256": "73a7635afd4aa75d630b085c28e2d8adca1ab1288be2ff087f9f765a3b31f146",
+  "legacy_row_counts": {
+    "article_sources": 96,
+    "articles": 94,
+    "observations": 127,
+    "runs": 2,
+    "source_guids": 96,
+    "source_runs": 6,
+    "sources": 3,
+    "url_aliases": 94
+  },
+  "legacy_rows_sha256_after": "5170fa16f13530fc766de28d8f727cfe2dac376c11561c7e548ff4001c840915",
+  "legacy_rows_sha256_before": "5170fa16f13530fc766de28d8f727cfe2dac376c11561c7e548ff4001c840915",
+  "original_file_unchanged": true,
+  "reference_time": "2026-10-17T19:45:25.894038+00:00",
+  "result": "PASS",
+  "selected_export_count": 50,
+  "source_schema": 2,
+  "stats": {
+    "articles": 94,
+    "enabled_sources": 3,
+    "observations": 127,
+    "runs": 2,
+    "sources": 3
+  },
+  "target_schema": 3
+}

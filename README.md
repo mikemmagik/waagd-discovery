@@ -53,7 +53,8 @@ export time. An exported item remains unverified and has no publication approval
 Filtering policy: `config/filter.yaml` (72 hours, title/URL/enabled source, 40
 description characters, valid publication date by default; no keyword rules).
 Managed retention: `config/backup.yaml` (keep newest seven verified copies plus
-all verified copies from the last 30 days). Rotation previews by default. Manual,
+all verified copies from the last 30 days). Standalone rotation previews by default;
+`backup-managed` verifies a new copy and applies retention as part of that command. Manual,
 pre-restore, corrupt and incompatible copies are preserved; only managed filenames
 are eligible for pruning, with a verified surviving copy checked before deletion.
 

@@ -16,12 +16,12 @@ changed in code; environment overrides for advanced tuning are deferred.
 Feeds are fetched sequentially to minimize upstream load. Only explicitly
 configured feeds are fetched, never the linked articles.
 
-Export schema lives in src/waagd_discovery/candidate.schema.json and is bundled
-in the wheel. --limit is 1–500, default 50. Export contains latest discovery
-metadata and provenance only, no complete article bodies, secrets or local paths.
+Selected export schema lives in src/waagd_discovery/candidate-v2.schema.json and is
+bundled in the wheel. --limit is 1–500, default 50. Export contains current eligible
+metadata, selection explanations and provenance, no complete article bodies,
+secrets or local paths.
 Publication date is distinct from event date. Unknown dates remain null.
 
-Sprint 2: current selected-candidate schema is candidate-v2.schema.json (version 2);
 candidate.schema.json remains the historical raw v1 contract. --policy overrides
 WAAGD_FILTER (default config/filter.yaml); --backup-policy overrides
 WAAGD_BACKUP_POLICY (default config/backup.yaml). Docker uses /app/config paths

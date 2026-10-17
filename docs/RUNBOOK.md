@@ -38,8 +38,10 @@ file manually; use the backup command.
 
 Rollback the application by checking out the recorded previous commit and
 rebuilding. An older app refuses a newer database schema. If schema rollback is
-needed, retain the current data backup and explicitly restore the matching
-pre-update backup first. Never reset the database or delete volumes to update.
+needed, retain the current data backup and restore the matching pre-update backup
+with the target older application's restore command. A newer application's
+restore may migrate a legacy backup to its own schema. Never reset the database
+or delete volumes to update.
 
 ## Failures
 
@@ -82,6 +84,14 @@ rotation returns exit1 with fixed reasons; a newly created verified backup may
 still exist when later rotation is blocked. Keep it and inspect the result.
 No valid survivor means nothing is deleted. Do not put the working SQLite in a
 managed backup directory. Keep off-device copies and test restoration separately.
+
+Restore inputs are placed in the writable /backups directory. A closed backup
+may retain a WAL-mode header; ordinary SQLite restore reads can need temporary
+WAL/SHM bookkeeping beside it. Copy a known closed standalone archive from a
+read-only medium into the dedicated writable directory before restoring; never
+substitute a raw copy of an actively written database. The original archive bytes
+can be checked with a hash before/after staging. Managed retention verification
+has a separate guarded immutable path and does not require writable backup files.
 
 An interrupted assessment rolls back the entire batch. On restart, `verify`,
 `filter-report`, a fresh manual `filter` and selected export are safe recovery
