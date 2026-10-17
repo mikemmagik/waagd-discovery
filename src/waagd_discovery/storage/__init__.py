@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from waagd_discovery.models import ArticleCandidate, DiscoveryError, FetchResult, Source
 from waagd_discovery.normalization import normalize_url
-from waagd_discovery.storage.migrations import SCHEMA_VERSION, migrate
+from waagd_discovery.storage.migrations import SCHEMA_VERSION, migrate, validate_schema
 
 __all__ = ["SCHEMA_VERSION", "Repository"]
 
@@ -476,6 +476,7 @@ class Repository:
 
 
 def _verify_connection(connection: sqlite3.Connection) -> None:
+    validate_schema(connection)
     integrity = connection.execute("PRAGMA integrity_check").fetchall()
     if len(integrity) != 1 or integrity[0][0] != "ok":
         raise DiscoveryError("database_integrity_failed")
