@@ -120,7 +120,7 @@ def main() -> None:
             "python",
             IMAGE,
             "-c",
-            "import os;[(os.chown(p,10001,10001),os.chmod(p,0o700)) "
+            "import os;[(os.chmod(p,0o700),os.chown(p,10001,10001)) "
             "for p in ('/workspace','/state')]",
         )
         with tempfile.TemporaryDirectory(prefix="waagd-bridge-smoke-") as temporary:
