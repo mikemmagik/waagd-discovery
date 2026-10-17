@@ -1,10 +1,16 @@
 from dataclasses import FrozenInstanceError
-from datetime import datetime
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
-from waagd_discovery.filtering import FilterPolicy, assess, load_policy, select_candidates
+from waagd_discovery.filtering import (
+    FilterPolicy,
+    assess,
+    filter_report,
+    load_policy,
+    select_candidates,
+)
 from waagd_discovery.models import DiscoveryError
 from waagd_discovery.storage import Repository
 
@@ -99,3 +105,24 @@ def test_invalid_reference_and_limit_are_fixed_errors() -> None:
         for invalid in (-1, True, 1.5):
             with pytest.raises(DiscoveryError, match="filter_limit_invalid"):
                 select_candidates(repository, FilterPolicy(), limit=invalid)  # type: ignore[arg-type]
+
+
+def test_reference_timezone_normalizes_and_overflow_is_safe() -> None:
+    with Repository(":memory:") as repository:
+        reference = datetime(2026, 10, 17, 19, tzinfo=timezone(timedelta(hours=7)))
+        summary = assess(repository, FilterPolicy(), reference)
+        assert summary["reference_time"] == datetime(2026, 10, 17, 12, tzinfo=UTC).isoformat()
+        with pytest.raises(DiscoveryError, match="filter_reference_time_invalid"):
+            assess(
+                repository, FilterPolicy(), datetime(1, 1, 1, tzinfo=timezone(timedelta(hours=1)))
+            )
+        for invalid in (-1, True, 2**80):
+            with pytest.raises(DiscoveryError, match="filter_limit_invalid"):
+                filter_report(repository, invalid)
+
+
+def test_excessive_yaml_integer_is_safe(tmp_path: Path) -> None:
+    path = tmp_path / "policy.yaml"
+    path.write_text("filter: {min_description_chars: " + "9" * 5000 + "}", encoding="utf-8")
+    with pytest.raises(DiscoveryError, match="filter_policy_unreadable"):
+        load_policy(path)

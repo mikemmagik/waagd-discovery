@@ -4,6 +4,7 @@ from datetime import timedelta
 
 import pytest
 
+from waagd_discovery import filtering
 from waagd_discovery.filtering import FilterPolicy, assess, filter_report, select_candidates
 from waagd_discovery.models import FetchResult
 from waagd_discovery.storage import Repository
@@ -118,6 +119,20 @@ def test_policy_change_requires_reassessment_and_latest_batch_wins(repository: R
         == "policy_mismatch"
     )
     assert filter_report(repository)["assessment"] == latest
+
+
+def test_changed_engine_requires_reassessment(
+    repository: Repository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(repository, [article()])
+    assess(repository, FilterPolicy(), REFERENCE)
+    monkeypatch.setattr(filtering, "ENGINE_VERSION", "rules-v2")
+    selected, context = select_candidates(repository, FilterPolicy(), REFERENCE)
+    assert selected == []
+    assert context["assessment_status"] == "engine_mismatch"
+    assert context["counts"]["stale"] == 1
+    assess(repository, FilterPolicy(), REFERENCE)
+    assert len(select_candidates(repository, FilterPolicy(), REFERENCE)[0]) == 1
 
 
 @pytest.mark.parametrize("field", ["title", "description", "publisher", "published_at"])

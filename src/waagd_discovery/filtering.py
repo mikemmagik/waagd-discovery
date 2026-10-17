@@ -77,10 +77,12 @@ _PolicyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _m
 
 def load_policy(path: Path) -> FilterPolicy:
     try:
-        if path.stat().st_size > 65_536:
+        with path.open("rb") as stream:
+            raw = stream.read(65_537)
+        if len(raw) > 65_536:
             raise DiscoveryError("filter_policy_too_large")
-        data = yaml.load(path.read_text(encoding="utf-8"), Loader=_PolicyLoader)
-    except (OSError, UnicodeError, yaml.YAMLError, RecursionError) as error:
+        data = yaml.load(raw.decode("utf-8"), Loader=_PolicyLoader)
+    except (OSError, UnicodeError, ValueError, yaml.YAMLError, RecursionError) as error:
         raise DiscoveryError("filter_policy_unreadable") from error
     if not isinstance(data, dict) or set(data) != {"filter"}:
         raise DiscoveryError("filter_policy_invalid")
@@ -101,9 +103,12 @@ def _policy_hash(policy: FilterPolicy) -> str:
 def _reference(as_of: datetime | None) -> datetime:
     if as_of is None:
         return datetime.now(UTC)
-    if not isinstance(as_of, datetime) or as_of.tzinfo is None or as_of.utcoffset() is None:
-        raise DiscoveryError("filter_reference_time_invalid")
-    return as_of.astimezone(UTC)
+    try:
+        if not isinstance(as_of, datetime) or as_of.tzinfo is None or as_of.utcoffset() is None:
+            raise ValueError
+        return as_of.astimezone(UTC)
+    except (ValueError, OverflowError) as error:
+        raise DiscoveryError("filter_reference_time_invalid") from error
 
 
 def _fingerprint(record: FilterRecord) -> str:
@@ -317,7 +322,7 @@ def select_candidates(
 
 
 def filter_report(repository: Repository, limit: int = 100) -> dict[str, object]:
-    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 2**63 - 1:
         raise DiscoveryError("filter_limit_invalid")
     connection = repository.connection
     with transaction(connection, write=False):
