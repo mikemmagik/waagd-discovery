@@ -10,3 +10,8 @@
 5. Ship baseline backup/export and conditional HTTP early to make core ingestion
    safe to operate. These do not enable the future agent integration.
 6. Proprietary source by default; no open-source license is granted implicitly.
+7. Reject HTTPS-to-HTTP redirects. Request identity encoding; accept bounded
+   gzip/deflate and reject other encodings. Pin public DNS addresses while
+   retaining original Host and TLS certificate/SNI checks.
+8. Restoration requires a recognized application schema, not merely a valid
+   SQLite container. Preserve the target if schema validation fails.

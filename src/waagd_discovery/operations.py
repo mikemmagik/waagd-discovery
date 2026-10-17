@@ -45,6 +45,8 @@ def restore(path: Path, backup: Path) -> Path | None:
     try:
         with closing(sqlite3.connect(backup.resolve().as_uri() + "?mode=ro", uri=True)) as source:
             verify_connection(source)
+            if source.execute("PRAGMA user_version").fetchone()[0] < 1:
+                raise DiscoveryError("restore_not_application_backup")
             with closing(sqlite3.connect(staged)) as target:
                 source.backup(target)
         with Repository(staged) as restored:
