@@ -99,6 +99,42 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
             WHEN NEW.url != OLD.url OR NEW.first_seen_at != OLD.first_seen_at
             BEGIN SELECT RAISE(ABORT, 'article_identity_is_immutable'); END""",
     ),
+    (
+        """CREATE TABLE filter_batches (
+            sequence INTEGER PRIMARY KEY,
+            id TEXT NOT NULL UNIQUE,
+            policy_hash TEXT NOT NULL,
+            policy_json TEXT NOT NULL,
+            engine_version TEXT NOT NULL,
+            reference_time TEXT NOT NULL,
+            assessed_at TEXT NOT NULL,
+            articles_evaluated INTEGER NOT NULL CHECK (articles_evaluated >= 0),
+            eligible_count INTEGER NOT NULL CHECK (eligible_count >= 0),
+            deferred_count INTEGER NOT NULL CHECK (deferred_count >= 0),
+            excluded_count INTEGER NOT NULL CHECK (excluded_count >= 0),
+            CHECK (articles_evaluated = eligible_count + deferred_count + excluded_count)
+        )""",
+        """CREATE TABLE filter_decisions (
+            batch_id TEXT NOT NULL REFERENCES filter_batches(id) DEFERRABLE INITIALLY DEFERRED,
+            article_id INTEGER NOT NULL REFERENCES articles(id),
+            input_fingerprint TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('eligible', 'deferred', 'excluded')),
+            reasons_json TEXT NOT NULL,
+            checks_json TEXT NOT NULL,
+            metadata_completeness INTEGER NOT NULL CHECK (metadata_completeness >= 0),
+            PRIMARY KEY (batch_id, article_id)
+        )""",
+        """CREATE INDEX filter_decisions_status
+            ON filter_decisions (batch_id, status, article_id)""",
+        """CREATE TRIGGER filter_batches_no_update BEFORE UPDATE ON filter_batches
+            BEGIN SELECT RAISE(ABORT, 'filter_audit_is_immutable'); END""",
+        """CREATE TRIGGER filter_batches_no_delete BEFORE DELETE ON filter_batches
+            BEGIN SELECT RAISE(ABORT, 'filter_audit_is_immutable'); END""",
+        """CREATE TRIGGER filter_decisions_no_update BEFORE UPDATE ON filter_decisions
+            BEGIN SELECT RAISE(ABORT, 'filter_audit_is_immutable'); END""",
+        """CREATE TRIGGER filter_decisions_no_delete BEFORE DELETE ON filter_decisions
+            BEGIN SELECT RAISE(ABORT, 'filter_audit_is_immutable'); END""",
+    ),
 )
 
 SCHEMA_VERSION = len(MIGRATIONS)
