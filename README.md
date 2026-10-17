@@ -84,7 +84,7 @@ uv run mypy src
 uv run pytest
 python3 scripts/check-secrets.py
 bash scripts/docker-smoke.sh
-sh scripts/scheduler-smoke.sh
+python3 scripts/docker-scheduler-smoke.py
 ```
 
 Offline tests use fixtures and mocked networking. Real source availability is
