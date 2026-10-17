@@ -1,0 +1,5 @@
+# Used only when the scheduler command/profile is explicitly invoked.
+# Default startup never starts this service. No external timer or backlog replay.
+scheduler:
+  interval_seconds: 1800
+  heartbeat_seconds: 15
