@@ -214,6 +214,21 @@ def test_invalid_editor_response_does_not_commit_or_ack(tmp_path):
     assert bridge.acks == 0
 
 
+def test_corrupt_partial_persisted_request_fails_safely_without_regeneration(tmp_path):
+    controller, bridge, _, editor, value = setup(tmp_path)
+    editor.fail_keys.add(value["candidates"][0]["candidate_key"])
+    assert controller.process(NOW)["completed"] == 1
+    saved = rows(controller, "decisions")[0]["candidate_key"]
+    previous_calls = editor.calls.count(saved)
+    with closing(sqlite3.connect(controller.store_path)) as connection:
+        connection.execute("UPDATE decisions SET request='{}' WHERE candidate_key=?", (saved,))
+        connection.commit()
+    with pytest.raises(EditorialError, match="^persisted_result_invalid$"):
+        controller.process(NOW)
+    assert editor.calls.count(saved) == previous_calls
+    assert bridge.acks == 0
+
+
 def test_failed_verification_can_complete_needs_verification(tmp_path):
     controller, bridge, verifier, _, _ = setup(tmp_path)
     verifier.fail = True

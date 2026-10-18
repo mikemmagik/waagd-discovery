@@ -152,18 +152,21 @@ class Controller:
         delivery = envelope["delivery_id"]
         if store.has_decision(key, revision):
             # Revalidate persisted results before treating them as completed.
-            row = store.connection.execute(
-                "SELECT request,result FROM decisions WHERE candidate_key=? AND revision=?",
-                (key, revision),
-            ).fetchone()
-            request = io.decode(row["request"].encode())
-            if (
-                request["candidate"]["candidate_key"] != key
-                or request["candidate"]["url"] != candidate["url"]
-                or request["simulation"] is not self.simulation
-            ):
-                raise EditorialError("stored_decision_identity_mismatch")
-            validate_decision(io.decode(row["result"].encode()), request)
+            try:
+                row = store.connection.execute(
+                    "SELECT request,result FROM decisions WHERE candidate_key=? AND revision=?",
+                    (key, revision),
+                ).fetchone()
+                request = io.decode(row["request"].encode())
+                if (
+                    request["candidate"]["candidate_key"] != key
+                    or request["candidate"]["url"] != candidate["url"]
+                    or request["simulation"] is not self.simulation
+                ):
+                    raise EditorialError("persisted_result_invalid")
+                validate_decision(io.decode(row["result"].encode()), request)
+            except (KeyError, TypeError, io.BridgeError, EditorialError):
+                raise EditorialError("persisted_result_invalid") from None
             return None
         self._fresh(envelope, now)
         verification = store.verification(key, revision)
