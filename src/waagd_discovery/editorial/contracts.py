@@ -115,7 +115,7 @@ def validate_verification(value: Any, candidate_key: str) -> None:
         if not set(support["evidence_ids"]) <= ids:
             raise EditorialError("unknown_support_evidence")
     if value["verification_status"] == "VERIFIED":
-        if not value["claim_support"] or not ids:
+        if not value["claim_support"] or not ids or value["errors"]:
             raise EditorialError("verified_without_support")
         if not any(e["source_kind"] in {"independent", "attestation"} for e in value["evidence"]):
             raise EditorialError("verified_without_independent_evidence")
@@ -124,6 +124,16 @@ def validate_verification(value: Any, candidate_key: str) -> None:
             for s in value["claim_support"]
         ):
             raise EditorialError("verified_without_independent_support")
+        by_id = {e["id"]: e for e in value["evidence"]}
+        for support in value["claim_support"]:
+            cited = [by_id[key] for key in support["evidence_ids"]]
+            if (
+                not any(e["source_kind"] in {"independent", "attestation"} for e in cited)
+                or len({_url(e["url"]) for e in cited}) < 2
+            ):
+                raise EditorialError("claim_without_independent_evidence")
+    if value["evidence"] and value["canonical_url"] not in {e["url"] for e in value["evidence"]}:
+        raise EditorialError("canonical_url_without_evidence")
     if value["verification_status"] == "FAILED" and not value["errors"]:
         raise EditorialError("failed_verification_without_reason")
     if value["verification_status"] == "PARTIAL" and not value["uncertainties"]:
