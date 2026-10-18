@@ -601,7 +601,7 @@ wheels = [
 
 [[package]]
 name = "waagd-discovery"
-version = "0.5.0rc1"
+version = "0.5.0rc2"
 source = { editable = "." }
 dependencies = [
     { name = "defusedxml" },

@@ -1,6 +1,7 @@
 """Independent security probes for untrusted bridge files and JSON decoding."""
 
 import os
+import stat
 
 import pytest
 
@@ -84,6 +85,8 @@ def test_qa_private_state_rejects_shared_directory(tmp_path):
     root = tmp_path.resolve()
     shared = root / "shared"
     shared.mkdir(mode=0o755)
+    shared.chmod(0o755)
+    assert stat.S_IMODE(shared.stat().st_mode) == 0o755
     with pytest.raises(BridgeError, match="private"):
         open_directory(shared, private=True)
 
