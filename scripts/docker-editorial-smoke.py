@@ -26,6 +26,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -54,7 +55,7 @@ def payload(name='main'):
     return json.loads(inbox(name).read_text())
 
 def counts(name):
-    with sqlite3.connect(store_path(name)) as db:
+    with closing(sqlite3.connect(store_path(name))) as db:
         return {table: db.execute('SELECT COUNT(*) FROM ' + table).fetchone()[0]
                 for table in ('decisions', 'verifications', 'attempts')}
 
@@ -162,7 +163,7 @@ def simulate():
     assert bridge().inspect_delivery(payload()['delivery_id'])['status'] == 'pending'
     legacy = controller('v1', delivery='v1', port=bridge('v1', 1), verifier=NeverCalled()).process()
     assert legacy['completed'] == legacy['total'] == 3
-    with sqlite3.connect(store_path('v1')) as db:
+    with closing(sqlite3.connect(store_path('v1'))) as db:
         rows = db.execute('SELECT result FROM verifications').fetchall()
     assert len(rows) == 3 and all('v1_fetch_forbidden' in row[0] for row in rows)
     expired = controller('expired', delivery='expired', verifier=NeverCalled(),
@@ -193,7 +194,7 @@ def persist():
     class PersistBeforeAck:
         def inspect_delivery(self, delivery): return bridge().inspect_delivery(delivery)
         def ack_if_current(self, delivery, expected):
-            with sqlite3.connect(store_path('real')) as db:
+            with closing(sqlite3.connect(store_path('real'))) as db:
                 assert db.execute('SELECT COUNT(*) FROM decisions').fetchone()[0] == 3
                 query = "SELECT COUNT(*) FROM ack_outbox WHERE status='pending'"
                 row = db.execute(query).fetchone()
@@ -230,7 +231,7 @@ def reconcile():
     expected = json.loads((STORE / 'expected.json').read_text())
     controller('real', editor=NeverCalled(), verifier=NeverCalled(), simulation=False,
                allow_ack=True).process(now=datetime.now(UTC) + timedelta(hours=3))
-    with sqlite3.connect(store_path('real')) as db:
+    with closing(sqlite3.connect(store_path('real'))) as db:
         assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
         assert db.execute('PRAGMA user_version').fetchone()[0] == 1
         assert db.execute('SELECT ack_status FROM deliveries WHERE delivery_id=?',
