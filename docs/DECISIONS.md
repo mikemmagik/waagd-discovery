@@ -77,3 +77,10 @@
     initialized marker, ledger and lock together in private backups; rollback of
     this state requires replay-risk review. The ledger caps at 10,000 URL keys and
     stops instead of pruning idempotency history. Sprint 5 needs separate approval.
+26. Patch 0.4.1 makes all five embedded configuration files root-owned, group
+    10001, mode 0440 via explicit Docker COPY flags, with /app/config mode 0755.
+    Host source modes must not determine application readability. UID/GID 10001,
+    read-only runtime and capability restrictions remain unchanged. Root ownership
+    prevents the application from changing file modes even on a writable test root.
+    Build regression uses isolated 0600 source files on both architectures; host
+    bind mounts remain operator-managed and are not changed by image COPY flags.

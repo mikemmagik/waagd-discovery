@@ -1,0 +1,408 @@
+{
+  "status": "PASS",
+  "version": "0.4.1",
+  "source_commit": "263f9cc28542768998f2b7fad2dbe3e20ba3ff4f",
+  "host": "macOS Apple Silicon; AMD64 emulated by Docker Desktop",
+  "architectures": {
+    "arm64": {
+      "config_permissions": {
+        "architecture": "arm64",
+        "image": "waagd-discovery:hotfix-v041-arm64",
+        "image_id": "sha256:2d5f66f5ab4807c1e24c882b3e01bd41b76bda31a6f43708733e0f182fd19038",
+        "restrictions": {
+          "cap_drop": [
+            "ALL"
+          ],
+          "network": "none",
+          "no_new_privileges": true,
+          "read_only": true
+        },
+        "runtime": {
+          "files": {
+            "backup.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "filter.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "handoff.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "scheduler.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "sources.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            }
+          },
+          "gid": 10001,
+          "modification_denied": true,
+          "policy_loading": "PASS",
+          "uid": 10001
+        },
+        "source_config_modes": {
+          "backup.yaml": "0600",
+          "filter.yaml": "0600",
+          "handoff.yaml": "0600",
+          "scheduler.yaml": "0600",
+          "sources.yaml": "0600"
+        },
+        "status": "PASS"
+      },
+      "persistence_backup_restore_smoke": {
+        "status": "PASS",
+        "recreated_container": true,
+        "persistent_sqlite": true,
+        "json_export": true,
+        "verified_backup_restore": true
+      },
+      "bridge_smoke": {
+        "bridge_runtime": {
+          "cpu_max": "100000 100000",
+          "database_mounted": false,
+          "docker_socket_present": false,
+          "effective_capabilities_zero": true,
+          "export_readonly": true,
+          "memory_limit_bytes": 536870912,
+          "no_new_privileges": true,
+          "pids_max": 64,
+          "uid": 10001
+        },
+        "duplicate_without_rewrite": true,
+        "exported_candidates": 25,
+        "image": "waagd-discovery:hotfix-v041-arm64",
+        "image_id": "sha256:2d5f66f5ab4807c1e24c882b3e01bd41b76bda31a6f43708733e0f182fd19038",
+        "next_batch_disjoint": true,
+        "pending_limit": 10,
+        "repeated_ack_idempotent": true,
+        "restart_same_delivery": true,
+        "status": "pass",
+        "wrong_ack_rejected": true
+      },
+      "scheduler_smoke": {
+        "status": "PASS",
+        "image": "waagd-discovery:hotfix-v041-arm64",
+        "elapsed_seconds": 57.549,
+        "memory_peak_bytes": 56152064,
+        "memory_peak_scope": "final_recreated_scheduler_cgroup",
+        "memory_limit_bytes": 536870912,
+        "cpu_limit": 1.0,
+        "sqlite": {
+          "articles": 2,
+          "observations": 50,
+          "runs": 26,
+          "source_runs": 50,
+          "run_interruptions": 1,
+          "success": 24,
+          "running": 0,
+          "interrupted": 2,
+          "eligible": 2,
+          "session": {
+            "consecutive_failures": 0,
+            "heartbeat_at": "2026-10-18T13:02:17.754405+00:00",
+            "last_cycle_at": "2026-10-18T13:02:17.728768+00:00",
+            "last_cycle_finished_at": "2026-10-18T13:02:17.754405+00:00",
+            "last_error": null,
+            "last_result": {
+              "dry_run": false,
+              "filter": {
+                "articles_evaluated": 2,
+                "assessed_at": "2026-10-18T13:02:17.750222+00:00",
+                "counts": {
+                  "deferred": 0,
+                  "eligible": 2,
+                  "excluded": 0
+                },
+                "engine_version": "rules-v1",
+                "policy": {
+                  "future_tolerance_minutes": 15.0,
+                  "max_age_hours": 72.0,
+                  "min_description_chars": 40,
+                  "require_publisher": false
+                },
+                "policy_hash": "67aa6a9341fb0f35e218854e8852eda3bd0d68f055eab91237cc73909915b6da",
+                "reference_time": "2026-10-18T13:02:17.750132+00:00",
+                "run_id": "b8ab8860-a91f-447e-869b-12b905fbd556"
+              },
+              "finished_at": "2026-10-18T13:02:17.748678+00:00",
+              "handoff": {
+                "status": "disabled"
+              },
+              "items_added": 0,
+              "items_existing": 2,
+              "items_failed": 0,
+              "items_received": 2,
+              "items_skipped": 0,
+              "recovered_runs": [],
+              "run_id": "dc7b2f83-d3f7-4d1a-a8a0-11c13bbadcb9",
+              "sources": [
+                {
+                  "error_code": null,
+                  "finished_at": "2026-10-18T13:02:17.740979+00:00",
+                  "items_added": 0,
+                  "items_existing": 1,
+                  "items_failed": 0,
+                  "items_received": 1,
+                  "items_skipped": 0,
+                  "source_id": "first",
+                  "status": "success"
+                },
+                {
+                  "error_code": null,
+                  "finished_at": "2026-10-18T13:02:17.746019+00:00",
+                  "items_added": 0,
+                  "items_existing": 1,
+                  "items_failed": 0,
+                  "items_received": 1,
+                  "items_skipped": 0,
+                  "source_id": "second",
+                  "status": "success"
+                }
+              ],
+              "sources_checked": 2,
+              "sources_failed": 0,
+              "sources_successful": 2,
+              "started_at": "2026-10-18T13:02:17.738645+00:00",
+              "status": "success"
+            },
+            "last_success_at": "2026-10-18T13:02:17.754305+00:00",
+            "next_run_at": "2026-10-18T13:02:19.754405+00:00",
+            "session_id": "634ec405-1999-41eb-8634-eea007b0c32c",
+            "started_at": "2026-10-18T13:01:46.873210+00:00",
+            "status": "waiting"
+          }
+        },
+        "checks": [
+          "cycles",
+          "deduplication",
+          "singleton",
+          "manual_lock",
+          "sigterm",
+          "restart",
+          "docker_sigkill_recovery",
+          "process_sigkill_autorestart",
+          "recovery",
+          "recreate",
+          "health",
+          "hardening",
+          "integrity"
+        ]
+      }
+    },
+    "amd64": {
+      "config_permissions": {
+        "architecture": "amd64",
+        "image": "waagd-discovery:hotfix-v041-amd64",
+        "image_id": "sha256:00d5205ab0475e22afe9acdd325d036f2fddc611a856b8618f254e6f704c186a",
+        "restrictions": {
+          "cap_drop": [
+            "ALL"
+          ],
+          "network": "none",
+          "no_new_privileges": true,
+          "read_only": true
+        },
+        "runtime": {
+          "files": {
+            "backup.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "filter.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "handoff.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "scheduler.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "sources.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            }
+          },
+          "gid": 10001,
+          "modification_denied": true,
+          "policy_loading": "PASS",
+          "uid": 10001
+        },
+        "source_config_modes": {
+          "backup.yaml": "0600",
+          "filter.yaml": "0600",
+          "handoff.yaml": "0600",
+          "scheduler.yaml": "0600",
+          "sources.yaml": "0600"
+        },
+        "status": "PASS"
+      },
+      "persistence_backup_restore_smoke": {
+        "status": "PASS",
+        "recreated_container": true,
+        "persistent_sqlite": true,
+        "json_export": true,
+        "verified_backup_restore": true
+      },
+      "bridge_smoke": {
+        "bridge_runtime": {
+          "cpu_max": "100000 100000",
+          "database_mounted": false,
+          "docker_socket_present": false,
+          "effective_capabilities_zero": true,
+          "export_readonly": true,
+          "memory_limit_bytes": 536870912,
+          "no_new_privileges": true,
+          "pids_max": 64,
+          "uid": 10001
+        },
+        "duplicate_without_rewrite": true,
+        "exported_candidates": 25,
+        "image": "waagd-discovery:hotfix-v041-amd64",
+        "image_id": "sha256:00d5205ab0475e22afe9acdd325d036f2fddc611a856b8618f254e6f704c186a",
+        "next_batch_disjoint": true,
+        "pending_limit": 10,
+        "repeated_ack_idempotent": true,
+        "restart_same_delivery": true,
+        "status": "pass",
+        "wrong_ack_rejected": true
+      },
+      "scheduler_smoke": {
+        "status": "PASS",
+        "image": "waagd-discovery:hotfix-v041-amd64",
+        "elapsed_seconds": 70.766,
+        "memory_peak_bytes": 91762688,
+        "memory_peak_scope": "final_recreated_scheduler_cgroup",
+        "memory_limit_bytes": 536870912,
+        "cpu_limit": 1.0,
+        "sqlite": {
+          "articles": 2,
+          "observations": 52,
+          "runs": 27,
+          "source_runs": 52,
+          "run_interruptions": 1,
+          "success": 25,
+          "running": 0,
+          "interrupted": 2,
+          "eligible": 2,
+          "session": {
+            "consecutive_failures": 0,
+            "heartbeat_at": "2026-10-18T13:03:09.001504+00:00",
+            "last_cycle_at": "2026-10-18T13:03:07.971490+00:00",
+            "last_cycle_finished_at": "2026-10-18T13:03:07.997734+00:00",
+            "last_error": null,
+            "last_result": {
+              "dry_run": false,
+              "filter": {
+                "articles_evaluated": 2,
+                "assessed_at": "2026-10-18T13:03:07.994562+00:00",
+                "counts": {
+                  "deferred": 0,
+                  "eligible": 2,
+                  "excluded": 0
+                },
+                "engine_version": "rules-v1",
+                "policy": {
+                  "future_tolerance_minutes": 15.0,
+                  "max_age_hours": 72.0,
+                  "min_description_chars": 40,
+                  "require_publisher": false
+                },
+                "policy_hash": "67aa6a9341fb0f35e218854e8852eda3bd0d68f055eab91237cc73909915b6da",
+                "reference_time": "2026-10-18T13:03:07.994438+00:00",
+                "run_id": "0983ad72-eda2-450c-a3ea-540a37eca34e"
+              },
+              "finished_at": "2026-10-18T13:03:07.993157+00:00",
+              "handoff": {
+                "status": "disabled"
+              },
+              "items_added": 0,
+              "items_existing": 2,
+              "items_failed": 0,
+              "items_received": 2,
+              "items_skipped": 0,
+              "recovered_runs": [],
+              "run_id": "96cdc98b-51cb-4bc0-ba74-6be3e4d64429",
+              "sources": [
+                {
+                  "error_code": null,
+                  "finished_at": "2026-10-18T13:03:07.987611+00:00",
+                  "items_added": 0,
+                  "items_existing": 1,
+                  "items_failed": 0,
+                  "items_received": 1,
+                  "items_skipped": 0,
+                  "source_id": "first",
+                  "status": "success"
+                },
+                {
+                  "error_code": null,
+                  "finished_at": "2026-10-18T13:03:07.990863+00:00",
+                  "items_added": 0,
+                  "items_existing": 1,
+                  "items_failed": 0,
+                  "items_received": 1,
+                  "items_skipped": 0,
+                  "source_id": "second",
+                  "status": "success"
+                }
+              ],
+              "sources_checked": 2,
+              "sources_failed": 0,
+              "sources_successful": 2,
+              "started_at": "2026-10-18T13:03:07.982556+00:00",
+              "status": "success"
+            },
+            "last_success_at": "2026-10-18T13:03:07.997601+00:00",
+            "next_run_at": "2026-10-18T13:03:09.997734+00:00",
+            "session_id": "e03686b6-1db9-4bee-b339-15eed75137f8",
+            "started_at": "2026-10-18T13:02:37.277902+00:00",
+            "status": "waiting"
+          }
+        },
+        "checks": [
+          "cycles",
+          "deduplication",
+          "singleton",
+          "manual_lock",
+          "sigterm",
+          "restart",
+          "docker_sigkill_recovery",
+          "process_sigkill_autorestart",
+          "recovery",
+          "recreate",
+          "health",
+          "hardening",
+          "integrity"
+        ]
+      }
+    }
+  }
+}

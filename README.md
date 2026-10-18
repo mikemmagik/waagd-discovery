@@ -111,3 +111,7 @@ Sprint 4 interface: [contracts](docs/SPRINT_4_CONTRACTS.md), [integration](docs/
 Acceptance: [Sprint report](docs/SPRINT_4_REPORT.md), [independent QA](docs/SPRINT_4_QA_REVIEW.md),
 [Docker matrix](docs/SPRINT_4_DOCKER.json), [native bridge](docs/SPRINT_4_NATIVE_HOST.json),
 [v0.3 compatibility](docs/SPRINT_4_COMPATIBILITY.json).
+
+v0.4.1 packaging hotfix: [patch report](docs/PATCH_0_4_1_REPORT.md),
+[independent QA](docs/PATCH_0_4_1_QA_REVIEW.md),
+[operator update from v0.4.0](docs/PATCH_0_4_1_UPDATE.md).
