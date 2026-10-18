@@ -131,3 +131,18 @@ def test_store_transaction_rolls_back_partial_delivery_write(tmp_path: Path) -> 
             store.register(malformed, NOW.isoformat())
         assert store.status()["deliveries"] == 1
         assert store.status()["candidates"] == 1
+
+
+def test_negative_schema_version_is_corruption_and_never_repaired_automatically(
+    tmp_path: Path,
+) -> None:
+    path = store_path(tmp_path)
+    with EditorialStore(path, simulation=True) as store:
+        store.register(inbox(), NOW.isoformat())
+    with closing(sqlite3.connect(path)) as connection, connection:
+        connection.execute("PRAGMA user_version=-1")
+    before = path.read_bytes()
+    with pytest.raises(EditorialError, match="editorial_schema_invalid"):
+        with EditorialStore(path, simulation=True):
+            pytest.fail("accepted unknown negative schema version")
+    assert path.read_bytes() == before
