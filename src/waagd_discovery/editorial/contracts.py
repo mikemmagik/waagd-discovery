@@ -56,6 +56,8 @@ def digest(value: dict[str, Any]) -> str:
 
 def _validate(value: Any, filename: str) -> None:
     try:
+        if not isinstance(value, dict) or type(value.get("schema_version")) is not int:
+            raise EditorialError("editorial_schema_invalid")
         if len(encode(value)) > 128 * 1024:
             raise EditorialError("editorial_payload_too_large")
         schema = json.loads(files("waagd_discovery").joinpath(filename).read_text())
@@ -180,6 +182,8 @@ def validate_decision(value: Any, request: dict[str, Any]) -> None:
     _date(value["created_at"])
     if value["date"] is not None:
         _date(value["date"])
+        if value["date"] not in {verification["publication_date"], verification["event_date"]}:
+            raise EditorialError("decision_invents_date")
     ids = {item["id"] for item in verification["evidence"]}
     if not set(value["verification_evidence"]) <= ids:
         raise EditorialError("decision_invents_evidence")
@@ -187,6 +191,11 @@ def validate_decision(value: Any, request: dict[str, Any]) -> None:
     if not set(value["checked_sources"]) <= allowed_urls:
         raise EditorialError("decision_invents_source")
     if value["decision"] == "READY_FOR_REVIEW":
+        needed_evidence = {
+            identifier
+            for support in verification["claim_support"]
+            for identifier in support["evidence_ids"]
+        }
         if (
             verification["verification_status"] != "VERIFIED"
             or not value["verification_evidence"]
@@ -198,10 +207,15 @@ def validate_decision(value: Any, request: dict[str, Any]) -> None:
             or not 80 <= len(value["article"].split()) <= 150
             or value["unverified_claims"]
             or value["rejection_reason"] is not None
+            or not needed_evidence <= set(value["verification_evidence"])
         ):
             raise EditorialError("ready_without_verified_material")
     elif value["decision"] == "NEEDS_VERIFICATION":
-        if not value["open_questions"] or not value["unverified_claims"]:
+        if (
+            not value["open_questions"]
+            or not value["unverified_claims"]
+            or not value["factual_summary"].strip()
+        ):
             raise EditorialError("needs_verification_without_questions")
         if value["rejection_reason"] is not None:
             raise EditorialError("nonrejected_with_rejection_reason")
