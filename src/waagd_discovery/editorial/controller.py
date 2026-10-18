@@ -80,6 +80,22 @@ class Controller:
             protected_roots=self.protected_roots,
         )
 
+    def _has_state(self) -> bool:
+        try:
+            directory = io.open_directory(self.store_path.parent, private=True)
+        except FileNotFoundError:
+            return False
+        try:
+            for suffix in ("", ".lock", ".initialized.json"):
+                try:
+                    os.stat(self.store_path.name + suffix, dir_fd=directory, follow_symlinks=False)
+                    return True
+                except FileNotFoundError:
+                    pass
+            return False
+        finally:
+            os.close(directory)
+
     def _read(self) -> dict[str, Any]:
         directory = io.open_directory(self.inbox.parent, private=True)
         try:
@@ -190,7 +206,11 @@ class Controller:
         expected = {c["candidate_key"]: c for c in envelope["candidates"]}
         delivery = envelope["delivery_id"]
         required = store.required(delivery)
-        if not expected or {key for key, _ in required} != set(expected):
+        if (
+            not expected
+            or len(expected) != len(envelope["candidates"])
+            or {key for key, _ in required} != set(expected)
+        ):
             raise EditorialError("ack_results_incomplete")
         record = store.connection.execute(
             "SELECT payload_digest,payload FROM deliveries WHERE delivery_id=?", (delivery,)
@@ -199,6 +219,15 @@ class Controller:
             record is None
             or record["payload_digest"] != digest(envelope)
             or digest(io.decode(record["payload"].encode())) != digest(envelope)
+        ):
+            raise EditorialError("ack_results_incomplete")
+        outbox = store.connection.execute(
+            "SELECT payload_digest,status FROM ack_outbox WHERE delivery_id=?", (delivery,)
+        ).fetchone()
+        if (
+            outbox is None
+            or outbox["payload_digest"] != digest(envelope)
+            or outbox["status"] not in {"pending", "acknowledged"}
         ):
             raise EditorialError("ack_results_incomplete")
         for key, revision in required:
@@ -258,7 +287,12 @@ class Controller:
         attempt = store.start_attempt(delivery, None, "ack", utc(now).isoformat())
         try:
             receipt = self.bridge.ack_if_current(delivery, digest(envelope))
-        except (EditorialError, io.BridgeError, OSError):
+        except (EditorialError, io.BridgeError) as error:
+            store.finish_attempt(attempt, utc(now).isoformat(), "bridge_ack_failed")
+            if str(error) != "bridge_busy":
+                raise EditorialError("bridge_ack_requires_operator") from None
+            return
+        except OSError:
             store.finish_attempt(attempt, utc(now).isoformat(), "bridge_ack_failed")
             return
         if not (
@@ -314,14 +348,14 @@ class Controller:
             envelope = self._read()
         except FileNotFoundError:
             # A persisted outbox can reconcile independently of a removed inbox.
-            if not self.store_path.exists():
+            if not self._has_state():
                 return {"status": "inbox_missing", "simulation": self.simulation}
             with self._store() as store:
                 self._recover(store, now)
                 return {**store.status(), "status": "inbox_missing"}
         if envelope.get("delivery_id") is None and envelope.get("candidates") == []:
             validate_envelope(envelope)
-            if not self.store_path.exists():
+            if not self._has_state():
                 validate_input(envelope, utc(now))
             with self._store() as store:
                 self._recover(store, now)
@@ -330,7 +364,7 @@ class Controller:
             validate_input(envelope, utc(now))
         except EditorialError as error:
             if str(error) == "delivery_expired":
-                if self.store_path.exists():
+                if self._has_state():
                     with self._store() as store:
                         self._recover(store, now)
                         if store.connection.execute(
@@ -354,7 +388,31 @@ class Controller:
                     "simulation": self.simulation,
                 }
             raise
-        self._authority(envelope, now)
+        authority = self._authority(envelope, now)
+        if authority["status"] == "acknowledged":
+            # An authoritative ACK is not proof that this independent store owns
+            # the previous editorial results. Never regenerate a lost history.
+            if not self._has_state():
+                return {
+                    "status": "operator_required",
+                    "error_code": "editorial_history_unavailable",
+                    "delivery_id": envelope["delivery_id"],
+                    "simulation": self.simulation,
+                }
+            with self._store() as store:
+                store.recover_attempts(utc(now).isoformat())
+                try:
+                    self._checked_completion(store, envelope)
+                    if not self.simulation:
+                        store.acknowledged(envelope["delivery_id"], utc(now).isoformat())
+                except (EditorialError, io.BridgeError, KeyError, TypeError):
+                    return {
+                        "status": "operator_required",
+                        "error_code": "editorial_history_unavailable",
+                        "delivery_id": envelope["delivery_id"],
+                        "simulation": self.simulation,
+                    }
+                return self._result(store, envelope["delivery_id"])
         with self._store() as store:
             self._recover(store, now)
             store.register(envelope, utc(now).isoformat())
@@ -392,7 +450,7 @@ class Controller:
             return self._result(store, envelope["delivery_id"])
 
     def status(self) -> dict[str, Any]:
-        if not self.store_path.exists():
+        if not self._has_state():
             return {"status": "uninitialized", "schema_version": 1, "simulation": self.simulation}
         with self._store(readonly=True) as store:
             return store.status()

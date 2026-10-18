@@ -5,7 +5,7 @@ import os
 import sqlite3
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +54,7 @@ def _schema(connection: sqlite3.Connection) -> list[tuple[Any, ...]]:
 
 
 def _expected_schema() -> list[tuple[Any, ...]]:
-    with sqlite3.connect(":memory:") as reference:
+    with closing(sqlite3.connect(":memory:")) as reference:
         for statement in _SCHEMA:
             reference.execute(statement)
         return _schema(reference)

@@ -6,6 +6,7 @@ import json
 import sqlite3
 import stat
 import uuid
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -155,7 +156,7 @@ def setup(tmp_path, *, count=2, version=2, simulation=False, allow_ack=True):
 
 
 def rows(controller, table):
-    with sqlite3.connect(controller.store_path) as connection:
+    with closing(sqlite3.connect(controller.store_path)) as connection:
         connection.row_factory = sqlite3.Row
         return [dict(row) for row in connection.execute(f"SELECT * FROM {table}")]
 
@@ -326,6 +327,7 @@ def test_delivery_same_id_changed_payload_is_rejected(tmp_path):
     changed["candidates"][0]["title"] = "A changed title"
     controller.inbox.write_bytes(io.encode(changed))
     bridge.value = changed
+    bridge.acknowledged = False
     with pytest.raises(EditorialError, match="delivery_payload_changed"):
         controller.process(NOW)
 
@@ -430,8 +432,9 @@ def test_store_rejects_newer_schema_without_reset(tmp_path, version):
     path = tmp_path.resolve() / "private" / "editorial.sqlite3"
     with EditorialStore(path, simulation=True):
         pass
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         connection.execute(f"PRAGMA user_version={version}")
+        connection.commit()
     before = path.read_bytes()
     with pytest.raises(EditorialError, match="editorial_schema_newer"):
         with EditorialStore(path, simulation=True):
