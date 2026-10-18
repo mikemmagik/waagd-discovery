@@ -351,3 +351,27 @@ def test_corrupt_partial_persisted_request_fails_with_safe_editorial_error(tmp_p
         instance.process(NOW)
     assert port.ack_calls == 0
     assert bridge.status(NOW)["processed"] == 0
+
+
+@pytest.mark.parametrize("payload", ["{}", "{", "[]"])
+def test_corrupt_outbox_delivery_manifest_requires_operator_without_ack(
+    tmp_path: Path, payload: str
+) -> None:
+    bridge = seed_bridge(tmp_path)
+    envelope = read_inbox(bridge)
+    store = tmp_path.resolve() / "editorial/store.sqlite3"
+    instance, port = controller(bridge, store, allow_ack=False)
+    assert instance.process(NOW)["status"] == "results_saved"
+    with closing(sqlite3.connect(store)) as connection, connection:
+        connection.execute("UPDATE deliveries SET payload=?", (payload,))
+    instance, port = controller(bridge, store)
+    with pytest.raises(EditorialError, match="persisted_delivery_invalid"):
+        instance.process(NOW)
+    assert port.ack_calls == 0
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
+    with closing(sqlite3.connect(store)) as connection:
+        assert connection.execute("SELECT status,error_code FROM deliveries").fetchone() == (
+            "operator_required",
+            "persisted_delivery_invalid",
+        )
+        assert connection.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] == 1
