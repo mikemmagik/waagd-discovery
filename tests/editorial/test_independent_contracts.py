@@ -151,10 +151,10 @@ def test_agent_decision_cannot_add_capabilities(field: str) -> None:
 
 @pytest.mark.parametrize("status", ["PARTIAL", "FAILED"])
 def test_http_success_and_failed_lookup_cannot_become_ready(status: str) -> None:
+    output = decision("READY_FOR_REVIEW")
+    output["verification_evidence"] = ["a" * 64]
     with pytest.raises(EditorialError, match="ready_without_verified_material"):
-        validate_decision(
-            decision("READY_FOR_REVIEW"), make_request(candidate(), verification(status))
-        )
+        validate_decision(output, make_request(candidate(), verification(status)))
 
 
 def test_verified_fixture_can_support_human_review_without_publication() -> None:
