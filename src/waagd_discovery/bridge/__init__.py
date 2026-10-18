@@ -47,8 +47,9 @@ def _validate_receipts(value: Any, acknowledged: list[str], dismissed: list[str]
             }
             or receipt["delivery_id"] != identifier
             or receipt["status"] not in {"acknowledged", "dismissed"}
+            or type(receipt["state_version"]) is not int
             or receipt["state_version"] != 2
-            or isinstance(receipt["schema_version"], bool)
+            or type(receipt["schema_version"]) is not int
             or receipt["schema_version"] not in {1, 2}
             or not isinstance(receipt["payload_digest"], str)
             or len(receipt["payload_digest"]) != 64
@@ -101,7 +102,7 @@ def _validate_state(value: Any) -> dict[str, Any]:
                 "checksum",
             }
             | ({"receipts"} if version == 2 else set())
-            or isinstance(version, bool)
+            or type(version) is not int
             or version not in {1, 2}
             or value["checksum"] != _checksum(value)
         ):
@@ -211,7 +212,7 @@ class Bridge:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
             raise BridgeError("limit_must_be_1_to_50")
         self.limit = limit
-        if isinstance(schema_version, bool) or schema_version not in {1, 2}:
+        if type(schema_version) is not int or schema_version not in {1, 2}:
             raise BridgeError("unsupported_envelope_version")
         self.schema_version = schema_version
 

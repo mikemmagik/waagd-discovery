@@ -152,7 +152,7 @@ def test_migrated_fresh_store_can_conditionally_ack_v1_without_fetching(tmp_path
     )
 
 
-@pytest.mark.parametrize("version", [0, 3, True, "2"])
+@pytest.mark.parametrize("version", [0, 3, True, "2", 2.0, [], {}])
 def test_unsupported_versions(version, tmp_path, now):
     with pytest.raises(BridgeError):
         make_bridge(tmp_path, now, version)

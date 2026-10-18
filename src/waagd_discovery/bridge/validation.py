@@ -172,7 +172,7 @@ def envelope(
     *,
     schema_version: int = 1,
 ) -> dict[str, Any]:
-    if isinstance(schema_version, bool) or schema_version not in {1, 2}:
+    if type(schema_version) is not int or schema_version not in {1, 2}:
         raise BridgeError("unsupported_envelope_version")
     result = {
         "bridge_schema_version": schema_version,
