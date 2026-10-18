@@ -1,0 +1,175 @@
+{
+  "date": "2026-10-18",
+  "scope": "Independent QA; local disposable development containers only. No target Mac/OpenClaw access.",
+  "negative_control": {
+    "description": "Derived from accepted v0.4.0 native image with original COPY semantics; all five copied source YAML files were 0600. This is a targeted faithful permission reproduction, not a complete rebuild of the old release.",
+    "base_image": "sha256:5f57e4cb584f35eaaa0561c7fecb9e3e2a0b5f49aa23c3e3323c83a7b78f8052",
+    "expected_defect_reproduced": true,
+    "runtime": {
+      "uid": 10001,
+      "gid": 10001,
+      "files": {
+        "backup.yaml": {
+          "uid": 0,
+          "gid": 0,
+          "mode": "0o600",
+          "readable": false
+        },
+        "filter.yaml": {
+          "uid": 0,
+          "gid": 0,
+          "mode": "0o600",
+          "readable": false
+        },
+        "handoff.yaml": {
+          "uid": 0,
+          "gid": 0,
+          "mode": "0o600",
+          "readable": false
+        },
+        "scheduler.yaml": {
+          "uid": 0,
+          "gid": 0,
+          "mode": "0o600",
+          "readable": false
+        },
+        "sources.yaml": {
+          "uid": 0,
+          "gid": 0,
+          "mode": "0o600",
+          "readable": false
+        }
+      }
+    }
+  },
+  "fixed_images": [
+    {
+      "architecture": "arm64",
+      "image": "waagd-discovery:hotfix-v041-arm64",
+      "image_id": "sha256:2d5f66f5ab4807c1e24c882b3e01bd41b76bda31a6f43708733e0f182fd19038",
+      "restrictions": {
+        "cap_drop": [
+          "ALL"
+        ],
+        "network": "none",
+        "no_new_privileges": true,
+        "read_only": true
+      },
+      "runtime": {
+        "files": {
+          "backup.yaml": {
+            "gid": 10001,
+            "loaded": true,
+            "mode": "0440",
+            "uid": 0
+          },
+          "filter.yaml": {
+            "gid": 10001,
+            "loaded": true,
+            "mode": "0440",
+            "uid": 0
+          },
+          "handoff.yaml": {
+            "gid": 10001,
+            "loaded": true,
+            "mode": "0440",
+            "uid": 0
+          },
+          "scheduler.yaml": {
+            "gid": 10001,
+            "loaded": true,
+            "mode": "0440",
+            "uid": 0
+          },
+          "sources.yaml": {
+            "gid": 10001,
+            "loaded": true,
+            "mode": "0440",
+            "uid": 0
+          }
+        },
+        "gid": 10001,
+        "modification_denied": true,
+        "policy_loading": "PASS",
+        "uid": 10001
+      },
+      "source_config_modes": {
+        "backup.yaml": "0600",
+        "filter.yaml": "0600",
+        "handoff.yaml": "0600",
+        "scheduler.yaml": "0600",
+        "sources.yaml": "0600"
+      },
+      "status": "PASS"
+    },
+    {
+      "architecture": "amd64",
+      "image": "waagd-discovery:hotfix-v041-amd64",
+      "image_id": "sha256:00d5205ab0475e22afe9acdd325d036f2fddc611a856b8618f254e6f704c186a",
+      "restrictions": {
+        "cap_drop": [
+          "ALL"
+        ],
+        "network": "none",
+        "no_new_privileges": true,
+        "read_only": true
+      },
+      "runtime": {
+        "files": {
+          "backup.yaml": {
+            "gid": 10001,
+            "loaded": true,
+            "mode": "0440",
+            "uid": 0
+          },
+          "filter.yaml": {
+            "gid": 10001,
+            "loaded": true,
+            "mode": "0440",
+            "uid": 0
+          },
+          "handoff.yaml": {
+            "gid": 10001,
+            "loaded": true,
+            "mode": "0440",
+            "uid": 0
+          },
+          "scheduler.yaml": {
+            "gid": 10001,
+            "loaded": true,
+            "mode": "0440",
+            "uid": 0
+          },
+          "sources.yaml": {
+            "gid": 10001,
+            "loaded": true,
+            "mode": "0440",
+            "uid": 0
+          }
+        },
+        "gid": 10001,
+        "modification_denied": true,
+        "policy_loading": "PASS",
+        "uid": 10001
+      },
+      "source_config_modes": {
+        "backup.yaml": "0600",
+        "filter.yaml": "0600",
+        "handoff.yaml": "0600",
+        "scheduler.yaml": "0600",
+        "sources.yaml": "0600"
+      },
+      "status": "PASS"
+    }
+  ],
+  "unit_integration_security": {
+    "tests_passed": 698,
+    "coverage_percent": 94.07,
+    "statements": 2683,
+    "missed": 159,
+    "elapsed_seconds": 10.04,
+    "ruff": "PASS (73 Python files)",
+    "format": "PASS",
+    "mypy": "PASS (27 production source files)"
+  }
+}
