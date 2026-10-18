@@ -110,6 +110,19 @@ legacy test, all feature-owned tests and 129 independent QA probes. The final
 release-branch CI and Docker evidence remain separately recorded in the Sprint
 Report; they must match the final RC runtime sources.
 
+QA also independently executed the final native ARM64 editorial Docker harness,
+reusing the image built from runtime sources identical to reviewed `e54d35d`:
+`sha256:b3ca41178ea1f17fc0adc7184736bfc7868d9af90e5e6d0d2be3928ad06b8557`.
+All five phases passed in **5.496 seconds**, including real synthetic Discovery
+auto-export, v1 no-fetch, defaults/dry-run, protected/expired rejection, saved
+results before ACK and abrupt post-ACK response loss reconciled after expiry.
+Observed UID/GID 10001, read-only root/export, no capabilities, no-new-privileges,
+network none, no Discovery mount or Docker socket in editorial phases; 512 MiB,
+one CPU and 64 PID limits held. Largest recorded phase cgroup peak was 53,182,464
+bytes. This is a per-phase container measurement, not whole-host or load capacity.
+Machine evidence: [SPRINT_5_QA_DOCKER.json](SPRINT_5_QA_DOCKER.json). The full
+AMD64/ARM64 five-harness matrix remains a separate release gate in the Sprint Report.
+
 ## Limits of approval
 
 The real verifier conservatively retrieves evidence and never creates a VERIFIED
