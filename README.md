@@ -87,6 +87,11 @@ on a separate branch; it does not update the working Mac. See
 [Sprint 5 report](docs/SPRINT_5_REPORT.md) and
 [independent QA](docs/SPRINT_5_QA_REVIEW.md).
 
+v0.5.0-rc.2 corrects a macOS `umask 077` assumption in one Bridge security test;
+runtime Bridge behavior and contracts are unchanged. See the
+[rc.2 patch report](docs/PATCH_0_5_0_RC2_REPORT.md) and
+[independent QA](docs/PATCH_0_5_0_RC2_QA_REVIEW.md).
+
 ## Development
 
 ```sh
