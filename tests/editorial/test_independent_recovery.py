@@ -336,3 +336,18 @@ def test_atomic_bridge_expiry_rejection_immediately_requires_operator(tmp_path: 
     assert result["completed"] == result["total"] == 1
     assert port.ack_calls == 1
     assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
+
+
+def test_corrupt_partial_persisted_request_fails_with_safe_editorial_error(tmp_path: Path) -> None:
+    bridge = seed_bridge(tmp_path)
+    store = tmp_path.resolve() / "editorial/store.sqlite3"
+    instance, port = controller(bridge, store, allow_ack=False)
+    assert instance.process(NOW)["status"] == "results_saved"
+    with closing(sqlite3.connect(store)) as connection, connection:
+        connection.execute("DELETE FROM ack_outbox")
+        connection.execute("UPDATE decisions SET request='{}'")
+    instance, port = controller(bridge, store)
+    with pytest.raises(EditorialError):
+        instance.process(NOW)
+    assert port.ack_calls == 0
+    assert bridge.status(NOW)["processed"] == 0
