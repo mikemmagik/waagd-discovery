@@ -44,6 +44,26 @@ def _failed(candidate: dict[str, Any], code: str) -> dict[str, Any]:
     }
 
 
+def _stored_envelope(raw: str) -> dict[str, Any]:
+    """Private SQLite JSON still needs semantic validation after corruption."""
+    try:
+        if not isinstance(raw, str):
+            raise EditorialError("persisted_delivery_invalid")
+        value = io.decode(raw.encode())
+        validate_envelope(value)
+        keys = [item["candidate_key"] for item in value["candidates"]]
+        if (
+            not value["delivery_id"]
+            or value["delivery_id"] in PROTECTED_DELIVERIES
+            or not keys
+            or len(set(keys)) != len(keys)
+        ):
+            raise EditorialError("persisted_delivery_invalid")
+        return value  # type: ignore[no-any-return]
+    except (EditorialError, io.BridgeError, KeyError, TypeError, ValueError):
+        raise EditorialError("persisted_delivery_invalid") from None
+
+
 class Controller:
     def __init__(
         self,
@@ -221,7 +241,7 @@ class Controller:
         if (
             record is None
             or record["payload_digest"] != digest(envelope)
-            or digest(io.decode(record["payload"].encode())) != digest(envelope)
+            or digest(_stored_envelope(record["payload"])) != digest(envelope)
         ):
             raise EditorialError("ack_results_incomplete")
         outbox = store.connection.execute(
@@ -315,11 +335,23 @@ class Controller:
         if not self.allow_ack or self.simulation:
             return
         rows = store.connection.execute(
-            "SELECT d.payload FROM ack_outbox a JOIN deliveries d ON d.delivery_id=a.delivery_id "
+            "SELECT d.delivery_id,d.payload,d.payload_digest FROM ack_outbox a "
+            "JOIN deliveries d ON d.delivery_id=a.delivery_id "
             "WHERE a.status='pending' ORDER BY a.created_at,d.delivery_id"
         ).fetchall()
         for row in rows:
-            envelope = io.decode(row[0].encode())
+            try:
+                envelope = _stored_envelope(row["payload"])
+                if (
+                    envelope["delivery_id"] != row["delivery_id"]
+                    or digest(envelope) != row["payload_digest"]
+                ):
+                    raise EditorialError("persisted_delivery_invalid")
+            except EditorialError:
+                store.mark_delivery(
+                    row["delivery_id"], "operator_required", "persisted_delivery_invalid"
+                )
+                raise
             # Payloads were validated at admission and are private durable state.
             # Expired envelopes may ONLY reconcile a matching already-ACKed receipt.
             try:
@@ -471,7 +503,7 @@ class Controller:
             ).fetchone()
             if context is None:
                 raise EditorialError("candidate_not_processed")
-            envelope = io.decode(context[0].encode())
+            envelope = _stored_envelope(context[0])
             if envelope["delivery_id"] in PROTECTED_DELIVERIES:
                 raise EditorialError("protected_delivery")
             result = store.reconsider(candidate_key, utc(now).isoformat())

@@ -229,6 +229,23 @@ def test_corrupt_partial_persisted_request_fails_safely_without_regeneration(tmp
     assert bridge.acks == 0
 
 
+@pytest.mark.parametrize("bad", ["{}", "{", "[]"])
+def test_corrupt_private_delivery_payload_is_safe_operator_error(tmp_path, bad):
+    controller, bridge, _, editor, _ = setup(tmp_path, allow_ack=False)
+    assert controller.process(NOW)["completed"] == 2
+    with closing(sqlite3.connect(controller.store_path)) as connection:
+        connection.execute("UPDATE deliveries SET payload=?", (bad,))
+        connection.commit()
+    controller.allow_ack = True
+    with pytest.raises(EditorialError, match="^persisted_delivery_invalid$"):
+        controller.process(NOW)
+    assert bridge.acks == 0
+    assert len(editor.calls) == 2
+    delivery = rows(controller, "deliveries")[0]
+    assert delivery["status"] == "operator_required"
+    assert delivery["error_code"] == "persisted_delivery_invalid"
+
+
 def test_failed_verification_can_complete_needs_verification(tmp_path):
     controller, bridge, verifier, _, _ = setup(tmp_path)
     verifier.fail = True
