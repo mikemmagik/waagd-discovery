@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mikemmagik/waagd-discovery/schemas/verification-result-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_key",
+    "verification_status",
+    "canonical_url",
+    "fetched_at",
+    "http_status",
+    "publisher",
+    "publication_date",
+    "event_date",
+    "evidence",
+    "uncertainties",
+    "errors",
+    "claim_support"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "candidate_key": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "verification_status": {
+      "enum": [
+        "VERIFIED",
+        "PARTIAL",
+        "FAILED"
+      ]
+    },
+    "canonical_url": {
+      "type": "string",
+      "format": "uri",
+      "maxLength": 2048,
+      "pattern": "^https?://"
+    },
+    "fetched_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "http_status": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 100,
+      "maximum": 599
+    },
+    "publisher": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 150
+    },
+    "publication_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "event_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "url",
+          "retrieved_at",
+          "sha256",
+          "excerpt",
+          "source_kind"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048,
+            "pattern": "^https?://"
+          },
+          "retrieved_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "excerpt": {
+            "type": "string",
+            "maxLength": 8000
+          },
+          "source_kind": {
+            "enum": [
+              "article",
+              "independent",
+              "attestation"
+            ]
+          }
+        }
+      }
+    },
+    "uncertainties": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "string",
+        "maxLength": 1000
+      }
+    },
+    "errors": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]{0,79}$"
+      }
+    },
+    "claim_support": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "claim",
+          "evidence_ids",
+          "independently_confirmed"
+        ],
+        "properties": {
+          "claim": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "evidence_ids": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "independently_confirmed": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

@@ -46,3 +46,11 @@ and operator-owned. Development uses fake workspaces; never access or alter any
 real agent/workspace/gateway. Lead owns auto-export, bridge specialist owns host
 bridge, infrastructure owns Docker/docs, QA reviews independently before merge.
 No LLM/Telegram/publication/production or Sprint 5 work is authorized.
+
+Sprint 5 architecture is now explicitly approved by the user. Development is
+authorized only on sprint5/editorial-processing and specialist worktrees, according
+to docs/SPRINT_5_CONTRACTS.md. Controller, independent Source Verifier, Editorial
+Store, mock-only agent adapter and versioned Bridge extension are in scope. No
+deployment, real OpenClaw/LLM calls, publication, production data or existing
+pending delivery mutation. Lead owns contracts/schemas/Bridge; specialists own
+verifier/controller modules; independent QA before integration remains mandatory.
