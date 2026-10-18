@@ -1,0 +1,90 @@
+{
+  "ack_denied": {
+    "elapsed_seconds": 0.116,
+    "exit_code": 1,
+    "response": {
+      "error": "real_editor_unavailable",
+      "status": "error"
+    }
+  },
+  "bridge_state_and_inbox_unchanged": true,
+  "candidate_count": 2,
+  "cli": "waagd-editorial",
+  "default_disabled": {
+    "elapsed_seconds": 0.119,
+    "exit_code": 1,
+    "response": {
+      "error": "editorial_disabled",
+      "status": "error"
+    }
+  },
+  "delivery_schema": 2,
+  "dry_run": {
+    "elapsed_seconds": 0.239,
+    "exit_code": 0,
+    "response": {
+      "ack_status": "disabled_simulation",
+      "completed": 2,
+      "delivery_id": "f8174a3b-c83c-4b91-a952-69e886c7a9ea",
+      "durable_results": false,
+      "error_code": null,
+      "simulation": true,
+      "status": "results_saved",
+      "total": 2
+    }
+  },
+  "editorial_directory_private_mode": "0o700",
+  "editorial_store_private_mode": "0o600",
+  "first_mock_process": {
+    "elapsed_seconds": 0.239,
+    "exit_code": 0,
+    "response": {
+      "ack_status": "disabled_simulation",
+      "completed": 2,
+      "delivery_id": "f8174a3b-c83c-4b91-a952-69e886c7a9ea",
+      "error_code": null,
+      "simulation": true,
+      "status": "results_saved",
+      "total": 2
+    }
+  },
+  "real_processing_denied": {
+    "elapsed_seconds": 0.111,
+    "exit_code": 1,
+    "response": {
+      "error": "real_editor_unavailable",
+      "status": "error"
+    }
+  },
+  "repeat_mock_process": {
+    "elapsed_seconds": 0.136,
+    "exit_code": 0,
+    "response": {
+      "ack_status": "disabled_simulation",
+      "completed": 2,
+      "delivery_id": "f8174a3b-c83c-4b91-a952-69e886c7a9ea",
+      "error_code": null,
+      "simulation": true,
+      "status": "results_saved",
+      "total": 2
+    }
+  },
+  "scope": "native isolated synthetic Bridge v2 and Editorial; no production Mac/agent/network",
+  "status": "PASS",
+  "status_report": {
+    "elapsed_seconds": 0.132,
+    "exit_code": 0,
+    "response": {
+      "attempts": 4,
+      "candidates": 2,
+      "decisions": 2,
+      "deliveries": 1,
+      "pending_ack": 0,
+      "schema_version": 1,
+      "simulation": true,
+      "status": "initialized",
+      "verifications": 2
+    }
+  },
+  "version": "0.5.0rc1"
+}

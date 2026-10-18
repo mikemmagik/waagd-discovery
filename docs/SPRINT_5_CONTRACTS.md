@@ -115,7 +115,9 @@ protected_roots:tuple[Path,...]=()) exposes process(now=None), status(),
 reconsider(candidate_key, now=None). CLI waagd-editorial explicit dry-run/process/
 status/reconsider; config strict/bounded, all enabled/network/llm/auto_ack/publishing
 false by default. No watch/LaunchAgent/daemon. Reject llm/publishing/auto_ack true
-in this RC; manual fixture ACK needs explicit --allow-ack and non-simulation mode.
+in this RC. CLI rejects non-simulation/--allow-ack while the real adapter is absent;
+fixture ACK is tested only through the injected Python Controller API with
+simulation=False and allow_ack=True against disposable fake Bridge/store roots.
 Dry-run uses synthetic verifier+mock editor, no real network/ACK/OpenClaw, separate
 scratch store marked simulation. Never mix simulation decisions with real results.
 Mock editor runs in separate fixed Python process with JSON stdin/stdout and bounded

@@ -22,6 +22,11 @@ fake workspace tests and operator-only update/integration instructions. The actu
 Intel Mac/OpenClaw deployment is inaccessible; never modify the existing agent.
 No OpenRouter/LLM, Telegram or real editorial processing is authorized.
 
-Sprint 5 (not authorized; stop after Sprint 4): verification, drafts, human review queue, audit/version history. A future
-limited publish service and staging rollout require separate approval. Discovery
+Sprint 5 / v0.5.0-rc.1 — Editorial Processing & Source Verification: explicitly
+authorized after architectural approval, on a separate unmerged branch. Adds a
+mock-only controller/adapter, bounded verifier, separate durable store, Bridge v2
+and conditional receipt-based ACK, adversarial/crash recovery tests and operator
+review instructions. No real LLM, deployment or existing agent changes. See
+SPRINT_5_CONTRACTS.md and EDITORIAL_ARCHITECTURE.md. Stop after the release candidate
+for architectural review; Sprint 6 and publication remain unapproved. Discovery
 collection and publication must always remain distinct capabilities.
