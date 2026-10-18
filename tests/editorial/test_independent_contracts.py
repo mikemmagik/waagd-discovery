@@ -102,7 +102,7 @@ def decision(kind: str = "NEEDS_VERIFICATION") -> dict[str, Any]:
         "unverified_claims": [] if kind == "READY_FOR_REVIEW" else ["The event occurred."],
         "open_questions": [] if kind == "READY_FOR_REVIEW" else ["Is there independent evidence?"],
         "checked_sources": [URL],
-        "verification_evidence": ["a" * 64],
+        "verification_evidence": ["a" * 64, "b" * 64] if kind == "READY_FOR_REVIEW" else ["a" * 64],
         "risks": ["Simulation only."],
         "rejection_reason": "UNVERIFIABLE" if kind == "REJECTED" else None,
         "created_at": NOW.isoformat(),
@@ -267,3 +267,35 @@ def test_ready_article_has_explicit_human_review_length_bounds(count: int) -> No
     output["article"] = " ".join(["word"] * count)
     with pytest.raises(EditorialError):
         validate_decision(output, make_request(candidate(), verification("VERIFIED")))
+
+
+def test_ready_output_cannot_omit_independent_claim_support_citation() -> None:
+    output = decision("READY_FOR_REVIEW")
+    output["verification_evidence"] = ["a" * 64]
+    with pytest.raises(EditorialError):
+        validate_decision(output, make_request(candidate(), verification("VERIFIED")))
+
+
+def test_editor_cannot_invent_event_or_publication_date_from_feed_metadata() -> None:
+    output = decision()
+    output["date"] = NOW.isoformat()
+    with pytest.raises(EditorialError):
+        validate_decision(output, make_request(candidate(), verification()))
+
+
+@pytest.mark.parametrize("version", [1.0, True])
+@pytest.mark.parametrize("boundary", ["verification", "request", "decision"])
+def test_schema_versions_require_integer_type(boundary: str, version: Any) -> None:
+    result = verification()
+    request = make_request(candidate(), result)
+    output = decision()
+    with pytest.raises(EditorialError):
+        if boundary == "verification":
+            result["schema_version"] = version
+            validate_verification(result, KEY)
+        elif boundary == "request":
+            request["schema_version"] = version
+            validate_request(request)
+        else:
+            output["schema_version"] = version
+            validate_decision(output, request)
