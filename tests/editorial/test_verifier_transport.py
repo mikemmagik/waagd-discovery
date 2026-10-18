@@ -312,6 +312,14 @@ def test_http_failure_not_evidence() -> None:
     assert not result["evidence"]
 
 
+def test_invalid_http_status_is_safe_failed_result() -> None:
+    client, _, _ = transport([b"HTTP/1.1 700 Invalid\r\n\r\n"])
+    result = SourceVerifier(client).verify(candidate(), policy_id=VERIFICATION_POLICY)
+    assert result["verification_status"] == "FAILED"
+    assert result["http_status"] is None
+    assert result["errors"] == ["source_status_invalid"]
+
+
 def test_html_plaintext_bound_and_unsupported_encoding() -> None:
     assert (
         article_text(FetchDocument("https://news.example/", 200, b"x" * 20000, "text/plain"))

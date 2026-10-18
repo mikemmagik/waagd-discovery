@@ -305,6 +305,8 @@ class PinnedTransport:
                     )
                     response = connection.getresponse()
                     try:
+                        if not 100 <= response.status <= 599:
+                            raise EditorialError("source_status_invalid")
                         headers = response.getheaders()
                         if sum(len(k) + len(v) for k, v in headers) > 32768:
                             raise EditorialError("source_headers_too_large")
