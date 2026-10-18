@@ -442,7 +442,7 @@ def test_store_never_mixes_simulation_and_real_results(tmp_path):
             pass
 
 
-@pytest.mark.parametrize("version", [2, 99])
+@pytest.mark.parametrize("version", [-1, 2, 99])
 def test_store_rejects_newer_schema_without_reset(tmp_path, version):
     path = tmp_path.resolve() / "private" / "editorial.sqlite3"
     with EditorialStore(path, simulation=True):
@@ -451,7 +451,8 @@ def test_store_rejects_newer_schema_without_reset(tmp_path, version):
         connection.execute(f"PRAGMA user_version={version}")
         connection.commit()
     before = path.read_bytes()
-    with pytest.raises(EditorialError, match="editorial_schema_newer"):
+    expected = "editorial_schema_invalid" if version < 0 else "editorial_schema_newer"
+    with pytest.raises(EditorialError, match=expected):
         with EditorialStore(path, simulation=True):
             pass
     assert path.read_bytes() == before

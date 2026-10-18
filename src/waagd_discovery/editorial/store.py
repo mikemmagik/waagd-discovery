@@ -205,6 +205,8 @@ class EditorialStore:
             self.connection.execute("PRAGMA foreign_keys=ON")
             self.connection.execute("PRAGMA synchronous=FULL")
             version = self.connection.execute("PRAGMA user_version").fetchone()[0]
+            if version < 0:
+                raise EditorialError("editorial_schema_invalid")
             if version > SCHEMA_VERSION:
                 raise EditorialError("editorial_schema_newer")
             if version == 0:
