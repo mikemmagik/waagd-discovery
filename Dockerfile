@@ -31,10 +31,12 @@ RUN groupadd --gid 10001 discovery \
     && useradd --uid 10001 --gid discovery --no-create-home --shell /usr/sbin/nologin discovery \
     && mkdir -p /data /exports /backups /app/config \
     && chown discovery:discovery /data /exports /backups \
-    && chmod 0700 /data /exports /backups
+    && chmod 0700 /data /exports /backups \
+    && chown 0:0 /app/config \
+    && chmod 0755 /app/config
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
-COPY config/sources.yaml config/filter.yaml config/backup.yaml config/scheduler.yaml config/handoff.yaml ./config/
+COPY --chown=0:10001 --chmod=0440 config/sources.yaml config/filter.yaml config/backup.yaml config/scheduler.yaml config/handoff.yaml ./config/
 USER 10001:10001
 ENTRYPOINT ["waagd-discovery"]
 CMD ["stats"]
