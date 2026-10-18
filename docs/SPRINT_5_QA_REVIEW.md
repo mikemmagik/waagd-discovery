@@ -22,7 +22,7 @@ retain them; no legacy test was deleted or relaxed for this sprint.
 
 ## Independent adversarial coverage
 
-QA adds 126 tests across five files:
+QA adds 129 tests across five files:
 
 | Area | Tests | Main observations |
 | --- | ---: | --- |
@@ -30,7 +30,7 @@ QA adds 126 tests across five files:
 | Source transport | 44 | Mixed public/private DNS fails before connect; actual peer is checked before HTTP and again after TLS; original hostname and pinned IP are preserved; environment proxies and secondary DNS cannot redirect the request; unsafe redirects, response encodings, ambiguous headers, oversized/truncated responses, stalled DNS and operation deadlines fail safely. |
 | Bridge protocol | 10 | Forged inbox bytes cannot replace the authoritative digest; v1 pending bytes and modification times remain unchanged; inspect is read-only; migration backup/readback and commit failures preserve history; lost ACK remains reconcilable after expiry; dismissal stays distinct from processing. |
 | Editorial Store | 15 | Missing detectable state cannot reset history; future/Discovery/negative schemas fail closed; simulation stores remain separate; symlink, hardlink, FIFO and protected roots fail; status is read-only and failed transactions roll back. |
-| Recovery/controller | 13 | Five genuine SIGKILL boundaries; missing/malformed/wrong-candidate results cannot ACK; protected and expired deliveries stay pending; an acknowledged batch without Editorial history cannot regenerate; atomic ACK expiry immediately requires an operator; malformed partial requests return a safe error. |
+| Recovery/controller | 16 | Five genuine SIGKILL boundaries; missing/malformed/wrong-candidate results cannot ACK; protected and expired deliveries stay pending; an acknowledged batch without Editorial history cannot regenerate; atomic ACK expiry immediately requires an operator; malformed partial requests return a safe error. |
 
 The source address matrix includes loopback, RFC1918, link-local, multicast,
 shared address space, Azure metadata, IPv4-mapped IPv6, NAT64, 6to4, Teredo and
@@ -84,6 +84,9 @@ hardware failure or exactly-once external LLM execution.
   checks.
 - Corrupt partial persisted requests could raise a raw KeyError. Reuse now returns
   the fixed `persisted_result_invalid` error, without regenerating or ACKing.
+- Corrupt durable delivery manifests are validated against their trusted SQL row
+  identity and digest before recovery. Invalid JSON, empty objects and arrays
+  preserve decisions, mark operator_required and never reach ACK.
 - Negative Editorial schema versions now fail closed without modifying bytes.
 - Docker client termination could leave a smoke container running. Tracked unique
   container names are forcibly cleaned before disposable volumes are removed.
@@ -95,16 +98,17 @@ QA explicitly approved these original feature commits before lead integration:
 - Bridge/contracts: `6c5320b`, `328b990`, `ea10b6a`.
 - Source verification: `8076618`, `ac78b04`.
 - Controller/store/adapter/CLI: `4b05436`, `0eb3dbd`, `d569eee`, `322582a`,
-  `7487d8a`, `46b7f80`.
+  `7487d8a`, `46b7f80`, `b61d940`.
 - Docker/editorial CI: `7af220f`, `e321d9c`.
 
 Lead cherry-picks have different hashes. The Sprint Report records the final
-branch SHA and exact CI evidence. The last full checkpoint before the two
-negative-version regressions was **941 passed in 12.60 seconds**, with
-`ResourceWarning` treated as errors, **92.60% coverage**, Ruff lint and formatting
-for 90 Python files, and strict mypy for 35 production files. The final gate
-must include the two additional version regressions; its exact count and timing
-belong to the final Sprint Report.
+branch SHA and exact CI evidence. The final independent implementation gate was
+**949 passed in 11.56 seconds**, with `ResourceWarning` treated as errors and no
+warnings, **92.63% coverage** (4,005 statements; 295 missed), Ruff lint and formatting
+for 90 Python files, and strict mypy for 35 production files. This includes every
+legacy test, all feature-owned tests and 129 independent QA probes. The final
+release-branch CI and Docker evidence remain separately recorded in the Sprint
+Report; they must match the final RC runtime sources.
 
 ## Limits of approval
 
