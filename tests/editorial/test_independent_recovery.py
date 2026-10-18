@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from contextlib import closing
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -180,7 +181,7 @@ def test_sigkill_recovers_durable_results_before_ack(
     assert bridge.inspect_delivery(delivery)["status"] == "acknowledged"
     assert (root / "verifier-calls").read_bytes().splitlines() == [b"call"] * verifier_calls
     assert (root / "editor-calls").read_bytes().splitlines() == [b"call"] * editor_calls
-    with sqlite3.connect(root / "editorial/store.sqlite3") as connection:
+    with closing(sqlite3.connect(root / "editorial/store.sqlite3")) as connection, connection:
         assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
         assert connection.execute("SELECT COUNT(*) FROM decisions").fetchone()[0] == 1
         assert connection.execute("SELECT status FROM ack_outbox").fetchone()[0] == "acknowledged"
@@ -206,7 +207,7 @@ def test_outbox_cannot_ack_missing_or_invalid_saved_results(
     initial, port = controller(bridge, store, allow_ack=False)
     assert initial.process(NOW)["status"] == "results_saved"
     assert port.ack_calls == 0
-    with sqlite3.connect(store) as connection:
+    with closing(sqlite3.connect(store)) as connection, connection:
         if corruption == "missing":
             connection.execute("DELETE FROM decisions")
         elif corruption == "malformed":
@@ -264,3 +265,74 @@ def test_expired_pending_batch_is_operator_required_without_ack_or_dismiss(tmp_p
     assert not store.parent.exists()
     assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
     assert (bridge.state_dir / "ledger.json").read_bytes() == before
+
+
+def test_acknowledged_delivery_without_editorial_history_cannot_be_regenerated(
+    tmp_path: Path,
+) -> None:
+    bridge = seed_bridge(tmp_path)
+    envelope = read_inbox(bridge)
+    from waagd_discovery.editorial.contracts import digest
+
+    bridge.ack_if_current(envelope["delivery_id"], digest(envelope), NOW)
+    # Simulate stale publication after ACK while an entirely new Editorial Store
+    # has no proof of the original decisions. The private receipt is authoritative.
+    (bridge.inbox_dir / "inbox.json").write_text(json.dumps(envelope))
+    store = tmp_path.resolve() / "new-editorial/store.sqlite3"
+
+    class NeverGenerate:
+        def verify(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            pytest.fail("re-fetch after acknowledged delivery without editorial history")
+
+        def evaluate(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            pytest.fail("re-generate after acknowledged delivery without editorial history")
+
+    port = FixturePort(bridge)
+    instance = Controller(
+        bridge.inbox_dir / "inbox.json",
+        store,
+        port,
+        NeverGenerate(),
+        NeverGenerate(),
+        simulation=False,
+        allow_ack=True,
+        protected_roots=(bridge.state_dir, bridge.export.parent),
+    )
+    try:
+        outcome = instance.process(NOW)
+    except EditorialError:
+        pass
+    else:
+        assert outcome["status"] == "operator_required"
+    assert port.ack_calls == 0
+    assert not store.exists()
+
+
+def test_atomic_bridge_expiry_rejection_immediately_requires_operator(tmp_path: Path) -> None:
+    bridge = seed_bridge(tmp_path)
+    envelope = read_inbox(bridge)
+    store = tmp_path.resolve() / "editorial/store.sqlite3"
+
+    class ExpiringPort(FixturePort):
+        def ack_if_current(self, identifier: str, expected_digest: str) -> dict[str, Any]:
+            self.ack_calls += 1
+            # Receipt inspection saw a live delivery; expiry crossed while entering
+            # the Bridge's locked commit, which independently rechecks real time.
+            return self.bridge.ack_if_current(identifier, expected_digest, NOW + timedelta(hours=3))
+
+    port = ExpiringPort(bridge)
+    instance = Controller(
+        bridge.inbox_dir / "inbox.json",
+        store,
+        port,
+        FixtureVerifier(),
+        FixtureEditor(),
+        simulation=False,
+        allow_ack=True,
+        protected_roots=(bridge.state_dir, bridge.export.parent),
+    )
+    result = instance.process(NOW)
+    assert result["status"] == "operator_required"
+    assert result["completed"] == result["total"] == 1
+    assert port.ack_calls == 1
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"

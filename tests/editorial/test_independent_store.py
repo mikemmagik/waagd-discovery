@@ -2,6 +2,7 @@
 
 import os
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +56,7 @@ def test_lost_marker_preserves_existing_database_history(tmp_path: Path) -> None
 @pytest.mark.parametrize("version", [4, 999])
 def test_newer_or_discovery_schema_is_never_reset(tmp_path: Path, version: int) -> None:
     path = store_path(tmp_path)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("CREATE TABLE preserved(value TEXT)")
         connection.execute("INSERT INTO preserved VALUES ('canary')")
         connection.execute(f"PRAGMA user_version={version}")
@@ -63,7 +64,7 @@ def test_newer_or_discovery_schema_is_never_reset(tmp_path: Path, version: int) 
     with pytest.raises(EditorialError, match="editorial_schema_newer"):
         with EditorialStore(path, simulation=True):
             pytest.fail("accepted future schema")
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == version
         assert connection.execute("SELECT * FROM preserved").fetchall() == [("canary",)]
 
