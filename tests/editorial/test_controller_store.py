@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from waagd_discovery.bridge import BridgeError, io
+from waagd_discovery.bridge import Bridge, BridgeError, io
 from waagd_discovery.bridge.validation import envelope
 from waagd_discovery.editorial.adapter import MockEditor
 from waagd_discovery.editorial.cli import load_config, main
@@ -566,3 +566,132 @@ def test_cli_disallows_real_editor_and_ack_without_touching_paths(tmp_path, caps
     assert main([*arguments, "--no-simulation", "process"]) == 1
     assert "real_editor_unavailable" in capsys.readouterr().out
     assert not (root / "private").exists()
+
+
+def real_bridge(tmp_path):
+    """Build a complete synthetic export; no Discovery database or HTTP is used."""
+    root = tmp_path.resolve()
+    clock = datetime.now(UTC)
+    workspace = root / "workspace"
+    workspace.mkdir()
+    exports = root / "exports"
+    exports.mkdir()
+    policy = {
+        "max_age_hours": 72.0,
+        "future_tolerance_minutes": 15.0,
+        "min_description_chars": 40,
+        "require_publisher": False,
+    }
+    policy_hash = hashlib.sha256(
+        json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    selection = {
+        "assessment_run_id": "offline-fixture",
+        "policy_hash": policy_hash,
+        "status": "eligible",
+        "reasons": [],
+        "checks": dict.fromkeys(
+            (
+                "canonical_url",
+                "title",
+                "enabled_source",
+                "description",
+                "publisher",
+                "publication_date",
+                "future_tolerance",
+                "freshness",
+            ),
+            True,
+        ),
+    }
+    candidates = []
+    for index in range(2):
+        item = candidate(index)
+        del item["candidate_key"]
+        item.update(
+            published_at=clock.isoformat(),
+            date_status="valid",
+            first_seen_at=clock.isoformat(),
+            last_seen_at=clock.isoformat(),
+            selection=selection,
+        )
+        candidates.append(item)
+    value = {
+        "schema_version": 2,
+        "generated_at": clock.isoformat(),
+        "selection": {
+            "policy": policy,
+            "policy_hash": policy_hash,
+            "engine_version": "rules-v1",
+            "reference_time": clock.isoformat(),
+            "assessment_run_id": "offline-fixture",
+            "assessed_at": clock.isoformat(),
+            "assessment_status": "current",
+            "counts": {"eligible": 2, "deferred": 0, "excluded": 0, "stale": 0, "unassessed": 0},
+        },
+        "candidates": candidates,
+    }
+    export = exports / "candidates.json"
+    export.write_bytes(io.encode(value))
+    bridge = Bridge(export, workspace, root / "bridge-state", schema_version=2)
+    bridge.sync(clock)
+    return bridge, clock
+
+
+def test_actual_bridge_v2_receipt_ack_and_restart_without_real_llm(tmp_path):
+    bridge, clock = real_bridge(tmp_path)
+    editor = FakeEditor()
+    controller = Controller(
+        bridge.inbox_dir / "inbox.json",
+        tmp_path.resolve() / "editorial" / "store.sqlite3",
+        bridge,
+        SyntheticVerifier(),
+        editor,
+        simulation=False,
+        allow_ack=True,
+        protected_roots=(bridge.export.parent, bridge.state_dir),
+    )
+    value = io.decode(controller.inbox.read_bytes())
+    result = controller.process(clock)
+    assert result["status"] == "acknowledged"
+    assert bridge.inspect_delivery(value["delivery_id"])["status"] == "acknowledged"
+    assert io.decode(controller.inbox.read_bytes())["candidates"] == []
+    assert controller.process(clock)["status"] == "inbox_empty"
+    assert len(editor.calls) == 2
+    assert controller.status()["decisions"] == 2
+
+
+def test_cli_disabled_dry_run_and_enabled_mock_processing(tmp_path, capsys):
+    bridge, _ = real_bridge(tmp_path)
+    root = tmp_path.resolve()
+    arguments = [
+        "--inbox",
+        str(bridge.inbox_dir / "inbox.json"),
+        "--store",
+        str(root / "editorial" / "store.sqlite3"),
+        "--export",
+        str(bridge.export),
+        "--workspace-root",
+        str(bridge.workspace_root),
+        "--state-dir",
+        str(bridge.state_dir),
+    ]
+    before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in bridge.state_dir.iterdir()}
+    assert main([*arguments, "process"]) == 1
+    assert "editorial_disabled" in capsys.readouterr().out
+    assert main([*arguments, "dry-run"]) == 0
+    dry = json.loads(capsys.readouterr().out)
+    assert dry["durable_results"] is False
+    assert dry["simulation"] is True
+    assert not (root / "editorial").exists()
+    config = root / "enabled.yaml"
+    config.write_text("editorial: {enabled: true}\n")
+    assert main([*arguments, "--config", str(config), "process"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["completed"] == 2
+    assert result["ack_status"] == "disabled_simulation"
+    assert main([*arguments, "status"]) == 0
+    assert json.loads(capsys.readouterr().out)["decisions"] == 2
+    assert before == {
+        p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in bridge.state_dir.iterdir()
+    }

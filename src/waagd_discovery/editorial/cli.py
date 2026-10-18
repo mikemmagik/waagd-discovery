@@ -100,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         config = load_config(args.config)
-        if not args.simulation or args.allow_ack:
+        if args.allow_ack or (not args.simulation and args.command != "status"):
             raise EditorialError("real_editor_unavailable")
         if args.inbox != args.workspace_root / "waagd-discovery" / "inbox.json":
             raise EditorialError("inbox_path_mismatch")
@@ -118,14 +118,18 @@ def main(argv: list[str] | None = None) -> int:
                 bridge,
                 SyntheticVerifier(),
                 MockEditor(),
-                simulation=True,
+                simulation=args.simulation,
                 allow_ack=False,
                 protected_roots=protected,
             )
 
         if args.command == "dry-run":
             with tempfile.TemporaryDirectory(prefix="waagd-editorial-dry-") as temporary:
-                result = controller(Path(temporary) / "store" / "editorial.sqlite3").process()
+                # macOS tempfile paths commonly begin with the /var symlink;
+                # canonicalize only this trusted freshly-created scratch root.
+                result = controller(
+                    Path(temporary).resolve() / "store" / "editorial.sqlite3"
+                ).process()
             result["durable_results"] = False
         else:
             if args.command in {"process", "reconsider"} and not config.enabled:
