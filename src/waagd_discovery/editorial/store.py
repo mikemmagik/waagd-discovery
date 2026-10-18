@@ -203,6 +203,7 @@ class EditorialStore:
             self.connection.row_factory = sqlite3.Row
             self.connection.execute("PRAGMA trusted_schema=OFF")
             self.connection.execute("PRAGMA foreign_keys=ON")
+            self.connection.execute("PRAGMA synchronous=FULL")
             version = self.connection.execute("PRAGMA user_version").fetchone()[0]
             if version > SCHEMA_VERSION:
                 raise EditorialError("editorial_schema_newer")
@@ -217,6 +218,8 @@ class EditorialStore:
             if _schema(self.connection) != _expected_schema():
                 raise EditorialError("editorial_schema_invalid")
             if self.connection.execute("PRAGMA quick_check").fetchall()[0][0] != "ok":
+                raise EditorialError("editorial_store_corrupt")
+            if self.connection.execute("PRAGMA foreign_key_check").fetchall():
                 raise EditorialError("editorial_store_corrupt")
             metadata = self.connection.execute("SELECT * FROM metadata").fetchall()
             if len(metadata) != 1 or bool(metadata[0]["simulation"]) != self.simulation:

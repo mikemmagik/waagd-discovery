@@ -202,6 +202,15 @@ class Controller:
         ):
             raise EditorialError("ack_results_incomplete")
         for key, revision in required:
+            candidate_row = store.connection.execute(
+                "SELECT source_url,current_revision FROM candidates WHERE candidate_key=?", (key,)
+            ).fetchone()
+            if (
+                candidate_row is None
+                or candidate_row["source_url"] != expected[key]["url"]
+                or candidate_row["current_revision"] < revision
+            ):
+                raise EditorialError("ack_results_incomplete")
             row = store.connection.execute(
                 "SELECT request,result FROM decisions WHERE candidate_key=? AND revision=?",
                 (key, revision),

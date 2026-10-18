@@ -32,7 +32,7 @@ result = {
     "candidate_key": candidate["candidate_key"],
     "decision": "NEEDS_VERIFICATION",
     "source": candidate["url"],
-    "date": candidate["published_at"],
+    "date": None,
     "factual_summary": "Source metadata was supplied; the reported event remains unverified.",
     "satirical_angle": "",
     "headline": "",
