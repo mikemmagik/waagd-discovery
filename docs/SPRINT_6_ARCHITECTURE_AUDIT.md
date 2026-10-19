@@ -99,3 +99,65 @@ Freeze the data-only boundary and approve PublicationIntent v1 jointly with the
 site contract before changing either producer or consumer. Do not tag a Sprint 6
 release candidate or enable autonomous publication until that contract, independent
 QA approval, and remote CI are complete.
+
+## Final cross-repository correction (2026-10-19)
+
+The preceding contract-gap section is superseded. `PublicationIntent v1` is now
+one closed, shared wire contract between Discovery and the site consumer:
+
+- batch: `{version: 1, producer: "waagd-discovery", intents: [...]}`;
+- item envelope: `version`, `intent_id`, `origin`, `authorization`, and `post`;
+- editorial provenance: `candidate_key`, `delivery_id`, `decision_revision`,
+  `verification_status`, `editorial_status`, source `publisher`,
+  `published_at_source`, structured `risks`, `evidence_ids`, `content_hash`, and
+  `publication_policy_version`.
+
+The normative schema is stored as
+`src/waagd_discovery/publication-intent-v1.schema.json` and mirrored at the
+fixed site commit `529f83c` in
+`automation/publishing/publication-intent-v1.schema.json`. Both producer and
+consumer validate it; the handoff validates it again before an atomic copy.
+`intent_id` is `auto:<candidate_key>:<decision_revision>` and the SHA-256
+`content_hash` covers canonical `post` bytes. A replay with another delivery ID
+is not a new publication; changing content under the same ID is a site-journal
+conflict.
+
+Discovery now emits `post.type: "news"` and puts the complete editorial article
+in `post.body`. It emits no intent without an explicitly enabled private
+publication policy, VERIFIED independent evidence, READY_FOR_REVIEW decision,
+no unresolved claims/questions/risks, fresh source timestamp, bounded fields and
+valid checksum. The default policy is deny-all. The policy assertion carried in
+the file is audit provenance, not a capability: the site applies its independent
+kill switch and trusted authorizer before any Worker request.
+
+No real independent verification service has yet passed acceptance. The existing
+dynamic assertion interface is insufficient evidence by itself, and therefore
+operator policy must remain disabled outside isolated fixture/staging acceptance.
+HTTP success never establishes VERIFIED.
+
+### Target-Mac coordination plan
+
+The target Mac stays on Discovery v0.4.1. Do not migrate Bridge, ACK, dismiss,
+reset, or otherwise mutate pending delivery
+`dbf6d7a2-395e-40c6-8e91-7866aab89e53`. A later operator-approved cutover must:
+
+1. Back up the schema-4 Discovery volume and separately preserve exact Bridge
+   inbox/ledger bytes.
+2. Inspect and reconcile that pending delivery under its existing v0.4.1
+   procedure before any Bridge-v2 action; this is a separate operator decision.
+3. Install the new release alongside distinct `0700` editorial, export and site
+   journal directories, initially with publication policy and site kill switch
+   disabled.
+4. Validate the installed OpenClaw acceptance below, then use a newly generated
+   delivery for a one-item staging run. Site receipt and Discovery ACK remain
+   separate records.
+
+### Installed-OpenClaw acceptance (operator-owned, not run here)
+
+Run only against an isolated staging Gateway with the existing `waagd` agent.
+Record Gateway/OpenClaw versions and the two repository commit SHAs. Prove the
+adapter starts one `waagd` session with a private bounded message, no inherited
+site/Cloudflare/Telegram credentials, no shell/Docker/write tools, and an
+attested zero tool-call response. Exercise malformed output, tool-call output,
+timeout and restart; all must hold the material and make no publication. This
+acceptance does not alter Shmul or create an agent.

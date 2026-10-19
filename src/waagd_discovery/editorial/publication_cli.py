@@ -8,6 +8,7 @@ from pathlib import Path
 from waagd_discovery.bridge import io
 from waagd_discovery.editorial.contracts import EditorialError
 from waagd_discovery.editorial.publication import export_file
+from waagd_discovery.editorial.publication_policy import load_publication_policy
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -15,9 +16,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--store", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--limit", type=int, default=100)
+    parser.add_argument("--publication-policy", type=Path)
     args = parser.parse_args(argv)
     try:
-        print(json.dumps(export_file(args.store, args.output, args.limit), sort_keys=True))
+        print(
+            json.dumps(
+                export_file(
+                    args.store,
+                    args.output,
+                    args.limit,
+                    policy=load_publication_policy(args.publication_policy),
+                ),
+                sort_keys=True,
+            )
+        )
         return 0
     except EditorialError as error:
         print(json.dumps({"status": "error", "error": str(error)}, sort_keys=True))

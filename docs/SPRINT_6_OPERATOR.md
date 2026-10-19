@@ -43,7 +43,8 @@ waagd-editorial --config /srv/waagd/private/editorial.yaml \
 
 waagd-publication-export \
   --store /srv/waagd/editorial/editorial.sqlite3 \
-  --output /srv/waagd/publication-export/publication-intents.json --limit 100
+  --output /srv/waagd/publication-export/publication-intents.json --limit 100 \
+  --publication-policy /srv/waagd/private/publication.yaml
 
 waagd-publication-bridge \
   --source /srv/waagd/publication-export/publication-intents.json \
@@ -84,6 +85,22 @@ corroboration:
   automatic:
     endpoint_template: https://verify.example/check?candidate_url={candidate_url}
 ```
+
+Publication export is deny-all unless a private service-user-owned `0700`
+directory contains a `0600` policy file. Keep it disabled until a genuine,
+governed verification evidence source has passed staging acceptance; an HTTP 200
+or a model assertion is never enough.
+
+```yaml
+publication:
+  automatic_enabled: false
+  version: publication-policy-v1
+  maximum_age_hours: 168
+```
+
+Set `automatic_enabled: true` only for the isolated staging run after the
+operator records independent-source evidence approval. The site publisher still
+has its separate default-off kill switch and trusted authorizer.
 
 The Gateway command rejects a batch larger than `--gateway-max-candidates` (1–10)
 before it can start a model turn. `--gateway-max-cost-usd` is mandatory and capped

@@ -106,3 +106,11 @@
     documented Gateway-backed agent invocation requires installed-version/tool
     isolation validation and separate operator approval. Same-user private paths
     and prompt policy cannot replace process/tool isolation or factual review.
+32. PublicationIntent v1 has one closed cross-repository wire form: a v1 batch
+    from `waagd-discovery` and `auto:<candidate_key>:<decision_revision>` items
+    with canonical-post SHA-256, evidence and delivery provenance. Discovery
+    creates only data; the site journal owns Worker credentials, duplicate
+    reconciliation, kill switch and final authorization. A private default-deny
+    policy is required to emit automatic intents. The assertion is audit data,
+    never a bearer capability. Until a governed real independent evidence source
+    passes staging acceptance, the policy remains disabled outside fixtures.

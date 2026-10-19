@@ -1,5 +1,6 @@
 """The host-side hand-off has no agent, network or publisher capability."""
 
+import json
 import os
 from pathlib import Path
 
@@ -17,13 +18,8 @@ def _private(path: Path) -> Path:
 
 
 def _batch() -> bytes:
-    return io.encode(
-        {
-            "schema_version": 1,
-            "producer": "waagd-discovery-publication-v1",
-            "intents": [],
-        }
-    )
+    fixture = Path(__file__).parent / "fixtures" / "publication-intent-v1-valid.json"
+    return io.encode(json.loads(fixture.read_text()))
 
 
 def test_transfer_is_private_atomic_and_preserves_validated_bytes(tmp_path: Path) -> None:
@@ -42,13 +38,23 @@ def test_transfer_is_private_atomic_and_preserves_validated_bytes(tmp_path: Path
     assert target.stat().st_mode & 0o777 == 0o600
 
 
-@pytest.mark.parametrize("mutation", ["bad_batch", "permissive_source", "same_directory"])
+@pytest.mark.parametrize(
+    "mutation", ["bad_batch", "tampered_hash", "permissive_source", "same_directory"]
+)
 def test_transfer_rejects_untrusted_paths_and_batches(tmp_path: Path, mutation: str) -> None:
     root = tmp_path.resolve()
     source = _private(root / "export")
     state = _private(root / "state")
     path = source / "publication-intents.json"
-    path.write_bytes(_batch() if mutation != "bad_batch" else b"{}")
+    data = _batch()
+    if mutation == "bad_batch":
+        data = b"{}"
+    elif mutation == "tampered_hash":
+        fixture = (
+            Path(__file__).parent / "fixtures" / "publication-intent-v1-invalid-content-hash.json"
+        )
+        data = fixture.read_bytes()
+    path.write_bytes(data)
     path.chmod(0o600 if mutation != "permissive_source" else 0o644)
     if mutation == "same_directory":
         path = state / "publication-intents.json"

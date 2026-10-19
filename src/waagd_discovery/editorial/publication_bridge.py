@@ -6,20 +6,18 @@ from typing import Any
 
 from waagd_discovery.bridge import io
 from waagd_discovery.editorial.contracts import EditorialError
+from waagd_discovery.editorial.publication import validate_publication_batch
 
 _NAME = "publication-intents.json"
 _MAXIMUM = 256 * 1024
 
 
 def _valid_batch(value: Any) -> bool:
-    if not isinstance(value, dict) or set(value) != {"schema_version", "producer", "intents"}:
+    try:
+        validate_publication_batch(value)
+        return True
+    except EditorialError:
         return False
-    return (
-        value["schema_version"] == 1
-        and value["producer"] == "waagd-discovery-publication-v1"
-        and isinstance(value["intents"], list)
-        and len(value["intents"]) <= 100
-    )
 
 
 def transfer(source: Path, state_directory: Path) -> dict[str, object]:
