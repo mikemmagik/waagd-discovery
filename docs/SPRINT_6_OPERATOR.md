@@ -6,7 +6,7 @@ agent. Keep all paths below outside source checkouts and owned by the service us
 
 ## Trust boundary
 
-Discovery writes only `publication-intents.json` to a private `0700` export
+Discovery writes only `publication-intent.json` to a private `0700` export
 directory. It contains at most 100 independently verified, review-ready decisions.
 `waagd-publication-bridge` checks that exact v1 envelope and atomically copies it
 into the website automation's private `WAAGD_STATE_DIR`. It cannot open SQLite,
@@ -43,11 +43,11 @@ waagd-editorial --config /srv/waagd/private/editorial.yaml \
 
 waagd-publication-export \
   --store /srv/waagd/editorial/editorial.sqlite3 \
-  --output /srv/waagd/publication-export/publication-intents.json --limit 100 \
+  --output /srv/waagd/publication-export/publication-intent.json --limit 100 \
   --publication-policy /srv/waagd/private/publication.yaml
 
 waagd-publication-bridge \
-  --source /srv/waagd/publication-export/publication-intents.json \
+  --source /srv/waagd/publication-export/publication-intent.json \
   --state-directory /srv/waagd/site-state
 
 node --env-file=/srv/waagd/private/site.env automation/cli.ts publish-import
@@ -145,5 +145,13 @@ uses only temporary data:
 ```sh
 python scripts/sprint6-acceptance.py --site-root /srv/waagd/weareallgonnadie
 ```
+
+Release acceptance is pinned to Site RC
+`ca112b2ab89a7ec0d82b85b06df07bb86a35b41c`. The supplied site checkout must be
+a clean detached checkout at that exact revision. The acceptance first confirms
+that the exporter rejects any other output filename, then runs the site's actual
+`tests/backend.integration.test.ts` E2E. That test creates a real Python intent
+and checks the TypeScript validator, Discovery ingress, Publisher, local
+Worker/D1, replay and conflict handling, and frontend parser.
 
 Use `--skip-docker` only while iterating locally; it is not release evidence.

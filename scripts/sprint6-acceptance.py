@@ -14,11 +14,67 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+FINAL_SITE_SHA = "ca112b2ab89a7ec0d82b85b06df07bb86a35b41c"
+TARGET_SITE_E2E_FILE = "tests/backend.integration.test.ts"
+TARGET_SITE_E2E_NAME = (
+    "actual Discovery 17f59e3 producer enters the core ingress once and reaches "
+    "Worker/D1 and frontend parser"
+)
 
 
 def command(*args: str, cwd: Path, env: dict[str, str] | None = None) -> None:
     print("+", " ".join(args), flush=True)
     subprocess.run(args, cwd=cwd, check=True, env=env)
+
+
+def expected_failure(
+    *args: str,
+    cwd: Path,
+    expected_text: str,
+    env: dict[str, str] | None = None,
+) -> None:
+    """Require a negative acceptance case to fail for its intended reason."""
+    print("+", " ".join(args), "(expected failure)", flush=True)
+    result = subprocess.run(args, cwd=cwd, text=True, capture_output=True, env=env)
+    output = result.stdout + result.stderr
+    if result.returncode == 0 or expected_text not in output:
+        raise RuntimeError(
+            "negative acceptance case did not reject the invalid input as expected:\n" + output
+        )
+
+
+def checked_site_revision(site: Path) -> None:
+    revision = subprocess.check_output(("git", "rev-parse", "HEAD"), cwd=site, text=True).strip()
+    if revision != FINAL_SITE_SHA:
+        raise RuntimeError(f"site checkout must be pinned to {FINAL_SITE_SHA}, found {revision}")
+    dirty = subprocess.check_output(("git", "status", "--porcelain"), cwd=site, text=True).strip()
+    if dirty:
+        raise RuntimeError("site checkout must be clean for release acceptance")
+
+
+def run_target_site_e2e(site: Path) -> None:
+    """Run and prove execution of the frozen site's concrete E2E test file."""
+    args = ("node", "--test", TARGET_SITE_E2E_FILE)
+    print("+", " ".join(args), flush=True)
+    result = subprocess.run(
+        args,
+        cwd=site,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=os.environ
+        | {
+            "WAAGD_DISCOVERY_ROOT": str(ROOT),
+            "WAAGD_DISCOVERY_PYTHON": sys.executable,
+        },
+    )
+    print(result.stdout, end="", flush=True)
+    result.check_returncode()
+    target_lines = [line for line in result.stdout.splitlines() if TARGET_SITE_E2E_NAME in line]
+    if not any(
+        line.lstrip().startswith(("ok ", "✔")) and "SKIP" not in line for line in target_lines
+    ):
+        raise RuntimeError("the required Site RC E2E test was not executed")
 
 
 def uv_command(*args: str, cwd: Path) -> None:
@@ -82,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     site = args.site_root.resolve()
     if site == ROOT or not (site / "package.json").is_file():
         parser.error("--site-root must be a separate checkout containing package.json")
+    checked_site_revision(site)
 
     uv_command("python", "scripts/check-secrets.py", cwd=ROOT)
     uv_command("ruff", "check", ".", cwd=ROOT)
@@ -90,7 +147,17 @@ def main(argv: list[str] | None = None) -> int:
     uv_command("pytest", "-m", "not live", "--cov-fail-under=85", cwd=ROOT)
     command("npm", "run", "validate", cwd=site)
     with tempfile.TemporaryDirectory(prefix="waagd-sprint6-e2e-") as scratch:
-        fixture = Path(scratch) / "publication-intents.json"
+        invalid_fixture = Path(scratch) / "publication-intents.json"
+        expected_failure(
+            sys.executable,
+            "scripts/sprint6-publication-fixture.py",
+            "--output",
+            str(invalid_fixture),
+            cwd=ROOT,
+            expected_text="publication_output_invalid",
+        )
+
+        fixture = Path(scratch) / "publication-intent.json"
         uv_command(
             "python",
             "scripts/sprint6-publication-fixture.py",
@@ -99,13 +166,17 @@ def main(argv: list[str] | None = None) -> int:
             cwd=ROOT,
         )
         command(
-            "npm",
-            "test",
-            "--",
-            "--test-name-pattern=cross-repository Python publication envelope",
+            "npx",
+            "--no-install",
+            "tsx",
+            str(ROOT / "scripts" / "validate_site_intent.mjs"),
+            str(site / "automation" / "core" / "intent.ts"),
+            str(fixture),
             cwd=site,
-            env=os.environ | {"WAAGD_DISCOVERY_PUBLICATION_FIXTURE": str(fixture)},
         )
+        # The concrete file constructs an actual Discovery fixture and exercises
+        # the real validator, ingress, publisher, Worker/D1 and frontend parser.
+        run_target_site_e2e(site)
     if not args.skip_docker:
         for platform in args.docker_platform or ("amd64", "arm64"):
             docker_acceptance(platform)
