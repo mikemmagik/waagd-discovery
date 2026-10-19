@@ -16,9 +16,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def command(*args: str, cwd: Path) -> None:
+def command(*args: str, cwd: Path, env: dict[str, str] | None = None) -> None:
     print("+", " ".join(args), flush=True)
-    subprocess.run(args, cwd=cwd, check=True)
+    subprocess.run(args, cwd=cwd, check=True, env=env)
 
 
 def uv_command(*args: str, cwd: Path) -> None:
@@ -89,6 +89,23 @@ def main(argv: list[str] | None = None) -> int:
     uv_command("mypy", "src", cwd=ROOT)
     uv_command("pytest", "-m", "not live", "--cov-fail-under=85", cwd=ROOT)
     command("npm", "run", "validate", cwd=site)
+    with tempfile.TemporaryDirectory(prefix="waagd-sprint6-e2e-") as scratch:
+        fixture = Path(scratch) / "publication-intents.json"
+        uv_command(
+            "python",
+            "scripts/sprint6-publication-fixture.py",
+            "--output",
+            str(fixture),
+            cwd=ROOT,
+        )
+        command(
+            "npm",
+            "test",
+            "--",
+            "--test-name-pattern=cross-repository Python publication envelope",
+            cwd=site,
+            env=os.environ | {"WAAGD_DISCOVERY_PUBLICATION_FIXTURE": str(fixture)},
+        )
     if not args.skip_docker:
         for platform in args.docker_platform or ("amd64", "arm64"):
             docker_acceptance(platform)
