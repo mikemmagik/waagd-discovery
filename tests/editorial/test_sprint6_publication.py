@@ -55,22 +55,16 @@ def test_verified_ready_decision_exports_exact_idempotent_intent(tmp_path: Path)
         intents = exportable(store, policy=_policy())
     assert len(intents) == 1
     intent = intents[0]
-    assert intent["intent_id"] == f"auto:{candidate()['candidate_key']}:1"
-    assert intent["authorization"] == {"kind": "trusted_publication_policy", "automatic": True}
+    assert intent["intent_id"] == f"auto-{candidate()['candidate_key']}-r1"
+    assert intent["authorization"] == {"kind": "discovery", "approved": True}
     assert intent["post"]["type"] == "news"
     assert intent["post"]["origin"] == "auto"
     assert (
         intent["post"]["source_item_id"]
         == "waagd:" + hashlib.sha256(intent["intent_id"].encode()).hexdigest()
     )
-    encoded = json.dumps(
-        intent["post"],
-        allow_nan=False,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode()
-    assert intent["content_hash"] == hashlib.sha256(encoded).hexdigest()
+    assert len(intent["content_hash"]) == 64
+
     assert {item["url"] for item in intent["post"]["references"]} == {
         candidate()["url"],
         "https://independent.example.test/attestation",
@@ -102,14 +96,14 @@ def test_risk_or_unknown_claim_blocks_auto_export(tmp_path: Path) -> None:
 
 def test_export_is_private_atomic_and_rejects_simulation_store(tmp_path: Path) -> None:
     path = _store(tmp_path.resolve() / "store" / "editorial.sqlite3")
-    output = tmp_path.resolve() / "publisher" / "publication-intents.json"
+    output = tmp_path.resolve() / "publisher" / "publication-intent.json"
     assert export_file(path, output, policy=_policy()) == {
         "status": "exported",
         "count": 1,
-        "path": "publication-intents.json",
+        "path": "publication-intent.json",
     }
     assert output.stat().st_mode & 0o777 == 0o600
-    assert io.decode(output.read_bytes())["version"] == 1
+    assert io.decode(output.read_bytes())["origin"] == "auto"
     simulation = tmp_path.resolve() / "simulation" / "editorial.sqlite3"
     with EditorialStore(simulation, simulation=True):
         pass

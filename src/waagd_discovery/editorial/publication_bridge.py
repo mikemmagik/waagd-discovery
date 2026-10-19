@@ -6,15 +6,15 @@ from typing import Any
 
 from waagd_discovery.bridge import io
 from waagd_discovery.editorial.contracts import EditorialError
-from waagd_discovery.editorial.publication import validate_publication_batch
+from waagd_discovery.editorial.publication import validate_publication_intent
 
-_NAME = "publication-intents.json"
+_NAME = "publication-intent.json"
 _MAXIMUM = 256 * 1024
 
 
 def _valid_batch(value: Any) -> bool:
     try:
-        validate_publication_batch(value)
+        validate_publication_intent(value)
         return True
     except EditorialError:
         return False
