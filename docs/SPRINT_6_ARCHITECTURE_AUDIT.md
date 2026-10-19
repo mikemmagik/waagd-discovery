@@ -105,22 +105,20 @@ QA approval, and remote CI are complete.
 The preceding contract-gap section is superseded. `PublicationIntent v1` is now
 one closed, shared wire contract between Discovery and the site consumer:
 
-- batch: `{version: 1, producer: "waagd-discovery", intents: [...]}`;
-- item envelope: `version`, `intent_id`, `origin`, `authorization`, and `post`;
-- editorial provenance: `candidate_key`, `delivery_id`, `decision_revision`,
-  `verification_status`, `editorial_status`, source `publisher`,
-  `published_at_source`, structured `risks`, `evidence_ids`, `content_hash`, and
-  `publication_policy_version`.
+- handoff file: exactly one `publication-intent.json` document;
+- item envelope: `version`, `intent_id`, `content_hash`, `origin`,
+  `authorization`, `editorial`, and `post`;
+- editorial provenance: decision ID, delivery-independent source event identity,
+  source attribution, approval timestamp, and publication-policy result.
 
-The normative schema is stored as
-`src/waagd_discovery/publication-intent-v1.schema.json` and mirrored at the
-fixed site commit `529f83c` in
-`automation/publishing/publication-intent-v1.schema.json`. Both producer and
-consumer validate it; the handoff validates it again before an atomic copy.
-`intent_id` is `auto:<candidate_key>:<decision_revision>` and the SHA-256
-`content_hash` covers canonical `post` bytes. A replay with another delivery ID
-is not a new publication; changing content under the same ID is a site-journal
-conflict.
+The final release-acceptance pin is site commit
+`ca112b2ab89a7ec0d82b85b06df07bb86a35b41c`; its
+`automation/core/intent.ts` is the normative consumer validator. Both producer
+and consumer validate the envelope, and the handoff validates it again before an
+atomic copy. `intent_id` is `auto-<candidate_key>-r<decision_revision>` and the
+SHA-256 `content_hash` covers the canonical PublicationIntent document defined
+by that validator. A replay with another delivery ID is not a new publication;
+changing content under the same ID is a site-journal conflict.
 
 Discovery now emits `post.type: "news"` and puts the complete editorial article
 in `post.body`. It emits no intent without an explicitly enabled private
