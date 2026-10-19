@@ -14,7 +14,12 @@ import pytest
 from waagd_discovery.bridge import Bridge, BridgeError, io
 from waagd_discovery.bridge.validation import envelope
 from waagd_discovery.editorial.adapter import MockEditor
-from waagd_discovery.editorial.cli import load_config, main
+from waagd_discovery.editorial.cli import (
+    _check_gateway_batch,
+    load_config,
+    load_corroboration_policies,
+    main,
+)
 from waagd_discovery.editorial.contracts import (
     PROTECTED_DELIVERIES,
     EditorialError,
@@ -556,6 +561,37 @@ def test_config_strict_shape_duplicate_and_boolean(tmp_path, text):
 
 def test_config_defaults_all_disabled():
     assert set(load_config().__dict__.values()) == {False}
+
+
+def test_private_corroboration_policy_is_strict_and_constructs_verifier_rules(tmp_path):
+    key = hashlib.sha256(b"https://news.example/story").hexdigest()
+    directory = tmp_path.resolve() / "policy"
+    directory.mkdir(mode=0o700)
+    directory.chmod(0o700)
+    path = directory / "corroboration.yaml"
+    path.write_text(
+        "corroboration:\n"
+        "  policies:\n"
+        f"    - candidate_key: {key}\n"
+        "      trusted_independent_hosts: [confirm.example]\n"
+        "      claims:\n"
+        "        - claim: The fictional council approved a transparent public audit.\n"
+        "          independent_url: https://confirm.example/audit\n"
+    )
+    path.chmod(0o600)
+    rules = load_corroboration_policies(path)
+    assert set(rules) == {key}
+    assert rules[key].claims[0].independent_url == "https://confirm.example/audit"
+    path.write_text("corroboration: {policies: []}\n")
+    path.chmod(0o600)
+    with pytest.raises(EditorialError, match="corroboration_policy_invalid"):
+        load_corroboration_policies(path)
+
+
+def test_gateway_candidate_limit_rejects_batch_before_editor_invocation(tmp_path):
+    bridge, _ = real_bridge(tmp_path)
+    with pytest.raises(EditorialError, match="gateway_candidate_limit"):
+        _check_gateway_batch(bridge.inbox_dir / "inbox.json", 1)
 
 
 def test_gateway_requires_explicit_runtime_and_all_three_config_switches(tmp_path, capsys):

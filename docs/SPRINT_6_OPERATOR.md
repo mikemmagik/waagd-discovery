@@ -36,7 +36,10 @@ waagd-editorial --config /srv/waagd/private/editorial.yaml \
   --workspace-root /srv/waagd/workspace \
   --state-dir /srv/waagd/bridge-state \
   --no-simulation --allow-gateway --allow-ack \
-  --gateway-executable /usr/local/bin/openclaw gateway-process
+  --gateway-executable /usr/local/bin/openclaw \
+  --gateway-max-candidates 1 --gateway-max-cost-usd 0.10 \
+  --corroboration-policy /srv/waagd/private/corroboration.yaml \
+  gateway-process
 
 waagd-publication-export \
   --store /srv/waagd/editorial/editorial.sqlite3 \
@@ -54,6 +57,26 @@ node --env-file=/srv/waagd/private/site.env automation/cli.ts publish-import
 The command otherwise fails before opening external input. The site environment
 also requires `WAAGD_SPRINT6_PUBLISHING_ENABLED=1`; absence or `0` is the kill
 switch and records no new Worker write. Keep it at `0` for all non-staging runs.
+
+`corroboration.yaml` is a service-user-owned `0700` directory with a `0600` file;
+it is an independent allowlist, never a downloaded source artifact. It must name
+every candidate which may become `VERIFIED`:
+
+```yaml
+corroboration:
+  policies:
+    - candidate_key: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      trusted_independent_hosts: [confirm.example]
+      claims:
+        - claim: The independently checked factual claim has at least four words.
+          independent_url: https://confirm.example/independent-report
+```
+
+The Gateway command rejects a batch larger than `--gateway-max-candidates` (1–10)
+before it can start a model turn. `--gateway-max-cost-usd` is mandatory and capped
+at one USD per candidate; the batch ceiling is their product. Use a smaller
+explicit amount for staging. A candidate without a matching policy remains
+`PARTIAL` and cannot reach publication.
 
 Do not put the site environment file in the Gateway process. The Gateway executable
 must be an absolute, executable regular file without group/world write permission.
@@ -84,3 +107,13 @@ files during recovery: replaying the same batch is how duplicate prevention work
 
 The automated acceptance uses fake Gateway, Telegram and Worker/D1 implementations.
 It does not establish a live Gateway, bot, Cloudflare, paid-model, or production pass.
+
+From the Discovery checkout, one offline release-acceptance command verifies both
+repositories and the two fake end-to-end journeys. It builds disposable images and
+uses only temporary data:
+
+```sh
+python scripts/sprint6-acceptance.py --site-root /srv/waagd/weareallgonnadie
+```
+
+Use `--skip-docker` only while iterating locally; it is not release evidence.

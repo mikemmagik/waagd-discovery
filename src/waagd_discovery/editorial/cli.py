@@ -12,8 +12,14 @@ import yaml
 
 from waagd_discovery.bridge import Bridge, io
 from waagd_discovery.editorial.adapter import MockEditor
-from waagd_discovery.editorial.contracts import EditorAdapter, EditorialError, Verifier
+from waagd_discovery.editorial.contracts import (
+    EditorAdapter,
+    EditorialError,
+    Verifier,
+    validate_input,
+)
 from waagd_discovery.editorial.controller import Controller
+from waagd_discovery.editorial.corroboration import CorroborationClaim, CorroborationPolicy
 
 
 @dataclass(frozen=True)
@@ -81,6 +87,85 @@ def load_config(path: Path | None = None) -> EditorialConfig:
         raise EditorialError("editorial_config_unreadable") from None
 
 
+def load_corroboration_policies(path: Path) -> dict[str, CorroborationPolicy]:
+    """Read a private, independently-maintained allowlist; never derive it from news."""
+    try:
+        directory = io.open_directory(path.parent, private=True)
+        try:
+            raw = io.read_file(directory, path.name, 65536, private=True)
+        finally:
+            import os
+
+            os.close(directory)
+        data = yaml.load(raw.decode("utf-8"), Loader=_Loader)
+        if not isinstance(data, dict) or set(data) != {"corroboration"}:
+            raise EditorialError("corroboration_policy_invalid")
+        body = data["corroboration"]
+        if not isinstance(body, dict) or set(body) != {"policies"}:
+            raise EditorialError("corroboration_policy_invalid")
+        entries = body["policies"]
+        if not isinstance(entries, list) or not 1 <= len(entries) <= 50:
+            raise EditorialError("corroboration_policy_invalid")
+        policies: dict[str, CorroborationPolicy] = {}
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry) != {
+                "candidate_key",
+                "trusted_independent_hosts",
+                "claims",
+            }:
+                raise EditorialError("corroboration_policy_invalid")
+            key, hosts, claims = (
+                entry["candidate_key"],
+                entry["trusted_independent_hosts"],
+                entry["claims"],
+            )
+            if (
+                not isinstance(key, str)
+                or not isinstance(hosts, list)
+                or not isinstance(claims, list)
+                or any(not isinstance(host, str) for host in hosts)
+            ):
+                raise EditorialError("corroboration_policy_invalid")
+            parsed_claims: list[CorroborationClaim] = []
+            for claim in claims:
+                if not isinstance(claim, dict) or set(claim) != {"claim", "independent_url"}:
+                    raise EditorialError("corroboration_policy_invalid")
+                parsed_claims.append(
+                    CorroborationClaim(
+                        claim=claim["claim"], independent_url=claim["independent_url"]
+                    )
+                )
+            if key in policies:
+                raise EditorialError("corroboration_policy_invalid")
+            policies[key] = CorroborationPolicy(
+                candidate_key=key,
+                trusted_independent_hosts=frozenset(hosts),
+                claims=tuple(parsed_claims),
+            )
+        return policies
+    except (OSError, io.BridgeError, UnicodeError, yaml.YAMLError, RecursionError):
+        raise EditorialError("corroboration_policy_unreadable") from None
+
+
+def _check_gateway_batch(inbox: Path, maximum: int) -> None:
+    """Bound calls before opening any network transport or Gateway process."""
+    try:
+        directory = io.open_directory(inbox.parent, private=True)
+        try:
+            value = io.decode(io.read_file(directory, inbox.name, 128 * 1024, private=True))
+        finally:
+            import os
+
+            os.close(directory)
+        if not isinstance(value, dict):
+            raise EditorialError("inbox_invalid")
+        validate_input(value)
+        if len(value["candidates"]) > maximum:
+            raise EditorialError("gateway_candidate_limit")
+    except (OSError, io.BridgeError):
+        raise EditorialError("gateway_inbox_unreadable") from None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="waagd-editorial")
     parser.add_argument("--config", type=Path)
@@ -94,6 +179,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allow-gateway", action="store_true")
     parser.add_argument("--gateway-executable", type=Path)
     parser.add_argument("--gateway-agent", default="waagd")
+    parser.add_argument("--gateway-max-candidates", type=int, default=1)
+    parser.add_argument("--gateway-max-cost-usd", type=float)
+    parser.add_argument("--corroboration-policy", type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("dry-run")
     commands.add_parser("process")
@@ -113,11 +201,20 @@ def main(argv: list[str] | None = None) -> int:
             args.simulation
             or not args.allow_gateway
             or args.gateway_executable is None
+            or args.corroboration_policy is None
+            or args.gateway_max_cost_usd is None
             or not config.enabled
             or not config.network_enabled
             or not config.llm_enabled
         ):
             raise EditorialError("gateway_processing_not_authorized")
+        if gateway and (
+            isinstance(args.gateway_max_candidates, bool)
+            or not 1 <= args.gateway_max_candidates <= 10
+        ):
+            raise EditorialError("gateway_candidate_limit")
+        if gateway and not 0 < args.gateway_max_cost_usd <= 1:
+            raise EditorialError("gateway_cost_limit")
         if args.inbox != args.workspace_root / "waagd-discovery" / "inbox.json":
             raise EditorialError("inbox_path_mismatch")
         bridge = Bridge(args.export, args.workspace_root, args.state_dir)
@@ -129,11 +226,22 @@ def main(argv: list[str] | None = None) -> int:
             verifier: Verifier
             editor: EditorAdapter
             if gateway:
-                from waagd_discovery.editorial.gateway_adapter import GatewayEditor
+                from waagd_discovery.editorial.gateway_adapter import (
+                    GatewayBudgetPolicy,
+                    GatewayEditor,
+                )
                 from waagd_discovery.editorial.verifier import SourceVerifier
 
-                verifier = SourceVerifier()
-                editor = GatewayEditor(args.gateway_executable, agent_id=args.gateway_agent)
+                verifier = SourceVerifier(
+                    corroboration_policies=load_corroboration_policies(args.corroboration_policy)
+                )
+                editor = GatewayEditor(
+                    args.gateway_executable,
+                    agent_id=args.gateway_agent,
+                    budget_policy=GatewayBudgetPolicy(
+                        max_reported_cost_usd=args.gateway_max_cost_usd
+                    ),
+                )
             else:
                 verifier = SyntheticVerifier()
                 editor = MockEditor()
@@ -167,6 +275,8 @@ def main(argv: list[str] | None = None) -> int:
             elif args.command == "reconsider":
                 result = instance.reconsider(args.candidate_key)
             else:
+                if gateway:
+                    _check_gateway_batch(args.inbox, args.gateway_max_candidates)
                 result = instance.process()
         print(json.dumps(result, sort_keys=True, allow_nan=False))
         return 0
