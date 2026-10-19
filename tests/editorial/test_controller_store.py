@@ -528,14 +528,7 @@ def test_store_rejects_links(tmp_path, target):
     assert victim.read_text() == "unchanged"
 
 
-@pytest.mark.parametrize(
-    "section,key",
-    [
-        ("llm", "enabled"),
-        ("bridge", "auto_ack"),
-        ("publishing", "enabled"),
-    ],
-)
+@pytest.mark.parametrize("section,key", [("bridge", "auto_ack"), ("publishing", "enabled")])
 def test_config_rejects_unauthorized_features(tmp_path, section, key):
     path = tmp_path.resolve() / "editorial.yaml"
     path.write_text(f"{section}:\n  {key}: true\n")
@@ -563,6 +556,29 @@ def test_config_strict_shape_duplicate_and_boolean(tmp_path, text):
 
 def test_config_defaults_all_disabled():
     assert set(load_config().__dict__.values()) == {False}
+
+
+def test_gateway_requires_explicit_runtime_and_all_three_config_switches(tmp_path, capsys):
+    root = tmp_path.resolve()
+    arguments = [
+        "--inbox",
+        str(root / "workspace" / "waagd-discovery" / "inbox.json"),
+        "--store",
+        str(root / "private" / "editorial.sqlite3"),
+        "--export",
+        str(root / "export" / "candidates.json"),
+        "--workspace-root",
+        str(root / "workspace"),
+        "--state-dir",
+        str(root / "bridge"),
+    ]
+    config = root / "gateway.yaml"
+    config.write_text(
+        "editorial: {enabled: true}\nnetwork: {enabled: true}\nllm: {enabled: true}\n"
+    )
+    assert main([*arguments, "--config", str(config), "gateway-process"]) == 1
+    assert "gateway_processing_not_authorized" in capsys.readouterr().out
+    assert not (root / "private").exists()
 
 
 def test_mock_worker_is_separate_bounded_data_only(tmp_path, monkeypatch):

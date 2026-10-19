@@ -1,4 +1,4 @@
-"""Explicit one-shot, mock-only RC commands; never installs an operator service."""
+"""Explicit one-shot editorial commands; never installs an operator service."""
 
 import argparse
 import json
@@ -12,7 +12,7 @@ import yaml
 
 from waagd_discovery.bridge import Bridge, io
 from waagd_discovery.editorial.adapter import MockEditor
-from waagd_discovery.editorial.contracts import EditorialError
+from waagd_discovery.editorial.contracts import EditorAdapter, EditorialError, Verifier
 from waagd_discovery.editorial.controller import Controller
 
 
@@ -74,7 +74,7 @@ def load_config(path: Path | None = None) -> EditorialConfig:
                 raise EditorialError("editorial_config_invalid")
             values[field] = value[allowed]
         config = EditorialConfig(**values)
-        if config.llm_enabled or config.auto_ack or config.publishing_enabled:
+        if config.auto_ack or config.publishing_enabled:
             raise EditorialError("editorial_feature_not_authorized")
         return config
     except (OSError, io.BridgeError, UnicodeError, yaml.YAMLError, RecursionError):
@@ -91,35 +91,60 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--simulation", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--allow-ack", action="store_true")
+    parser.add_argument("--allow-gateway", action="store_true")
+    parser.add_argument("--gateway-executable", type=Path)
+    parser.add_argument("--gateway-agent", default="waagd")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("dry-run")
     commands.add_parser("process")
+    commands.add_parser("gateway-process")
     commands.add_parser("status")
     reconsider = commands.add_parser("reconsider")
     reconsider.add_argument("--candidate-key", required=True)
     args = parser.parse_args(argv)
     try:
         config = load_config(args.config)
-        if args.allow_ack or (not args.simulation and args.command != "status"):
+        gateway = args.command == "gateway-process"
+        if (args.allow_ack and not gateway) or (
+            not args.simulation and args.command != "status" and not gateway
+        ):
             raise EditorialError("real_editor_unavailable")
+        if gateway and (
+            args.simulation
+            or not args.allow_gateway
+            or args.gateway_executable is None
+            or not config.enabled
+            or not config.network_enabled
+            or not config.llm_enabled
+        ):
+            raise EditorialError("gateway_processing_not_authorized")
         if args.inbox != args.workspace_root / "waagd-discovery" / "inbox.json":
             raise EditorialError("inbox_path_mismatch")
         bridge = Bridge(args.export, args.workspace_root, args.state_dir)
         protected = (args.workspace_root, args.export.parent, args.state_dir)
 
         def controller(store: Path) -> Controller:
-            # Lazy import: verifier is owned independently and network is never
-            # instantiated or used by this mock-only RC CLI.
             from waagd_discovery.editorial.verifier import SyntheticVerifier
 
+            verifier: Verifier
+            editor: EditorAdapter
+            if gateway:
+                from waagd_discovery.editorial.gateway_adapter import GatewayEditor
+                from waagd_discovery.editorial.verifier import SourceVerifier
+
+                verifier = SourceVerifier()
+                editor = GatewayEditor(args.gateway_executable, agent_id=args.gateway_agent)
+            else:
+                verifier = SyntheticVerifier()
+                editor = MockEditor()
             return Controller(
                 args.inbox,
                 store,
                 bridge,
-                SyntheticVerifier(),
-                MockEditor(),
+                verifier,
+                editor,
                 simulation=args.simulation,
-                allow_ack=False,
+                allow_ack=args.allow_ack and gateway,
                 protected_roots=protected,
             )
 
