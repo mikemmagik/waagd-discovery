@@ -50,6 +50,14 @@ different identity. The publisher holds the Worker bearer token outside model an
 workspace processes. The model cannot select API origin, credentials, endpoint,
 command, local path or publication mode.
 
+An unattended verification policy may pre-authorize one fixed independent HTTPS
+assertion endpoint with only a `{candidate_url}` query placeholder. It must return a
+strict JSON object containing that exact canonical URL and one bounded claim; the
+claim must also occur verbatim in the candidate article. The candidate cannot choose
+the endpoint, host, path or claim. Failed, malformed or redirected assertions remain
+PARTIAL. This is the only policy-selected dynamic verification path; all other links
+remain untrusted data and never authorize a fetch.
+
 Telegram ingress accepts private messages only from configured numeric owner IDs.
 URL, text and already-supported URL-based media references become staged submissions;
 `/preview <id>` reads a saved bounded preview and `/publish <id>` is the only manual

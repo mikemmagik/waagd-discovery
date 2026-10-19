@@ -7,7 +7,11 @@ from typing import Any
 import pytest
 
 from waagd_discovery.editorial.contracts import VERIFICATION_POLICY, EditorialError
-from waagd_discovery.editorial.corroboration import CorroborationClaim, CorroborationPolicy
+from waagd_discovery.editorial.corroboration import (
+    AutomaticCorroborationPolicy,
+    CorroborationClaim,
+    CorroborationPolicy,
+)
 from waagd_discovery.editorial.transport import FetchDocument
 from waagd_discovery.editorial.verifier import SourceVerifier
 
@@ -118,3 +122,31 @@ def test_wrong_candidate_key_policy_rejected_at_construction() -> None:
 def test_untrusted_domain_policy_rejected() -> None:
     with pytest.raises(EditorialError, match="corroboration_policy_invalid"):
         policy("https://attacker.example/story")
+
+
+class AutomaticDocuments(Documents):
+    def fetch(self, url: str) -> FetchDocument:
+        if url == ARTICLE:
+            return super().fetch(url)
+        assert url.startswith("https://verify.example/check?candidate_url=")
+        return FetchDocument(
+            url,
+            200,
+            (
+                b'{"canonical_url":"https://news.example/article","claim":'
+                b'"The fictional town council approved a new audit on Tuesday."}'
+            ),
+            "application/json",
+        )
+
+
+def test_governed_dynamic_endpoint_can_verify_a_new_candidate_without_a_key_rule() -> None:
+    result = SourceVerifier(
+        AutomaticDocuments(),
+        clock=lambda: NOW,
+        automatic_corroboration=AutomaticCorroborationPolicy(
+            "https://verify.example/check?candidate_url={candidate_url}"
+        ),
+    ).verify(candidate(), policy_id=VERIFICATION_POLICY)
+    assert result["verification_status"] == "VERIFIED"
+    assert result["claim_support"][0]["claim"] == CLAIM

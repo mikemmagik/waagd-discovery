@@ -19,7 +19,11 @@ from waagd_discovery.editorial.contracts import (
     validate_input,
 )
 from waagd_discovery.editorial.controller import Controller
-from waagd_discovery.editorial.corroboration import CorroborationClaim, CorroborationPolicy
+from waagd_discovery.editorial.corroboration import (
+    AutomaticCorroborationPolicy,
+    CorroborationClaim,
+    CorroborationPolicy,
+)
 
 
 @dataclass(frozen=True)
@@ -87,7 +91,9 @@ def load_config(path: Path | None = None) -> EditorialConfig:
         raise EditorialError("editorial_config_unreadable") from None
 
 
-def load_corroboration_policies(path: Path) -> dict[str, CorroborationPolicy]:
+def load_corroboration_rules(
+    path: Path,
+) -> tuple[dict[str, CorroborationPolicy], AutomaticCorroborationPolicy | None]:
     """Read a private, independently-maintained allowlist; never derive it from news."""
     try:
         directory = io.open_directory(path.parent, private=True)
@@ -101,10 +107,10 @@ def load_corroboration_policies(path: Path) -> dict[str, CorroborationPolicy]:
         if not isinstance(data, dict) or set(data) != {"corroboration"}:
             raise EditorialError("corroboration_policy_invalid")
         body = data["corroboration"]
-        if not isinstance(body, dict) or set(body) != {"policies"}:
+        if not isinstance(body, dict) or not {"policies", "automatic"} >= set(body) or not body:
             raise EditorialError("corroboration_policy_invalid")
-        entries = body["policies"]
-        if not isinstance(entries, list) or not 1 <= len(entries) <= 50:
+        entries = body.get("policies", [])
+        if not isinstance(entries, list) or len(entries) > 50:
             raise EditorialError("corroboration_policy_invalid")
         policies: dict[str, CorroborationPolicy] = {}
         for entry in entries:
@@ -142,9 +148,21 @@ def load_corroboration_policies(path: Path) -> dict[str, CorroborationPolicy]:
                 trusted_independent_hosts=frozenset(hosts),
                 claims=tuple(parsed_claims),
             )
-        return policies
+        automatic = body.get("automatic")
+        if automatic is not None:
+            if not isinstance(automatic, dict) or set(automatic) != {"endpoint_template"}:
+                raise EditorialError("corroboration_policy_invalid")
+            automatic = AutomaticCorroborationPolicy(automatic["endpoint_template"])
+        if not policies and automatic is None:
+            raise EditorialError("corroboration_policy_invalid")
+        return policies, automatic
     except (OSError, io.BridgeError, UnicodeError, yaml.YAMLError, RecursionError):
         raise EditorialError("corroboration_policy_unreadable") from None
+
+
+def load_corroboration_policies(path: Path) -> dict[str, CorroborationPolicy]:
+    """Compatibility helper for focused policy validation callers."""
+    return load_corroboration_rules(path)[0]
 
 
 def _check_gateway_batch(inbox: Path, maximum: int) -> None:
@@ -232,8 +250,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 from waagd_discovery.editorial.verifier import SourceVerifier
 
+                rules, automatic = load_corroboration_rules(args.corroboration_policy)
                 verifier = SourceVerifier(
-                    corroboration_policies=load_corroboration_policies(args.corroboration_policy)
+                    corroboration_policies=rules, automatic_corroboration=automatic
                 )
                 editor = GatewayEditor(
                     args.gateway_executable,

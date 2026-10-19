@@ -7,7 +7,7 @@ Neither Bridge candidate metadata nor retrieved page links are policy input here
 import re
 import unicodedata
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from waagd_discovery.editorial.contracts import EditorialError
 
@@ -95,3 +95,33 @@ class CorroborationPolicy:
         return independent_host in self.trusted_independent_hosts and not _related_hosts(
             article_host, independent_host
         )
+
+
+@dataclass(frozen=True)
+class AutomaticCorroborationPolicy:
+    """A governed verifier endpoint, not a candidate-provided lookup URL.
+
+    The endpoint must return one strict JSON assertion for the supplied canonical
+    URL. The resulting claim still has to occur verbatim in the retrieved article.
+    """
+
+    endpoint_template: str
+
+    def __post_init__(self) -> None:
+        marker = "{candidate_url}"
+        if (
+            not isinstance(self.endpoint_template, str)
+            or self.endpoint_template.count(marker) != 1
+            or marker not in (urlsplit(self.endpoint_template).query or "")
+        ):
+            raise EditorialError("corroboration_policy_invalid")
+        _host(self.endpoint_template.replace(marker, "https%3A%2F%2Fcandidate.invalid%2F"))
+
+    def lookup_url(self, article_url: str) -> str:
+        value = self.endpoint_template.replace("{candidate_url}", quote(article_url, safe=""))
+        if not self.authorizes(article_url, value):
+            raise EditorialError("corroboration_policy_invalid")
+        return value
+
+    def authorizes(self, article_url: str, independent_url: str) -> bool:
+        return not _related_hosts(_host(article_url), _host(independent_url))

@@ -1,6 +1,7 @@
 """Conservative retrieval evidence, never automatic factual corroboration."""
 
 import hashlib
+import json
 import re
 import unicodedata
 from collections.abc import Callable, Mapping
@@ -15,7 +16,12 @@ from waagd_discovery.editorial.contracts import (
     utc,
     validate_verification,
 )
-from waagd_discovery.editorial.corroboration import CorroborationPolicy, contains_exact_claim
+from waagd_discovery.editorial.corroboration import (
+    AutomaticCorroborationPolicy,
+    CorroborationClaim,
+    CorroborationPolicy,
+    contains_exact_claim,
+)
 from waagd_discovery.editorial.transport import FetchDocument, PinnedTransport
 
 _HIDDEN = {"head", "script", "style", "svg", "math", "template", "iframe", "object", "noscript"}
@@ -104,6 +110,7 @@ class SourceVerifier:
         allow_http: bool = False,
         clock: Callable[[], datetime] | None = None,
         corroboration_policies: Mapping[str, CorroborationPolicy] | None = None,
+        automatic_corroboration: AutomaticCorroborationPolicy | None = None,
     ) -> None:
         self.transport = transport or PinnedTransport(allow_http=allow_http)
         self.clock = clock
@@ -113,6 +120,63 @@ class SourceVerifier:
             for key, policy in self.corroboration_policies.items()
         ):
             raise EditorialError("corroboration_policy_invalid")
+        if automatic_corroboration is not None and not isinstance(
+            automatic_corroboration, AutomaticCorroborationPolicy
+        ):
+            raise EditorialError("corroboration_policy_invalid")
+        self.automatic_corroboration = automatic_corroboration
+
+    def _automatic_corroborate(
+        self,
+        result: dict[str, Any],
+        article_excerpt: str,
+        policy: AutomaticCorroborationPolicy,
+    ) -> None:
+        try:
+            document = self.transport.fetch(policy.lookup_url(result["canonical_url"]))
+            if document.status != 200 or not policy.authorizes(
+                result["canonical_url"], document.url
+            ):
+                raise EditorialError("source_independent_response_unsafe")
+            assertion = json.loads(document.body.decode("utf-8"))
+            if (
+                not isinstance(assertion, dict)
+                or set(assertion) != {"canonical_url", "claim"}
+                or assertion["canonical_url"] != result["canonical_url"]
+            ):
+                raise EditorialError("source_independent_response_invalid")
+            claim = CorroborationClaim(assertion["claim"], document.url)
+            if not (
+                contains_exact_claim(article_excerpt, claim.claim)
+                and contains_exact_claim(document.body.decode("utf-8"), claim.claim)
+            ):
+                raise EditorialError("source_independent_claim_unconfirmed")
+            fetched = utc(self.clock() if self.clock else None).isoformat()
+            body_hash = hashlib.sha256(document.body).hexdigest()
+            identity = hashlib.sha256((document.url + "\0" + body_hash).encode()).hexdigest()
+            result["evidence"].append(
+                {
+                    "id": identity,
+                    "url": document.url,
+                    "retrieved_at": fetched,
+                    "sha256": body_hash,
+                    "excerpt": claim.claim,
+                    "source_kind": "independent",
+                }
+            )
+            result["claim_support"] = [
+                {
+                    "claim": claim.claim,
+                    "evidence_ids": [result["evidence"][0]["id"], identity],
+                    "independently_confirmed": True,
+                }
+            ]
+            result["verification_status"] = "VERIFIED"
+            result["uncertainties"] = []
+        except (EditorialError, UnicodeError, json.JSONDecodeError, TypeError):
+            result["uncertainties"].append(
+                "A governed independent assertion could not be corroborated."
+            )
 
     def _corroborate(
         self, result: dict[str, Any], article_excerpt: str, policy: CorroborationPolicy
@@ -220,6 +284,10 @@ class SourceVerifier:
                 policy = self.corroboration_policies.get(result["candidate_key"])
                 if policy is not None:
                     self._corroborate(result, extracted[:8000], policy)
+                elif self.automatic_corroboration is not None:
+                    self._automatic_corroborate(
+                        result, extracted[:8000], self.automatic_corroboration
+                    )
             except EditorialError as error:
                 # Only errors emitted by our transport/extractor are permitted into the schema.
                 code = str(error)

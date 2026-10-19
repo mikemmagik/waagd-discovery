@@ -72,6 +72,19 @@ corroboration:
           independent_url: https://confirm.example/independent-report
 ```
 
+For unattended staging, a separately governed verification service may instead
+be pre-authorized with a fixed HTTPS template. The candidate URL is percent-encoded
+only into the configured query placeholder; it cannot select a host or path. The
+service must return exactly `canonical_url` and a 20–300-character `claim`, and the
+claim must occur verbatim in both its response and the retrieved article. A failed,
+redirected, malformed, or mismatched response stays `PARTIAL`.
+
+```yaml
+corroboration:
+  automatic:
+    endpoint_template: https://verify.example/check?candidate_url={candidate_url}
+```
+
 The Gateway command rejects a batch larger than `--gateway-max-candidates` (1–10)
 before it can start a model turn. `--gateway-max-cost-usd` is mandatory and capped
 at one USD per candidate; the batch ceiling is their product. Use a smaller
