@@ -53,18 +53,47 @@ def _text(value: Any, maximum: int) -> bool:
 
 
 def _content_hash(intent: dict[str, Any]) -> str:
-    """Match site canonicalPublicationJson(): sorted object keys, array order."""
+    """Match frozen site `publicationIntentHashDocument()` byte-for-byte."""
     try:
-        canonical = json.dumps(
-            intent["post"],
-            ensure_ascii=False,
-            allow_nan=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("utf-8")
+        post = intent["post"]
+        document = {
+            "version": intent["version"],
+            "intent_id": intent["intent_id"],
+            "origin": intent["origin"],
+            "authorization": {
+                "kind": intent["authorization"]["kind"],
+                "approved": intent["authorization"]["approved"],
+            },
+            "editorial": {
+                "decision_id": intent["editorial"]["decision_id"],
+                "source_event_id": intent["editorial"]["source_event_id"],
+                "source_attribution": intent["editorial"]["source_attribution"],
+                "approved_at": intent["editorial"]["approved_at"],
+                "publication_policy": {
+                    "version": intent["editorial"]["publication_policy"]["version"],
+                    "outcome": intent["editorial"]["publication_policy"]["outcome"],
+                },
+            },
+            "post": {
+                key: post[key]
+                for key in (
+                    "type",
+                    "url",
+                    "canonical_url",
+                    "source_item_id",
+                    "title",
+                    "source",
+                    "origin",
+                    "preview",
+                    "embed",
+                    "body",
+                    "references",
+                )
+            },
+        }
+        return hashlib.sha256(_json(document)).hexdigest()
     except (KeyError, TypeError, ValueError, UnicodeError, RecursionError):
         raise EditorialError("publication_payload_invalid") from None
-    return hashlib.sha256(canonical).hexdigest()
 
 
 def _payload(
