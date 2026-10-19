@@ -144,3 +144,13 @@ def test_private_policy_is_explicit_and_default_remains_deny_all(tmp_path: Path)
     path.chmod(0o644)
     with pytest.raises(EditorialError, match="publication_policy_unreadable"):
         load_publication_policy(path)
+
+
+def test_delivery_id_is_not_in_stable_editorial_identity() -> None:
+    from waagd_discovery.editorial.publication import _payload
+
+    item, verified, ready = candidate(), verification("VERIFIED"), decision("READY_FOR_REVIEW")
+    ready["risks"] = []
+    first = _payload(item, verified, ready, inbox()["delivery_id"], 1, _policy())
+    second = _payload(item, verified, ready, "4db343d2-d078-4f4d-858c-32531e6d79a4", 1, _policy())
+    assert first == second
