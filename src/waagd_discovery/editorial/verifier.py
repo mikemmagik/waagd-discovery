@@ -3,7 +3,7 @@
 import hashlib
 import re
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from html.parser import HTMLParser
 from typing import Any, Protocol
@@ -15,6 +15,7 @@ from waagd_discovery.editorial.contracts import (
     utc,
     validate_verification,
 )
+from waagd_discovery.editorial.corroboration import CorroborationPolicy, contains_exact_claim
 from waagd_discovery.editorial.transport import FetchDocument, PinnedTransport
 
 _HIDDEN = {"head", "script", "style", "svg", "math", "template", "iframe", "object", "noscript"}
@@ -102,9 +103,77 @@ class SourceVerifier:
         *,
         allow_http: bool = False,
         clock: Callable[[], datetime] | None = None,
+        corroboration_policies: Mapping[str, CorroborationPolicy] | None = None,
     ) -> None:
         self.transport = transport or PinnedTransport(allow_http=allow_http)
         self.clock = clock
+        self.corroboration_policies = dict(corroboration_policies or {})
+        if any(
+            not isinstance(policy, CorroborationPolicy) or key != policy.candidate_key
+            for key, policy in self.corroboration_policies.items()
+        ):
+            raise EditorialError("corroboration_policy_invalid")
+
+    def _corroborate(
+        self, result: dict[str, Any], article_excerpt: str, policy: CorroborationPolicy
+    ) -> None:
+        article = result["evidence"][0]
+        if not all(
+            policy.authorizes(result["canonical_url"], claim.independent_url)
+            for claim in policy.claims
+        ):
+            result["uncertainties"].append("Configured independent source is not authorized.")
+            return
+        independent: dict[str, dict[str, Any]] = {}
+        for claim in policy.claims:
+            if claim.independent_url in independent:
+                continue
+            try:
+                document = self.transport.fetch(claim.independent_url)
+                if document.status != 200:
+                    raise EditorialError(f"source_http_status_{document.status}")
+                if not policy.authorizes(result["canonical_url"], document.url):
+                    raise EditorialError("source_independent_redirect_unsafe")
+                extracted = article_text(document)
+                if not extracted:
+                    raise EditorialError("source_text_empty")
+                retrieved_at = utc(self.clock() if self.clock else None).isoformat()
+                body_hash = hashlib.sha256(document.body).hexdigest()
+                identity = hashlib.sha256((document.url + "\0" + body_hash).encode()).hexdigest()
+                evidence = {
+                    "id": identity,
+                    "url": document.url,
+                    "retrieved_at": retrieved_at,
+                    "sha256": body_hash,
+                    "excerpt": extracted[:8000],
+                    "source_kind": "independent",
+                }
+                result["evidence"].append(evidence)
+                independent[claim.independent_url] = evidence
+            except EditorialError:
+                result["uncertainties"].append(
+                    "A configured independent source could not be corroborated."
+                )
+                return
+        for claim in policy.claims:
+            supporting = independent[claim.independent_url]
+            if not (
+                contains_exact_claim(article_excerpt, claim.claim)
+                and contains_exact_claim(supporting["excerpt"], claim.claim)
+            ):
+                result["uncertainties"].append(
+                    "A material claim lacks exact independent corroboration."
+                )
+                return
+            result["claim_support"].append(
+                {
+                    "claim": claim.claim,
+                    "evidence_ids": [article["id"], supporting["id"]],
+                    "independently_confirmed": True,
+                }
+            )
+        result["verification_status"] = "VERIFIED"
+        result["uncertainties"] = []
 
     def verify(self, candidate: dict[str, Any], *, policy_id: str) -> dict[str, Any]:
         result = _base(candidate)
@@ -148,6 +217,9 @@ class SourceVerifier:
                         ],
                     }
                 )
+                policy = self.corroboration_policies.get(result["candidate_key"])
+                if policy is not None:
+                    self._corroborate(result, extracted[:8000], policy)
             except EditorialError as error:
                 # Only errors emitted by our transport/extractor are permitted into the schema.
                 code = str(error)
