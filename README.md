@@ -92,6 +92,15 @@ runtime Bridge behavior and contracts are unchanged. See the
 [rc.2 patch report](docs/PATCH_0_5_0_RC2_REPORT.md) and
 [independent QA](docs/PATCH_0_5_0_RC2_QA_REVIEW.md).
 
+v0.6.0 completes the accepted Sprint 6 integration without enabling a deployment.
+It retains the Discovery engine and schema 4, Scheduler, Bridge v1/v2, Editorial
+Controller/Store, Source Verifier, bounded Gateway adapter, trusted PublicationIntent
+v1 policy gate, and private recovery-aware handoff. Automatic publication remains
+default-deny and requires VERIFIED evidence plus the site's independent kill switch.
+The final compatibility target is site commit
+`ca112b2ab89a7ec0d82b85b06df07bb86a35b41c`; see the
+[final operator handoff](docs/WAAGD_DISCOVERY_STABLE_HANDOFF.md).
+
 ## Development
 
 ```sh

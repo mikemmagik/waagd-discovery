@@ -106,11 +106,18 @@
     documented Gateway-backed agent invocation requires installed-version/tool
     isolation validation and separate operator approval. Same-user private paths
     and prompt policy cannot replace process/tool isolation or factual review.
-32. PublicationIntent v1 has one closed cross-repository wire form: a v1 batch
-    from `waagd-discovery` and `auto:<candidate_key>:<decision_revision>` items
-    with canonical-post SHA-256, evidence and delivery provenance. Discovery
-    creates only data; the site journal owns Worker credentials, duplicate
-    reconciliation, kill switch and final authorization. A private default-deny
-    policy is required to emit automatic intents. The assertion is audit data,
-    never a bearer capability. Until a governed real independent evidence source
-    passes staging acceptance, the policy remains disabled outside fixtures.
+32. PublicationIntent v1 has one closed cross-repository wire form: one
+    `publication-intent.json` document with `auto-<candidate_key>-r<revision>`
+    identity, delivery-independent editorial source identity, and a canonical
+    full-envelope SHA-256. Discovery creates only data; the site journal owns
+    Worker credentials, duplicate reconciliation, kill switch and final
+    authorization. A private default-deny policy is required to emit automatic
+    intents. The assertion is audit data, never a bearer capability. Until a
+    governed real independent evidence source passes staging acceptance, the
+    policy remains disabled outside fixtures.
+33. v0.6.0 freezes the accepted Sprint 5/6 implementation. The final site
+    compatibility pin is `ca112b2ab89a7ec0d82b85b06df07bb86a35b41c`; its validator
+    defines the one-item `publication-intent.json` document and full-envelope hash.
+    Keep automatic publication default-deny and require VERIFIED evidence, trusted
+    policy, and the separate site kill switch. A stable release does not authorize a
+    deployment or mutation of the protected v0.4.1 Bridge delivery.
