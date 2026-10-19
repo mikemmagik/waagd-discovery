@@ -1,0 +1,95 @@
+{
+  "architectures": [
+    {
+      "architecture": "arm64",
+      "execution": "native",
+      "image": "waagd-discovery:rc2-arm64",
+      "image_id": "sha256:e340c638a9885ad355b9320549aaadfcaf3e21c43dbd2f38531d91f6505382bc",
+      "package_version": "0.5.0rc2",
+      "stages": {
+        "bridge": {
+          "elapsed_seconds": 5.865,
+          "log_sha256": "3b391d28f536d9e894cf2f7836d4326fa3c8ed3f1195d88d77da5165cb935c18",
+          "status": "PASS"
+        },
+        "config": {
+          "elapsed_seconds": 0.514,
+          "log_sha256": "aa681eebc60bc434112545886eba056884ad021dd4f13428e64bf5d58301fbdc",
+          "status": "PASS"
+        },
+        "editorial": {
+          "elapsed_seconds": 5.273,
+          "log_sha256": "9a218c985d558a25ec866b0dfb547f40ce8c6f99f42a15fc4682e5bf6d092508",
+          "lost_ack_reconciled_after_expiry": true,
+          "max_observed_phase_cgroup_peak_bytes": 53407744,
+          "status": "PASS"
+        },
+        "persistence": {
+          "elapsed_seconds": 7.259,
+          "log_sha256": "3d16b062fa79ee7a5a3d6612717a1b9d97459fb1e6d36d708fe87a46628bf904",
+          "status": "PASS"
+        },
+        "scheduler": {
+          "elapsed_seconds": 57.115,
+          "log_sha256": "1111c9b1e2059f267cf245a16c8d381e65b284a6c622c12fd24486f4061fcc9d",
+          "memory_peak_bytes": 56348672,
+          "status": "PASS"
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "architecture": "amd64",
+      "execution": "emulated",
+      "image": "waagd-discovery:rc2-amd64",
+      "image_id": "sha256:46ffe3fb253e6d75587c3261bf74d57f2275f3eeb98e3a6a588958dc5b447ac6",
+      "package_version": "0.5.0rc2",
+      "stages": {
+        "bridge": {
+          "elapsed_seconds": 10.886,
+          "log_sha256": "e1abec08808fc6917755aa256de6a94fc183a5d3f498b4b69d812766e80a17ba",
+          "status": "PASS"
+        },
+        "config": {
+          "elapsed_seconds": 0.987,
+          "log_sha256": "ccbb43f41e96e660203dff3d3bfe43509d3cb3075509dc1ec7154dd853a7f2ce",
+          "status": "PASS"
+        },
+        "editorial": {
+          "elapsed_seconds": 10.469,
+          "log_sha256": "ffdde1fe2693c5219a03cb8a680f63cd10cca0849e81ac054479b2f421a1c339",
+          "lost_ack_reconciled_after_expiry": true,
+          "max_observed_phase_cgroup_peak_bytes": 90693632,
+          "status": "PASS"
+        },
+        "persistence": {
+          "elapsed_seconds": 12.269,
+          "log_sha256": "9ff977c635c8fbbf5a44b723724e8da3a42ff75ba71873c73ff79e48bd25f62d",
+          "status": "PASS"
+        },
+        "scheduler": {
+          "elapsed_seconds": 65.115,
+          "log_sha256": "ea748a544535a02dde506c49b427a9a0dc7e20c8cffa25fcbedeea9e025b859d",
+          "memory_peak_bytes": 91488256,
+          "status": "PASS"
+        }
+      },
+      "status": "PASS"
+    }
+  ],
+  "cleanup": {
+    "smoke_containers_remaining": 0,
+    "smoke_volumes_remaining": 0
+  },
+  "runtime_commit": "7bf342b1ba805b9bc31b303f34727884a3fdb14f",
+  "runtime_inputs_match_current_commit": true,
+  "scope": "Disposable offline local fixtures only; ARM64 native, AMD64 emulated; no operator Mac, production volume, OpenClaw or LLM",
+  "source_config_modes": {
+    "backup.yaml": "0600",
+    "filter.yaml": "0600",
+    "handoff.yaml": "0600",
+    "scheduler.yaml": "0600",
+    "sources.yaml": "0600"
+  },
+  "status": "PASS"
+}

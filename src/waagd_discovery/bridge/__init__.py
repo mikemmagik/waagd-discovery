@@ -21,6 +21,50 @@ from waagd_discovery.bridge.validation import (
 
 __all__ = ["Bridge", "BridgeError"]
 
+_PROTECTED = frozenset({"dbf6d7a2-395e-40c6-8e91-7866aab89e53"})
+
+
+def _payload_digest(value: dict[str, Any]) -> str:
+    return hashlib.sha256(io.encode(value)).hexdigest()
+
+
+def _validate_receipts(value: Any, acknowledged: list[str], dismissed: list[str]) -> None:
+    if not isinstance(value, dict) or len(value) > 10000:
+        raise BridgeError("ledger_corrupt")
+    for identifier, receipt in value.items():
+        if (
+            not _uuid(identifier)
+            or not isinstance(receipt, dict)
+            or set(receipt)
+            != {
+                "delivery_id",
+                "status",
+                "payload_digest",
+                "schema_version",
+                "expires_at",
+                "acknowledged_at",
+                "state_version",
+            }
+            or receipt["delivery_id"] != identifier
+            or receipt["status"] not in {"acknowledged", "dismissed"}
+            or type(receipt["state_version"]) is not int
+            or receipt["state_version"] != 2
+            or type(receipt["schema_version"]) is not int
+            or receipt["schema_version"] not in {1, 2}
+            or not isinstance(receipt["payload_digest"], str)
+            or len(receipt["payload_digest"]) != 64
+            or any(c not in "0123456789abcdef" for c in receipt["payload_digest"])
+            or not isinstance(receipt["expires_at"], str)
+        ):
+            raise BridgeError("ledger_corrupt")
+        timestamp(receipt["expires_at"])
+        if receipt["status"] == "acknowledged":
+            if identifier not in acknowledged or not isinstance(receipt["acknowledged_at"], str):
+                raise BridgeError("ledger_corrupt")
+            timestamp(receipt["acknowledged_at"])
+        elif identifier not in dismissed or receipt["acknowledged_at"] is not None:
+            raise BridgeError("ledger_corrupt")
+
 
 def _utc(now: datetime | None) -> datetime:
     value = now or datetime.now(UTC)
@@ -44,6 +88,7 @@ def _checksum(value: dict[str, Any]) -> str:
 
 def _validate_state(value: Any) -> dict[str, Any]:
     try:
+        version = value.get("version") if isinstance(value, dict) else None
         if (
             not isinstance(value, dict)
             or set(value)
@@ -56,7 +101,9 @@ def _validate_state(value: Any) -> dict[str, Any]:
                 "dismissed_ids",
                 "checksum",
             }
-            or value["version"] != 1
+            | ({"receipts"} if version == 2 else set())
+            or type(version) is not int
+            or version not in {1, 2}
             or value["checksum"] != _checksum(value)
         ):
             raise BridgeError("ledger_corrupt")
@@ -94,6 +141,10 @@ def _validate_state(value: Any) -> dict[str, Any]:
             ):
                 raise BridgeError("ledger_corrupt")
         validate_envelope(value["snapshot"])
+        if value["snapshot"]["bridge_schema_version"] == 2 and version != 2:
+            raise BridgeError("ledger_corrupt")
+        if version == 2:
+            _validate_receipts(value["receipts"], acknowledged, dismissed)
         pending = value["pending"]
         if pending is not None:
             if (
@@ -138,7 +189,15 @@ def _validate_state(value: Any) -> dict[str, Any]:
 class Bridge:
     """One pending, durable delivery; explicit acknowledgement preserves URL history."""
 
-    def __init__(self, export: Path, workspace_root: Path, state_dir: Path, limit: int = 10):
+    def __init__(
+        self,
+        export: Path,
+        workspace_root: Path,
+        state_dir: Path,
+        limit: int = 10,
+        *,
+        schema_version: int = 1,
+    ):
         self.export = Path(export)
         self.workspace_root = Path(workspace_root)
         self.state_dir = Path(state_dir)
@@ -153,6 +212,9 @@ class Bridge:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
             raise BridgeError("limit_must_be_1_to_50")
         self.limit = limit
+        if type(schema_version) is not int or schema_version not in {1, 2}:
+            raise BridgeError("unsupported_envelope_version")
+        self.schema_version = schema_version
 
     def _verify(self, descriptor: int, path: Path, private: bool = False) -> None:
         current = io.open_directory(path, private=private)
@@ -326,21 +388,15 @@ class Bridge:
                             record["status"] = "delivered"
                     self._save(state, ledger)
                 return self._summary(ledger, clock)
+            if ledger is not None and ledger["version"] == 1 and self.schema_version == 2:
+                raise BridgeError("state_migration_required")
             # An ACK is durable before clearing the inbox. Repair its publication
             # even when the next export is missing or invalid.
             if ledger is not None:
                 self._publish(inbox, ledger["snapshot"])
             candidates, expiry = self._read_export(clock)
             if ledger is None:
-                ledger = {
-                    "version": 1,
-                    "records": {},
-                    "pending": None,
-                    "snapshot": envelope(None, [], clock, clock + timedelta(hours=2)),
-                    "acknowledged_ids": [],
-                    "dismissed_ids": [],
-                    "checksum": "",
-                }
+                ledger = self._new_ledger(clock, 2 if self.schema_version == 2 else 1)
             selected = [
                 item for item in candidates if item["candidate_key"] not in ledger["records"]
             ][: self.limit]
@@ -352,7 +408,9 @@ class Bridge:
                 # unbounded backlog or automatic pagination is created.
                 while True:
                     try:
-                        snapshot = envelope(delivery, selected, clock, expiry)
+                        snapshot = envelope(
+                            delivery, selected, clock, expiry, schema_version=self.schema_version
+                        )
                         break
                     except BridgeError as error:
                         if str(error) != "envelope_too_large" or len(selected) == 1:
@@ -402,15 +460,187 @@ class Bridge:
             pending = ledger["pending"]
             if pending is None or pending["envelope"]["delivery_id"] != delivery_id:
                 raise BridgeError("unknown_delivery_id")
-            for record in ledger["records"].values():
-                if record["delivery_id"] == delivery_id:
-                    record["status"] = terminal
-            ledger[own_history].append(delivery_id)
-            ledger["pending"] = None
-            ledger["snapshot"] = envelope(None, [], clock, clock + timedelta(hours=2))
+            self._commit_completion(ledger, state, inbox, delivery_id, terminal, clock)
+            return self._summary(ledger, clock)
+
+    def _new_ledger(self, clock: datetime, version: int) -> dict[str, Any]:
+        ledger: dict[str, Any] = {
+            "version": version,
+            "records": {},
+            "pending": None,
+            "snapshot": envelope(
+                None, [], clock, clock + timedelta(hours=2), schema_version=self.schema_version
+            ),
+            "acknowledged_ids": [],
+            "dismissed_ids": [],
+            "checksum": "",
+        }
+        if version == 2:
+            ledger["receipts"] = {}
+        return ledger
+
+    def _commit_completion(
+        self,
+        ledger: dict[str, Any],
+        state: int,
+        inbox: int,
+        delivery_id: str,
+        terminal: str,
+        clock: datetime,
+    ) -> None:
+        snapshot = ledger["pending"]["envelope"]
+        if ledger["version"] == 2:
+            ledger["receipts"][delivery_id] = {
+                "delivery_id": delivery_id,
+                "status": "acknowledged" if terminal == "processed" else "dismissed",
+                "payload_digest": _payload_digest(snapshot),
+                "schema_version": snapshot["bridge_schema_version"],
+                "expires_at": snapshot["expires_at"],
+                "acknowledged_at": clock.isoformat() if terminal == "processed" else None,
+                "state_version": 2,
+            }
+        for record in ledger["records"].values():
+            if record["delivery_id"] == delivery_id:
+                record["status"] = terminal
+        history = "acknowledged_ids" if terminal == "processed" else "dismissed_ids"
+        ledger[history].append(delivery_id)
+        ledger["pending"] = None
+        ledger["snapshot"] = envelope(
+            None,
+            [],
+            clock,
+            clock + timedelta(hours=2),
+            schema_version=snapshot["bridge_schema_version"],
+        )
+        self._save(state, ledger)
+        self._publish(inbox, ledger["snapshot"])
+
+    def migrate_state(self, now: datetime | None = None) -> dict[str, Any]:
+        """Explicit idle-only migration; never change a prepared delivery."""
+        clock = _utc(now)
+        if self.status(clock)["pending_delivery_id"] is not None:
+            raise BridgeError("pending_delivery_blocks_migration")
+        with self._access(mutate=True) as (state, inbox):
+            ledger = self._load(state, inbox)
+            if ledger is not None and ledger["pending"] is not None:
+                raise BridgeError("pending_delivery_blocks_migration")
+            if ledger is None:
+                ledger = self._new_ledger(clock, 2)
+            elif ledger["version"] == 1:
+                backup_name = "before-state-v2-" + uuid.uuid4().hex + ".json"
+                before = io.encode(ledger)
+                io.atomic_write(state, backup_name, before)
+                if io.read_file(state, backup_name, 8 * 1024 * 1024, private=True) != before:
+                    raise BridgeError("state_backup_verification_failed")
+                ledger["version"] = 2
+                ledger["receipts"] = {}
             self._save(state, ledger)
             self._publish(inbox, ledger["snapshot"])
-            return self._summary(ledger, clock)
+            return {**self._summary(ledger, clock), "state_version": 2}
+
+    def _receipt(self, ledger: dict[str, Any] | None, delivery_id: str) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "delivery_id": delivery_id,
+            "status": "unknown",
+            "payload_digest": None,
+            "schema_version": None,
+            "expires_at": None,
+            "acknowledged_at": None,
+            "state_version": ledger["version"] if ledger else None,
+        }
+        if ledger is None:
+            return result
+        if ledger["version"] == 2 and delivery_id in ledger["receipts"]:
+            return dict(ledger["receipts"][delivery_id])
+        pending = ledger["pending"]
+        if pending and pending["envelope"]["delivery_id"] == delivery_id:
+            value = pending["envelope"]
+            return {
+                **result,
+                "status": "pending",
+                "payload_digest": _payload_digest(value),
+                "schema_version": value["bridge_schema_version"],
+                "expires_at": value["expires_at"],
+            }
+        if delivery_id in ledger["acknowledged_ids"]:
+            result["status"] = "acknowledged"
+        elif delivery_id in ledger["dismissed_ids"]:
+            result["status"] = "dismissed"
+        return result
+
+    def inspect_delivery(self, delivery_id: str) -> dict[str, Any]:
+        """Read-only authoritative receipt; no inbox/public JSON authorization."""
+        if not _uuid(delivery_id):
+            raise BridgeError("invalid_delivery_id")
+        descriptors: list[int] = []
+        try:
+            workspace = io.open_directory(self.workspace_root)
+            descriptors.append(workspace)
+            if os.fstat(workspace).st_uid != os.geteuid() or os.fstat(workspace).st_mode & 0o022:
+                raise BridgeError("workspace_requires_owner_without_group_world_write")
+            try:
+                state = io.open_directory(self.state_dir, private=True)
+            except FileNotFoundError:
+                return self._receipt(None, delivery_id)
+            descriptors.append(state)
+            try:
+                lock = os.open(
+                    "bridge.lock", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=state
+                )
+            except FileNotFoundError:
+                for name in ("ledger.json", "initialized.json"):
+                    try:
+                        os.stat(name, dir_fd=state, follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue
+                    raise BridgeError("initialized_lock_missing") from None
+                return self._receipt(None, delivery_id)
+            descriptors.append(lock)
+            io.check_file(os.fstat(lock), private=True)
+            self._lock(lock, exclusive=False)
+            if io.identity(os.fstat(lock)) != io.identity(
+                os.stat("bridge.lock", dir_fd=state, follow_symlinks=False)
+            ):
+                raise BridgeError("lock_identity_changed")
+            ledger = self._load(state, None)
+            self._verify(state, self.state_dir, True)
+            self._verify(workspace, self.workspace_root)
+            return self._receipt(ledger, delivery_id)
+        finally:
+            for descriptor in reversed(descriptors):
+                os.close(descriptor)
+
+    def ack_if_current(
+        self, delivery_id: str, expected_digest: str, now: datetime | None = None
+    ) -> dict[str, Any]:
+        """Match exact durable input and expiry atomically; idempotent after commit."""
+        if delivery_id in _PROTECTED:
+            raise BridgeError("protected_delivery")
+        if not _uuid(delivery_id):
+            raise BridgeError("invalid_delivery_id")
+        if (
+            not isinstance(expected_digest, str)
+            or len(expected_digest) != 64
+            or any(c not in "0123456789abcdef" for c in expected_digest)
+        ):
+            raise BridgeError("invalid_payload_digest")
+        clock = _utc(now)
+        with self._access(mutate=True) as (state, inbox):
+            ledger = self._load(state, inbox)
+            if ledger is None or ledger["version"] != 2:
+                raise BridgeError("state_migration_required")
+            receipt = self._receipt(ledger, delivery_id)
+            if receipt["payload_digest"] != expected_digest:
+                raise BridgeError("delivery_digest_mismatch")
+            if receipt["status"] == "acknowledged":
+                self._publish(inbox, ledger["snapshot"])
+                return receipt
+            if receipt["status"] != "pending":
+                raise BridgeError("delivery_not_pending")
+            if timestamp(receipt["expires_at"]) <= clock:
+                raise BridgeError("delivery_expired")
+            self._commit_completion(ledger, state, inbox, delivery_id, "processed", clock)
+            return self._receipt(ledger, delivery_id)
 
     def status(self, now: datetime | None = None) -> dict[str, Any]:
         clock = _utc(now)

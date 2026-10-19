@@ -1,0 +1,152 @@
+{
+  "article_ids_urls_first_seen_preserved": true,
+  "article_source_identities_and_first_seen_preserved": true,
+  "baseline": {
+    "foreign_keys": "ok",
+    "integrity": "ok",
+    "schema": 4,
+    "tables": {
+      "article_sources": {
+        "count": 4,
+        "sha256": "9943baeb3dc0b953a5437b8bb0b52a3c84fa6dee745151d1220927f42110c920"
+      },
+      "articles": {
+        "count": 3,
+        "sha256": "eedf68fafad41da5380d543a6935c705831825a3135e533818a7bfc236c541b2"
+      },
+      "filter_batches": {
+        "count": 2,
+        "sha256": "b4899900e72001de7b47b0170002b88171a103c38da751deb1b60e4e6a9d2872"
+      },
+      "filter_decisions": {
+        "count": 6,
+        "sha256": "4a7866cf74b628b02b52fa4039ab926be1ecca85e8192c38141ddfa839e8c24d"
+      },
+      "observations": {
+        "count": 8,
+        "sha256": "b723d0c404e6c4457c5474b118edefaa891e99143370f205c0894b5719f72ce2"
+      },
+      "run_interruptions": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "runs": {
+        "count": 2,
+        "sha256": "4351aff25e10ffb1f1df6987c6dad8d0e668e752b285d2cecce76bd4fd7b95c5"
+      },
+      "service_state": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "source_guids": {
+        "count": 4,
+        "sha256": "3616097baa088ee0830d0f89adcf49aa33bbf35ec9b13207468fd2d4d4c59071"
+      },
+      "source_runs": {
+        "count": 4,
+        "sha256": "4a9d3b68411361ae1bb485c73b8fdde8dfbec3afd8a544a75faabe41ce525902"
+      },
+      "sources": {
+        "count": 2,
+        "sha256": "d69cad957f992b01dde8410d0047f8862267467be0f183233262d099e4bf5af9"
+      },
+      "url_aliases": {
+        "count": 3,
+        "sha256": "e95e717b2fed7ab8a290fbcaf335cce545d9a56069cb914f56ed588ac85c95a7"
+      }
+    }
+  },
+  "baseline_runtime": "v0.4.1",
+  "configured_handoff_publish": {
+    "candidates": 3,
+    "status": "exported"
+  },
+  "disposable_volumes_removed": true,
+  "last_seen_refresh_expected": true,
+  "new_image": "waagd-discovery:sprint5-release-arm64",
+  "new_image_id": "sha256:b3ca41178ea1f17fc0adc7184736bfc7868d9af90e5e6d0d2be3928ad06b8557",
+  "new_open_preserves_all_table_hashes": true,
+  "new_real_cycle": {
+    "handoff": {
+      "candidates": 3,
+      "diagnostics_saved": true,
+      "status": "exported"
+    },
+    "items_added": 0,
+    "items_existing": 4,
+    "status": "success"
+  },
+  "new_runtime": "v0.5.0rc1",
+  "old_backup_matches_all_tables": true,
+  "old_image": "sha256:2d5f66f5ab4807c1e24c882b3e01bd41b76bda31a6f43708733e0f182fd19038",
+  "old_image_reopens_new_cycle_database": true,
+  "original_history_rows_preserved": [
+    "observations",
+    "source_guids",
+    "url_aliases",
+    "filter_batches",
+    "filter_decisions",
+    "runs",
+    "source_runs"
+  ],
+  "original_pending_delivery_touched": false,
+  "post_cycle": {
+    "foreign_keys": "ok",
+    "integrity": "ok",
+    "schema": 4,
+    "tables": {
+      "article_sources": {
+        "count": 4,
+        "sha256": "1b95fbb1aeeb55547372131530e92cfb241799cf61db36e7a1ebf5bf96f61f7b"
+      },
+      "articles": {
+        "count": 3,
+        "sha256": "a5a3df49c576b0935d8e0e3a3a26ee5445a346e41d446fca8d516659ce331c3d"
+      },
+      "filter_batches": {
+        "count": 3,
+        "sha256": "561fb4d51933fa47d75498f4d7a5caafc7081dd44be636a22df084d9d507bbb1"
+      },
+      "filter_decisions": {
+        "count": 9,
+        "sha256": "a25097afc6f00582dbcd236290728a7a833048f0a1acd7c160efa8b44d99e8c7"
+      },
+      "observations": {
+        "count": 12,
+        "sha256": "64de92aa129c2d944e049ca4a76aeffbdc9ca76c9523ab8f4899359adf2797c5"
+      },
+      "run_interruptions": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "runs": {
+        "count": 3,
+        "sha256": "791248176d8dffbeba60107c614b6eb1f252899334c0a48ef406556c2db3d185"
+      },
+      "service_state": {
+        "count": 0,
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "source_guids": {
+        "count": 4,
+        "sha256": "3616097baa088ee0830d0f89adcf49aa33bbf35ec9b13207468fd2d4d4c59071"
+      },
+      "source_runs": {
+        "count": 6,
+        "sha256": "024210d656e569c65370eab7c177f3b6a575abf244ca11908ad63e488e80aa2c"
+      },
+      "sources": {
+        "count": 2,
+        "sha256": "d69cad957f992b01dde8410d0047f8862267467be0f183233262d099e4bf5af9"
+      },
+      "url_aliases": {
+        "count": 3,
+        "sha256": "e95e717b2fed7ab8a290fbcaf335cce545d9a56069cb914f56ed588ac85c95a7"
+      }
+    }
+  },
+  "publication_and_old_reopen_preserve_all_table_hashes": true,
+  "scope": "isolated disposable development volume; no target Mac access",
+  "seed_output": "Old image seed/backup: PASS",
+  "status": "PASS"
+}

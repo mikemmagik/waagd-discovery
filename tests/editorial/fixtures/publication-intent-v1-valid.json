@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "producer": "waagd-discovery",
+  "intents": [
+    {
+      "version": 1,
+      "intent_id": "auto:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1",
+      "origin": "waagd-discovery",
+      "authorization": {
+        "kind": "trusted_publication_policy",
+        "automatic": true
+      },
+      "post": {
+        "type": "news",
+        "origin": "auto",
+        "url": "https://example.test/story",
+        "canonical_url": "https://example.test/story",
+        "source_item_id": "waagd:c2a93f27c78582b570f57734face0287fb4a4f076a10edc15cc92acd3b4709e5",
+        "title": "Checked satire",
+        "source": "WAAGD",
+        "preview": null,
+        "embed": null,
+        "body": "A bounded body from a verified editorial decision.",
+        "references": [
+          {
+            "url": "https://example.test/evidence",
+            "title": "Evidence"
+          }
+        ]
+      },
+      "candidate_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "delivery_id": "5bdac05a-6f04-4bb9-a7d7-c08530c4fb12",
+      "decision_revision": 1,
+      "verification_status": "VERIFIED",
+      "editorial_status": "READY_FOR_REVIEW",
+      "publisher": "waagd-discovery",
+      "published_at_source": "2026-10-19T00:00:00.000Z",
+      "risks": [],
+      "evidence_ids": [
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "content_hash": "6f4af71b94007545a64228c82551544b77078d5d64349780822528227dc4ce74",
+      "publication_policy_version": "policy-v1"
+    }
+  ]
+}

@@ -76,7 +76,8 @@
 25. State loss/corruption fails closed rather than reset delivery history. Keep
     initialized marker, ledger and lock together in private backups; rollback of
     this state requires replay-risk review. The ledger caps at 10,000 URL keys and
-    stops instead of pruning idempotency history. Sprint 5 needs separate approval.
+    stops instead of pruning idempotency history. Sprint 5 received separate
+    approval after this interface shipped; see decisions 27–31.
 26. Patch 0.4.1 makes all five embedded configuration files root-owned, group
     10001, mode 0440 via explicit Docker COPY flags, with /app/config mode 0755.
     Host source modes must not determine application readability. UID/GID 10001,
@@ -84,3 +85,39 @@
     prevents the application from changing file modes even on a writable test root.
     Build regression uses isolated 0600 source files on both architectures; host
     bind mounts remain operator-managed and are not changed by image COPY flags.
+27. Sprint 5 develops only a mock-only RC on an unmerged branch. The operator's
+    stable Mac and protected pending delivery are inaccessible and untouched.
+    Keep Controller, verifier, mock subprocess and Store distinct; no broker,
+    permanent service, OpenClaw implementation or LLM SDK is needed.
+28. Preserve v1 warning and exact pending bytes. Opt-in delivery v2 authorizes
+    only a dedicated trusted verifier. New private Bridge state 2 adds durable
+    receipts through explicit idle-only forward migration with verified backup;
+    old Bridge cannot downgrade it. Discovery stays schema 4.
+29. Article retrieval uses a separate pinned-IP transport with actual-peer checks
+    before HTTP/after TLS, all-answer public DNS validation, per-hop checks and
+    shared wire/time bounds. HTTP success yields PARTIAL, never factual VERIFIED.
+    Verified claim support requires trusted independent assessment; this RC only
+    tests that path with synthetic attestations.
+30. Store decisions and a validated whole-delivery ACK intent transactionally in
+    private Editorial schema 1. Reconcile via public authoritative Bridge receipts
+    and atomic conditional ACK. Revalidate durable business results on recovery;
+    no exactly-once external model promise, automatic reset or expiry dismissal.
+31. Real editor/network/ACK CLI paths remain unavailable in the RC. A future
+    documented Gateway-backed agent invocation requires installed-version/tool
+    isolation validation and separate operator approval. Same-user private paths
+    and prompt policy cannot replace process/tool isolation or factual review.
+32. PublicationIntent v1 has one closed cross-repository wire form: one
+    `publication-intent.json` document with `auto-<candidate_key>-r<revision>`
+    identity, delivery-independent editorial source identity, and a canonical
+    full-envelope SHA-256. Discovery creates only data; the site journal owns
+    Worker credentials, duplicate reconciliation, kill switch and final
+    authorization. A private default-deny policy is required to emit automatic
+    intents. The assertion is audit data, never a bearer capability. Until a
+    governed real independent evidence source passes staging acceptance, the
+    policy remains disabled outside fixtures.
+33. v0.6.0 freezes the accepted Sprint 5/6 implementation. The final site
+    compatibility pin is `ca112b2ab89a7ec0d82b85b06df07bb86a35b41c`; its validator
+    defines the one-item `publication-intent.json` document and full-envelope hash.
+    Keep automatic publication default-deny and require VERIFIED evidence, trusted
+    policy, and the separate site kill switch. A stable release does not authorize a
+    deployment or mutation of the protected v0.4.1 Bridge delivery.

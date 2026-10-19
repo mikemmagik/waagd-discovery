@@ -75,7 +75,31 @@ operator task. No permanent operator scheduler was activated during development.
 v0.4 adds a data-only host bridge and opt-in automatic selected export. The
 existing WAAGD agent is unchanged. See [Integration](docs/INTEGRATION.md) and
 [operator handoff](docs/BRIDGE_OPERATIONS.md); the separate deployed Intel Mac
-is inaccessible here. No real LLM processing, publication or Sprint 5 is enabled.
+is inaccessible here. No real LLM processing or publication is enabled.
+
+v0.5.0-rc.1 adds a separate mock-only Editorial Controller, private Editorial
+SQLite, bounded Source Verifier, versioned Bridge v2 and conditional ACK recovery.
+V1 remains the default and its pending deliveries are unchanged. Real processing,
+LLM calls and automatic ACK remain disabled. This release candidate is for review
+on a separate branch; it does not update the working Mac. See
+[Editorial architecture](docs/EDITORIAL_ARCHITECTURE.md),
+[isolated installation and rollback](docs/EDITORIAL_OPERATIONS.md),
+[Sprint 5 report](docs/SPRINT_5_REPORT.md) and
+[independent QA](docs/SPRINT_5_QA_REVIEW.md).
+
+v0.5.0-rc.2 corrects a macOS `umask 077` assumption in one Bridge security test;
+runtime Bridge behavior and contracts are unchanged. See the
+[rc.2 patch report](docs/PATCH_0_5_0_RC2_REPORT.md) and
+[independent QA](docs/PATCH_0_5_0_RC2_QA_REVIEW.md).
+
+v0.6.0 completes the accepted Sprint 6 integration without enabling a deployment.
+It retains the Discovery engine and schema 4, Scheduler, Bridge v1/v2, Editorial
+Controller/Store, Source Verifier, bounded Gateway adapter, trusted PublicationIntent
+v1 policy gate, and private recovery-aware handoff. Automatic publication remains
+default-deny and requires VERIFIED evidence plus the site's independent kill switch.
+The final compatibility target is site commit
+`ca112b2ab89a7ec0d82b85b06df07bb86a35b41c`; see the
+[final operator handoff](docs/WAAGD_DISCOVERY_STABLE_HANDOFF.md).
 
 ## Development
 
@@ -89,6 +113,7 @@ python3 scripts/check-secrets.py
 bash scripts/docker-smoke.sh
 python3 scripts/docker-scheduler-smoke.py
 python3 scripts/docker-bridge-smoke.py
+python3 scripts/docker-editorial-smoke.py
 ```
 
 Offline tests use fixtures and mocked networking. Real source availability is

@@ -14,6 +14,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace-root", type=Path, required=True)
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--limit", type=int, default=10)
+    parser.add_argument("--schema-version", type=int, choices=(1, 2), default=1)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("sync")
     commands.add_parser("status")
@@ -23,10 +24,28 @@ def main(argv: list[str] | None = None) -> int:
     dismiss.add_argument("--delivery-id", required=True)
     watch = commands.add_parser("watch")
     watch.add_argument("--interval", type=int, default=60)
+    commands.add_parser("migrate-state")
+    inspect = commands.add_parser("inspect-delivery")
+    inspect.add_argument("--delivery-id", required=True)
+    conditional = commands.add_parser("ack-if-current")
+    conditional.add_argument("--delivery-id", required=True)
+    conditional.add_argument("--digest", required=True)
     args = parser.parse_args(argv)
     try:
-        bridge = Bridge(args.export, args.workspace_root, args.state_dir, args.limit)
-        if args.command == "watch":
+        bridge = Bridge(
+            args.export,
+            args.workspace_root,
+            args.state_dir,
+            args.limit,
+            schema_version=args.schema_version,
+        )
+        if args.command == "inspect-delivery":
+            result = bridge.inspect_delivery(args.delivery_id)
+        elif args.command == "ack-if-current":
+            result = bridge.ack_if_current(args.delivery_id, args.digest)
+        elif args.command == "migrate-state":
+            result = bridge.migrate_state()
+        elif args.command == "watch":
             if not 10 <= args.interval <= 3600:
                 raise BridgeError("interval_must_be_10_to_3600")
             while True:

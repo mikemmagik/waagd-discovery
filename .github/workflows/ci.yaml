@@ -97,3 +97,9 @@ jobs:
           WAAGD_SMOKE_SKIP_BUILD: "1"
           DOCKER_DEFAULT_PLATFORM: linux/${{ matrix.arch }}
         run: python3 scripts/docker-bridge-smoke.py
+      - name: Offline editorial processing and conditional ACK recovery smoke
+        env:
+          WAAGD_SMOKE_IMAGE: waagd-discovery:ci
+          WAAGD_SMOKE_SKIP_BUILD: "1"
+          DOCKER_DEFAULT_PLATFORM: linux/${{ matrix.arch }}
+        run: python3 scripts/docker-editorial-smoke.py

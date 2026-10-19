@@ -1,0 +1,641 @@
+{
+  "architectures": [
+    {
+      "architecture": "arm64",
+      "bridge": {
+        "bridge_runtime": {
+          "cpu_max": "100000 100000",
+          "database_mounted": false,
+          "docker_socket_present": false,
+          "effective_capabilities_zero": true,
+          "export_readonly": true,
+          "memory_limit_bytes": 536870912,
+          "no_new_privileges": true,
+          "pids_max": 64,
+          "uid": 10001
+        },
+        "duplicate_without_rewrite": true,
+        "exported_candidates": 25,
+        "image": "waagd-discovery:sprint5-release-arm64",
+        "image_id": "sha256:b3ca41178ea1f17fc0adc7184736bfc7868d9af90e5e6d0d2be3928ad06b8557",
+        "next_batch_disjoint": true,
+        "pending_limit": 10,
+        "repeated_ack_idempotent": true,
+        "restart_same_delivery": true,
+        "status": "pass",
+        "wrong_ack_rejected": true
+      },
+      "configuration_0600": {
+        "architecture": "arm64",
+        "image": "waagd-discovery:sprint5-release-arm64",
+        "image_id": "sha256:b3ca41178ea1f17fc0adc7184736bfc7868d9af90e5e6d0d2be3928ad06b8557",
+        "restrictions": {
+          "cap_drop": [
+            "ALL"
+          ],
+          "network": "none",
+          "no_new_privileges": true,
+          "read_only": true
+        },
+        "runtime": {
+          "files": {
+            "backup.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "filter.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "handoff.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "scheduler.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "sources.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            }
+          },
+          "gid": 10001,
+          "modification_denied": true,
+          "policy_loading": "PASS",
+          "uid": 10001
+        },
+        "source_config_modes": {
+          "backup.yaml": "0600",
+          "filter.yaml": "0600",
+          "handoff.yaml": "0600",
+          "scheduler.yaml": "0600",
+          "sources.yaml": "0600"
+        },
+        "status": "PASS"
+      },
+      "editorial": {
+        "architecture": "arm64",
+        "elapsed_seconds": 5.016,
+        "image": "waagd-discovery:sprint5-release-arm64",
+        "image_id": "sha256:b3ca41178ea1f17fc0adc7184736bfc7868d9af90e5e6d0d2be3928ad06b8557",
+        "network": "none",
+        "phases": [
+          {
+            "exported": 3,
+            "phase": "seed",
+            "schema": 2,
+            "status": "pass"
+          },
+          {
+            "default_disabled": true,
+            "dry_run_no_ack": true,
+            "expired_operator_required": true,
+            "phase": "simulate",
+            "protected_id_rejected": true,
+            "runtime": {
+              "cpu_max": "100000 100000",
+              "discovery_database_mounted": false,
+              "docker_socket_present": false,
+              "effective_capabilities_zero": true,
+              "export_readonly": true,
+              "gid": 10001,
+              "memory_limit_bytes": 536870912,
+              "memory_peak_bytes": 52490240,
+              "no_new_privileges": true,
+              "pids_max": 64,
+              "root_readonly": true,
+              "uid": 10001
+            },
+            "simulation_restart_reused": true,
+            "status": "pass",
+            "v1_no_fetch": true
+          },
+          {
+            "completed": 3,
+            "phase": "persist",
+            "results_durable_before_ack": true,
+            "runtime": {
+              "cpu_max": "100000 100000",
+              "discovery_database_mounted": false,
+              "docker_socket_present": false,
+              "effective_capabilities_zero": true,
+              "export_readonly": true,
+              "gid": 10001,
+              "memory_limit_bytes": 536870912,
+              "memory_peak_bytes": 31563776,
+              "no_new_privileges": true,
+              "pids_max": 64,
+              "root_readonly": true,
+              "uid": 10001
+            },
+            "status": "pass"
+          },
+          {
+            "abrupt_exit_code": 81,
+            "ack_commit_response_lost": true,
+            "decisions_not_regenerated": true,
+            "phase": "lose_ack_response",
+            "runtime": {
+              "cpu_max": "100000 100000",
+              "discovery_database_mounted": false,
+              "docker_socket_present": false,
+              "effective_capabilities_zero": true,
+              "export_readonly": true,
+              "gid": 10001,
+              "memory_limit_bytes": 536870912,
+              "memory_peak_bytes": 23904256,
+              "no_new_privileges": true,
+              "pids_max": 64,
+              "root_readonly": true,
+              "uid": 10001
+            },
+            "status": "pass"
+          },
+          {
+            "editorial_schema": 1,
+            "integrity_check": "ok",
+            "lost_ack_reconciled_after_restart_and_expiry": true,
+            "phase": "reconcile",
+            "runtime": {
+              "cpu_max": "100000 100000",
+              "discovery_database_mounted": false,
+              "docker_socket_present": false,
+              "effective_capabilities_zero": true,
+              "export_readonly": true,
+              "gid": 10001,
+              "memory_limit_bytes": 536870912,
+              "memory_peak_bytes": 23707648,
+              "no_new_privileges": true,
+              "pids_max": 64,
+              "root_readonly": true,
+              "uid": 10001
+            },
+            "status": "pass"
+          }
+        ],
+        "scope": "Synthetic fixtures; no real OpenClaw, network or production data",
+        "status": "pass"
+      },
+      "editorial_max_observed_phase_cgroup_peak_bytes": 52490240,
+      "editorial_memory_scope": "maximum of four measured phase-container cgroup peaks; not a load benchmark",
+      "execution": "native",
+      "image": "waagd-discovery:sprint5-release-arm64",
+      "image_id": "sha256:b3ca41178ea1f17fc0adc7184736bfc7868d9af90e5e6d0d2be3928ad06b8557",
+      "persistence_backup": {
+        "log_sha256": "f1585f5a0f074dbc05f0101d5a1266c14067dee4767271d935e45f830fcfa3ca",
+        "status": "PASS"
+      },
+      "scheduler": {
+        "checks": [
+          "cycles",
+          "deduplication",
+          "singleton",
+          "manual_lock",
+          "sigterm",
+          "restart",
+          "docker_sigkill_recovery",
+          "process_sigkill_autorestart",
+          "recovery",
+          "recreate",
+          "health",
+          "hardening",
+          "integrity"
+        ],
+        "cpu_limit": 1.0,
+        "elapsed_seconds": 57.713,
+        "image": "waagd-discovery:sprint5-release-arm64",
+        "memory_limit_bytes": 536870912,
+        "memory_peak_bytes": 56102912,
+        "memory_peak_scope": "final_recreated_scheduler_cgroup",
+        "sqlite": {
+          "articles": 2,
+          "eligible": 2,
+          "interrupted": 2,
+          "observations": 50,
+          "run_interruptions": 1,
+          "running": 0,
+          "runs": 26,
+          "session": {
+            "consecutive_failures": 0,
+            "heartbeat_at": "2026-10-18T19:48:50.466198+00:00",
+            "last_cycle_at": "2026-10-18T19:48:50.449862+00:00",
+            "last_cycle_finished_at": "2026-10-18T19:48:50.466198+00:00",
+            "last_error": null,
+            "last_result": {
+              "dry_run": false,
+              "filter": {
+                "articles_evaluated": 2,
+                "assessed_at": "2026-10-18T19:48:50.464397+00:00",
+                "counts": {
+                  "deferred": 0,
+                  "eligible": 2,
+                  "excluded": 0
+                },
+                "engine_version": "rules-v1",
+                "policy": {
+                  "future_tolerance_minutes": 15.0,
+                  "max_age_hours": 72.0,
+                  "min_description_chars": 40,
+                  "require_publisher": false
+                },
+                "policy_hash": "67aa6a9341fb0f35e218854e8852eda3bd0d68f055eab91237cc73909915b6da",
+                "reference_time": "2026-10-18T19:48:50.464342+00:00",
+                "run_id": "4a673128-45f7-4863-9af7-39f9ee606b6b"
+              },
+              "finished_at": "2026-10-18T19:48:50.463591+00:00",
+              "handoff": {
+                "status": "disabled"
+              },
+              "items_added": 0,
+              "items_existing": 2,
+              "items_failed": 0,
+              "items_received": 2,
+              "items_skipped": 0,
+              "recovered_runs": [],
+              "run_id": "e7e0d6fc-9eb4-41b4-96c1-7f97f23774b8",
+              "sources": [
+                {
+                  "error_code": null,
+                  "finished_at": "2026-10-18T19:48:50.460814+00:00",
+                  "items_added": 0,
+                  "items_existing": 1,
+                  "items_failed": 0,
+                  "items_received": 1,
+                  "items_skipped": 0,
+                  "source_id": "first",
+                  "status": "success"
+                },
+                {
+                  "error_code": null,
+                  "finished_at": "2026-10-18T19:48:50.462489+00:00",
+                  "items_added": 0,
+                  "items_existing": 1,
+                  "items_failed": 0,
+                  "items_received": 1,
+                  "items_skipped": 0,
+                  "source_id": "second",
+                  "status": "success"
+                }
+              ],
+              "sources_checked": 2,
+              "sources_failed": 0,
+              "sources_successful": 2,
+              "started_at": "2026-10-18T19:48:50.458193+00:00",
+              "status": "success"
+            },
+            "last_success_at": "2026-10-18T19:48:50.466147+00:00",
+            "next_run_at": "2026-10-18T19:48:52.466198+00:00",
+            "session_id": "db337559-046c-44f7-a6d6-0aef3d9a598c",
+            "started_at": "2026-10-18T19:48:19.967144+00:00",
+            "status": "waiting"
+          },
+          "source_runs": 50,
+          "success": 24
+        },
+        "status": "PASS"
+      }
+    },
+    {
+      "architecture": "amd64",
+      "bridge": {
+        "bridge_runtime": {
+          "cpu_max": "100000 100000",
+          "database_mounted": false,
+          "docker_socket_present": false,
+          "effective_capabilities_zero": true,
+          "export_readonly": true,
+          "memory_limit_bytes": 536870912,
+          "no_new_privileges": true,
+          "pids_max": 64,
+          "uid": 10001
+        },
+        "duplicate_without_rewrite": true,
+        "exported_candidates": 25,
+        "image": "waagd-discovery:sprint5-release-amd64",
+        "image_id": "sha256:c3a23150955e97ab874a2af866d1d64fc58b0cdc05cc0a38cb0441deff3a9de3",
+        "next_batch_disjoint": true,
+        "pending_limit": 10,
+        "repeated_ack_idempotent": true,
+        "restart_same_delivery": true,
+        "status": "pass",
+        "wrong_ack_rejected": true
+      },
+      "configuration_0600": {
+        "architecture": "amd64",
+        "image": "waagd-discovery:sprint5-release-amd64",
+        "image_id": "sha256:c3a23150955e97ab874a2af866d1d64fc58b0cdc05cc0a38cb0441deff3a9de3",
+        "restrictions": {
+          "cap_drop": [
+            "ALL"
+          ],
+          "network": "none",
+          "no_new_privileges": true,
+          "read_only": true
+        },
+        "runtime": {
+          "files": {
+            "backup.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "filter.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "handoff.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "scheduler.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            },
+            "sources.yaml": {
+              "gid": 10001,
+              "loaded": true,
+              "mode": "0440",
+              "uid": 0
+            }
+          },
+          "gid": 10001,
+          "modification_denied": true,
+          "policy_loading": "PASS",
+          "uid": 10001
+        },
+        "source_config_modes": {
+          "backup.yaml": "0600",
+          "filter.yaml": "0600",
+          "handoff.yaml": "0600",
+          "scheduler.yaml": "0600",
+          "sources.yaml": "0600"
+        },
+        "status": "PASS"
+      },
+      "editorial": {
+        "architecture": "amd64",
+        "elapsed_seconds": 9.581,
+        "image": "waagd-discovery:sprint5-release-amd64",
+        "image_id": "sha256:c3a23150955e97ab874a2af866d1d64fc58b0cdc05cc0a38cb0441deff3a9de3",
+        "network": "none",
+        "phases": [
+          {
+            "exported": 3,
+            "phase": "seed",
+            "schema": 2,
+            "status": "pass"
+          },
+          {
+            "default_disabled": true,
+            "dry_run_no_ack": true,
+            "expired_operator_required": true,
+            "phase": "simulate",
+            "protected_id_rejected": true,
+            "runtime": {
+              "cpu_max": "100000 100000",
+              "discovery_database_mounted": false,
+              "docker_socket_present": false,
+              "effective_capabilities_zero": true,
+              "export_readonly": true,
+              "gid": 10001,
+              "memory_limit_bytes": 536870912,
+              "memory_peak_bytes": 90206208,
+              "no_new_privileges": true,
+              "pids_max": 64,
+              "root_readonly": true,
+              "uid": 10001
+            },
+            "simulation_restart_reused": true,
+            "status": "pass",
+            "v1_no_fetch": true
+          },
+          {
+            "completed": 3,
+            "phase": "persist",
+            "results_durable_before_ack": true,
+            "runtime": {
+              "cpu_max": "100000 100000",
+              "discovery_database_mounted": false,
+              "docker_socket_present": false,
+              "effective_capabilities_zero": true,
+              "export_readonly": true,
+              "gid": 10001,
+              "memory_limit_bytes": 536870912,
+              "memory_peak_bytes": 56610816,
+              "no_new_privileges": true,
+              "pids_max": 64,
+              "root_readonly": true,
+              "uid": 10001
+            },
+            "status": "pass"
+          },
+          {
+            "abrupt_exit_code": 81,
+            "ack_commit_response_lost": true,
+            "decisions_not_regenerated": true,
+            "phase": "lose_ack_response",
+            "runtime": {
+              "cpu_max": "100000 100000",
+              "discovery_database_mounted": false,
+              "docker_socket_present": false,
+              "effective_capabilities_zero": true,
+              "export_readonly": true,
+              "gid": 10001,
+              "memory_limit_bytes": 536870912,
+              "memory_peak_bytes": 38584320,
+              "no_new_privileges": true,
+              "pids_max": 64,
+              "root_readonly": true,
+              "uid": 10001
+            },
+            "status": "pass"
+          },
+          {
+            "editorial_schema": 1,
+            "integrity_check": "ok",
+            "lost_ack_reconciled_after_restart_and_expiry": true,
+            "phase": "reconcile",
+            "runtime": {
+              "cpu_max": "100000 100000",
+              "discovery_database_mounted": false,
+              "docker_socket_present": false,
+              "effective_capabilities_zero": true,
+              "export_readonly": true,
+              "gid": 10001,
+              "memory_limit_bytes": 536870912,
+              "memory_peak_bytes": 38502400,
+              "no_new_privileges": true,
+              "pids_max": 64,
+              "root_readonly": true,
+              "uid": 10001
+            },
+            "status": "pass"
+          }
+        ],
+        "scope": "Synthetic fixtures; no real OpenClaw, network or production data",
+        "status": "pass"
+      },
+      "editorial_max_observed_phase_cgroup_peak_bytes": 90206208,
+      "editorial_memory_scope": "maximum of four measured phase-container cgroup peaks; not a load benchmark",
+      "execution": "emulated",
+      "image": "waagd-discovery:sprint5-release-amd64",
+      "image_id": "sha256:c3a23150955e97ab874a2af866d1d64fc58b0cdc05cc0a38cb0441deff3a9de3",
+      "persistence_backup": {
+        "log_sha256": "201cf6774bc2673140948b338e460becd1516cdd809aa1432475cce6caca3df3",
+        "status": "PASS"
+      },
+      "scheduler": {
+        "checks": [
+          "cycles",
+          "deduplication",
+          "singleton",
+          "manual_lock",
+          "sigterm",
+          "restart",
+          "docker_sigkill_recovery",
+          "process_sigkill_autorestart",
+          "recovery",
+          "recreate",
+          "health",
+          "hardening",
+          "integrity"
+        ],
+        "cpu_limit": 1.0,
+        "elapsed_seconds": 66.611,
+        "image": "waagd-discovery:sprint5-release-amd64",
+        "memory_limit_bytes": 536870912,
+        "memory_peak_bytes": 90812416,
+        "memory_peak_scope": "final_recreated_scheduler_cgroup",
+        "sqlite": {
+          "articles": 2,
+          "eligible": 2,
+          "interrupted": 2,
+          "observations": 50,
+          "run_interruptions": 1,
+          "running": 0,
+          "runs": 26,
+          "session": {
+            "consecutive_failures": 0,
+            "heartbeat_at": "2026-10-18T19:49:06.215870+00:00",
+            "last_cycle_at": "2026-10-18T19:49:05.190053+00:00",
+            "last_cycle_finished_at": "2026-10-18T19:49:05.211398+00:00",
+            "last_error": null,
+            "last_result": {
+              "dry_run": false,
+              "filter": {
+                "articles_evaluated": 2,
+                "assessed_at": "2026-10-18T19:49:05.208534+00:00",
+                "counts": {
+                  "deferred": 0,
+                  "eligible": 2,
+                  "excluded": 0
+                },
+                "engine_version": "rules-v1",
+                "policy": {
+                  "future_tolerance_minutes": 15.0,
+                  "max_age_hours": 72.0,
+                  "min_description_chars": 40,
+                  "require_publisher": false
+                },
+                "policy_hash": "67aa6a9341fb0f35e218854e8852eda3bd0d68f055eab91237cc73909915b6da",
+                "reference_time": "2026-10-18T19:49:05.208412+00:00",
+                "run_id": "99341a29-0827-4b10-8d72-6b17b3353dd6"
+              },
+              "finished_at": "2026-10-18T19:49:05.207407+00:00",
+              "handoff": {
+                "status": "disabled"
+              },
+              "items_added": 0,
+              "items_existing": 2,
+              "items_failed": 0,
+              "items_received": 2,
+              "items_skipped": 0,
+              "recovered_runs": [],
+              "run_id": "181dfd71-c66d-4cf5-9a20-d8cd585cb0ac",
+              "sources": [
+                {
+                  "error_code": null,
+                  "finished_at": "2026-10-18T19:49:05.202954+00:00",
+                  "items_added": 0,
+                  "items_existing": 1,
+                  "items_failed": 0,
+                  "items_received": 1,
+                  "items_skipped": 0,
+                  "source_id": "first",
+                  "status": "success"
+                },
+                {
+                  "error_code": null,
+                  "finished_at": "2026-10-18T19:49:05.205813+00:00",
+                  "items_added": 0,
+                  "items_existing": 1,
+                  "items_failed": 0,
+                  "items_received": 1,
+                  "items_skipped": 0,
+                  "source_id": "second",
+                  "status": "success"
+                }
+              ],
+              "sources_checked": 2,
+              "sources_failed": 0,
+              "sources_successful": 2,
+              "started_at": "2026-10-18T19:49:05.200562+00:00",
+              "status": "success"
+            },
+            "last_success_at": "2026-10-18T19:49:05.211280+00:00",
+            "next_run_at": "2026-10-18T19:49:07.211398+00:00",
+            "session_id": "29595d09-fe80-44d5-920e-6a4db40f2a9d",
+            "started_at": "2026-10-18T19:48:34.269018+00:00",
+            "status": "waiting"
+          },
+          "source_runs": 50,
+          "success": 24
+        },
+        "status": "PASS"
+      }
+    }
+  ],
+  "cleanup": {
+    "waagd-bridge-smoke-": {
+      "containers_remaining": 0,
+      "volumes_remaining": 0
+    },
+    "waagd-editorial-smoke-": {
+      "containers_remaining": 0,
+      "volumes_remaining": 0
+    },
+    "waagd-scheduler-smoke-": {
+      "containers_remaining": 0,
+      "volumes_remaining": 0
+    },
+    "waagd-smoke-": {
+      "containers_remaining": 0,
+      "volumes_remaining": 0
+    }
+  },
+  "runtime_commit": "e54d35d074bc55a5575300a9766ea050295468cb",
+  "runtime_inputs_content_sha256": "6b9cc1491729e71ec1b6bfc3d16682c8f6d4b183df5934e1b2cbd44f8a7a1201",
+  "runtime_inputs_match_canonical_commit": true,
+  "scope": "Offline fictional fixtures, disposable volumes, no actual OpenClaw/LLM/production access",
+  "source_config_permissions": "0600 for all five embedded YAML in isolated build context",
+  "status": "PASS",
+  "verified_at": "2026-10-18T19:49:37.153977+00:00"
+}

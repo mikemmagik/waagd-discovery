@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mikemmagik/waagd-discovery/schemas/editorial-decision-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_key",
+    "decision",
+    "source",
+    "date",
+    "factual_summary",
+    "satirical_angle",
+    "headline",
+    "summary",
+    "article",
+    "established_facts",
+    "unverified_claims",
+    "open_questions",
+    "checked_sources",
+    "verification_evidence",
+    "risks",
+    "rejection_reason",
+    "created_at",
+    "model_identifier",
+    "prompt_version"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "candidate_key": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "decision": {
+      "enum": [
+        "READY_FOR_REVIEW",
+        "NEEDS_VERIFICATION",
+        "REJECTED"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "format": "uri",
+      "maxLength": 2048,
+      "pattern": "^https?://"
+    },
+    "date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "factual_summary": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "satirical_angle": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "headline": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "article": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "established_facts": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "string",
+        "maxLength": 1000
+      }
+    },
+    "unverified_claims": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "string",
+        "maxLength": 1000
+      }
+    },
+    "open_questions": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "string",
+        "maxLength": 1000
+      }
+    },
+    "checked_sources": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "format": "uri",
+        "maxLength": 2048,
+        "pattern": "^https?://"
+      }
+    },
+    "verification_evidence": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "uniqueItems": true
+    },
+    "risks": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "string",
+        "maxLength": 1000
+      }
+    },
+    "rejection_reason": {
+      "enum": [
+        null,
+        "NO_SATIRICAL_ANGLE",
+        "DUPLICATE",
+        "UNVERIFIABLE",
+        "MISLEADING",
+        "OUTDATED",
+        "EDITORIAL_RISK",
+        "OTHER"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "model_identifier": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "prompt_version": {
+      "const": "waagd-editorial-v1"
+    }
+  }
+}
