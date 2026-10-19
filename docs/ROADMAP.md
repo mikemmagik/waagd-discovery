@@ -28,8 +28,9 @@ mock-only controller/adapter, bounded verifier, separate durable store, Bridge v
 and conditional receipt-based ACK, adversarial/crash recovery tests and operator
 review instructions. No real LLM, deployment or existing agent changes. See
 SPRINT_5_CONTRACTS.md and EDITORIAL_ARCHITECTURE.md. Stop after the release candidate
-for architectural review; Sprint 6 and publication remain unapproved. Discovery
-collection and publication must always remain distinct capabilities.
+for architectural review. At that point Sprint 6 and publication remained
+unapproved; Discovery collection and publication must always remain distinct
+capabilities.
 
 Sprint 6 / v0.6.0 — Stable cross-repository integration: accepted Discovery-to-site
 PublicationIntent v1 compatibility, bounded trusted Gateway adapter, source
