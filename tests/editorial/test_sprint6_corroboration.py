@@ -125,12 +125,16 @@ def test_untrusted_domain_policy_rejected() -> None:
 
 
 class AutomaticDocuments(Documents):
+    def __init__(self, *, redirect: str | None = None) -> None:
+        super().__init__()
+        self.automatic_redirect = redirect
+
     def fetch(self, url: str) -> FetchDocument:
         if url == ARTICLE:
             return super().fetch(url)
         assert url.startswith("https://verify.example/check?candidate_url=")
         return FetchDocument(
-            url,
+            self.automatic_redirect or url,
             200,
             (
                 b'{"canonical_url":"https://news.example/article","claim":'
@@ -150,3 +154,13 @@ def test_governed_dynamic_endpoint_can_verify_a_new_candidate_without_a_key_rule
     ).verify(candidate(), policy_id=VERIFICATION_POLICY)
     assert result["verification_status"] == "VERIFIED"
     assert result["claim_support"][0]["claim"] == CLAIM
+
+
+def test_governed_dynamic_endpoint_rejects_any_redirect() -> None:
+    result = SourceVerifier(
+        AutomaticDocuments(redirect="https://attacker.example/assertion"),
+        automatic_corroboration=AutomaticCorroborationPolicy(
+            "https://verify.example/check?candidate_url={candidate_url}"
+        ),
+    ).verify(candidate(), policy_id=VERIFICATION_POLICY)
+    assert result["verification_status"] == "PARTIAL"

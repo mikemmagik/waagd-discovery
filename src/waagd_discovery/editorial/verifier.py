@@ -133,9 +133,12 @@ class SourceVerifier:
         policy: AutomaticCorroborationPolicy,
     ) -> None:
         try:
-            document = self.transport.fetch(policy.lookup_url(result["canonical_url"]))
-            if document.status != 200 or not policy.authorizes(
-                result["canonical_url"], document.url
+            lookup_url = policy.lookup_url(result["canonical_url"])
+            document = self.transport.fetch(lookup_url)
+            if (
+                document.status != 200
+                or document.url != lookup_url
+                or not policy.authorizes(result["canonical_url"], document.url)
             ):
                 raise EditorialError("source_independent_response_unsafe")
             assertion = json.loads(document.body.decode("utf-8"))
