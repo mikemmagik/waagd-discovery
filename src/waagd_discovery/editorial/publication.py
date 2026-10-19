@@ -20,6 +20,7 @@ from waagd_discovery.editorial.contracts import (
 from waagd_discovery.editorial.store import EditorialStore
 
 _MAXIMUM = 256 * 1024
+_LIMIT = 100
 
 
 def _canonical(value: dict[str, Any]) -> bytes:
@@ -97,16 +98,19 @@ def _payload(
     }
 
 
-def exportable(store: EditorialStore) -> list[dict[str, Any]]:
+def exportable(store: EditorialStore, limit: int = _LIMIT) -> list[dict[str, Any]]:
     """Return deterministic eligible intents from a real, validated store only."""
     if store.simulation:
         raise EditorialError("publication_simulation_forbidden")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _LIMIT:
+        raise EditorialError("publication_limit_invalid")
     rows = store.connection.execute(
         "SELECT c.candidate_key,c.current_revision,d.request,d.result AS decision_result,"
         "v.result AS verification_result FROM candidates c "
         "JOIN decisions d ON d.candidate_key=c.candidate_key AND d.revision=c.current_revision "
         "JOIN verifications v ON v.candidate_key=c.candidate_key AND v.revision=c.current_revision "
-        "WHERE c.current_revision > 0 ORDER BY c.candidate_key"
+        "WHERE c.current_revision > 0 ORDER BY c.candidate_key LIMIT ?",
+        (limit,),
     ).fetchall()
     results: list[dict[str, Any]] = []
     for row in rows:
@@ -138,7 +142,7 @@ def exportable(store: EditorialStore) -> list[dict[str, Any]]:
     return results
 
 
-def export_file(store_path: Path, output: Path) -> dict[str, Any]:
+def export_file(store_path: Path, output: Path, limit: int = _LIMIT) -> dict[str, Any]:
     """Atomically write an inspectable publication batch into a private directory."""
     io.path_parts(store_path)
     io.path_parts(output)
@@ -146,7 +150,7 @@ def export_file(store_path: Path, output: Path) -> dict[str, Any]:
         raise EditorialError("publication_output_invalid")
     try:
         with EditorialStore(store_path, simulation=False, readonly=True) as store:
-            intents = exportable(store)
+            intents = exportable(store, limit)
     except EditorialError as error:
         # EditorialStore deliberately refuses to open an initialized simulation
         # database as real. Reopen only to identify that exact durable state;
@@ -155,7 +159,7 @@ def export_file(store_path: Path, output: Path) -> dict[str, Any]:
             raise
         try:
             with EditorialStore(store_path, simulation=True, readonly=True) as store:
-                exportable(store)
+                exportable(store, limit)
         except EditorialError as simulation:
             if str(simulation) == "publication_simulation_forbidden":
                 raise
