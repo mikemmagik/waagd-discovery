@@ -1,12 +1,12 @@
 """The host-side hand-off has no agent, network or publisher capability."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
 
 import pytest
 
-from waagd_discovery.bridge import io
 from waagd_discovery.editorial.contracts import EditorialError
 from waagd_discovery.editorial.publication_bridge import transfer
 
@@ -37,7 +37,7 @@ def _batch() -> bytes:
             "origin": "auto",
             "url": "https://example.test/story",
             "canonical_url": "https://example.test/story",
-            "source_item_id": "waagd:" + __import__("hashlib").sha256("auto-test-intent".encode()).hexdigest(),
+            "source_item_id": "waagd:" + hashlib.sha256(b"auto-test-intent").hexdigest(),
             "title": "Title",
             "source": "WAAGD",
             "preview": None,
