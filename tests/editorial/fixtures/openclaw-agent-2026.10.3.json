@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "status": "ok",
+  "payloads": [
+    {
+      "text": ""
+    }
+  ],
+  "costUsd": 0.01,
+  "codeModeEngaged": false,
+  "bridgeCalls": {
+    "search": 0,
+    "describe": 0,
+    "call": 0
+  },
+  "terminalReceipt": {
+    "successfulToolNames": []
+  },
+  "systemPromptReport": {
+    "tools": {
+      "entries": [],
+      "toolSearch": false
+    }
+  },
+  "model": "minimax/minimax-m3.1-flash:free"
+}
