@@ -272,26 +272,35 @@ class GatewayEditor:
         bridge = self._one(
             self._values(containers, "bridgeCalls"), "gateway_tool_attestation_missing"
         )
-        if not isinstance(bridge, dict) or any(
-            type(bridge.get(key)) is not int or bridge[key] < 0
-            for key in ("search", "describe", "call")
+        bridge_keys = {"search", "describe", "call"}
+        if (
+            not isinstance(bridge, dict)
+            or set(bridge) != bridge_keys
+            or any(type(bridge.get(key)) is not int or bridge[key] < 0 for key in bridge_keys)
         ):
             raise EditorialError("gateway_tool_attestation_missing")
-        if any(bridge[key] != 0 for key in ("search", "describe", "call")):
+        if any(bridge[key] != 0 for key in bridge_keys):
             raise EditorialError("gateway_tools_used")
 
         receipt = self._one(
             self._values(containers, "terminalReceipt"), "gateway_tool_attestation_missing"
         )
+        receipt_keys = {
+            "successfulToolNames",
+            "attemptedToolNames",
+            "failedToolNames",
+            "toolNames",
+        }
         if (
             not isinstance(receipt, dict)
+            or not set(receipt) <= receipt_keys
             or not isinstance(receipt.get("successfulToolNames"), list)
             or not all(isinstance(name, str) for name in receipt["successfulToolNames"])
         ):
             raise EditorialError("gateway_tool_attestation_missing")
         if receipt["successfulToolNames"]:
             raise EditorialError("gateway_tools_used")
-        for key in ("attemptedToolNames", "failedToolNames", "toolNames"):
+        for key in receipt_keys - {"successfulToolNames"}:
             if key in receipt:
                 if not isinstance(receipt[key], list) or not all(
                     isinstance(name, str) for name in receipt[key]

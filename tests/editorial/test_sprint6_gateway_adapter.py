@@ -174,12 +174,20 @@ def test_gateway_rejects_bad_or_tool_using_output(tmp_path: Path, output: bytes,
             "gateway_tools_used",
         ),
         (
+            lambda value: value["bridgeCalls"].update({"unknown": 1}),
+            "gateway_tool_attestation_missing",
+        ),
+        (
             lambda value: value.pop("terminalReceipt"),
             "gateway_tool_attestation_missing",
         ),
         (
             lambda value: value["terminalReceipt"].update({"successfulToolNames": ["read"]}),
             "gateway_tools_used",
+        ),
+        (
+            lambda value: value["terminalReceipt"].update({"otherToolNames": ["shell"]}),
+            "gateway_tool_attestation_missing",
         ),
         (
             lambda value: value["systemPromptReport"]["tools"].update({"entries": ["tool_search"]}),
