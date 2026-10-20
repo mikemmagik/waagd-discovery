@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "status": "ok",
+  "result": {
+    "payloads": [
+      {
+        "text": ""
+      }
+    ],
+    "meta": {
+      "agentMeta": {
+        "terminalReceipt": {
+          "successfulToolNames": []
+        },
+        "codeModeEngaged": false
+      },
+      "systemPromptReport": {
+        "tools": {
+          "entries": []
+        }
+      }
+    }
+  }
+}

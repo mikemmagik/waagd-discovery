@@ -117,6 +117,16 @@ def openclaw_2026_10_3(*, text: str | None = None) -> dict[str, Any]:
     return fixture
 
 
+def openclaw_2026_10_3_tool_free(*, text: str | None = None) -> dict[str, Any]:
+    """De-identified tool-free Gateway form captured from OpenClaw 2026.10.3."""
+
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures" / "openclaw-agent-2026.10.3-tool-free.json").read_text()
+    )
+    fixture["result"]["payloads"][0]["text"] = text if text is not None else json.dumps(decision())
+    return fixture
+
+
 def test_gateway_success_fixed_argv_and_sanitized_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -134,6 +144,81 @@ def test_gateway_parses_full_openclaw_2026_10_3_gateway_envelope(tmp_path: Path)
     raw = json.dumps(response).encode()
     assert editor._parse(raw, request()) == decision()
     assert editor.evaluate(request()) == decision()
+
+
+def test_gateway_parses_full_openclaw_2026_10_3_tool_free_gateway_envelope(tmp_path: Path) -> None:
+    response = openclaw_2026_10_3_tool_free()
+    editor = GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode()))
+    raw = json.dumps(response).encode()
+    assert editor._parse(raw, request()) == decision()
+    assert editor.evaluate(request()) == decision()
+
+
+def test_gateway_accepts_empty_optional_tool_receipt_lists_in_tool_free_form(
+    tmp_path: Path,
+) -> None:
+    response = openclaw_2026_10_3_tool_free()
+    response["result"]["meta"]["agentMeta"]["terminalReceipt"].update(
+        {"attemptedToolNames": [], "failedToolNames": [], "toolNames": []}
+    )
+    assert (
+        GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode())).evaluate(request())
+        == decision()
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutate", "code"),
+    [
+        (
+            lambda value: value["result"]["meta"]["systemPromptReport"]["tools"].update(
+                {"entries": ["tool_search"]}
+            ),
+            "gateway_tools_exposed",
+        ),
+        (
+            lambda value: value["result"]["meta"].pop("systemPromptReport"),
+            "gateway_tool_attestation_missing",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"].pop("terminalReceipt"),
+            "gateway_tool_attestation_missing",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"].update({"codeModeEngaged": True}),
+            "gateway_tools_used",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"]["terminalReceipt"].update(
+                {"attemptedToolNames": ["read"]}
+            ),
+            "gateway_tools_used",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"]["terminalReceipt"].update(
+                {"toolPrivilege": "shell"}
+            ),
+            "gateway_tool_attestation_missing",
+        ),
+        (
+            lambda value: value["result"]["meta"]["systemPromptReport"]["tools"].update(
+                {"toolSearch": True}
+            ),
+            "gateway_tools_exposed",
+        ),
+        (
+            lambda value: value.update({"meta": {"agentMeta": {"codeModeEngaged": True}}}),
+            "gateway_tool_attestation_conflict",
+        ),
+    ],
+)
+def test_gateway_rejects_unattested_or_tool_enabled_tool_free_output(
+    tmp_path: Path, mutate: Any, code: str
+) -> None:
+    response = openclaw_2026_10_3_tool_free()
+    mutate(response)
+    with pytest.raises(EditorialError, match=code):
+        GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode())).evaluate(request())
 
 
 def test_simulation_and_wrong_agent_rejected_before_process(tmp_path: Path) -> None:

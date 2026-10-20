@@ -136,3 +136,11 @@
     zero-tool attestations; unknown fields, malformed neutral values, missing
     attestations, and conflicting duplicates fail closed. This does not change
     PublicationIntent, Bridge, verifier, site or default-deny contracts.
+
+36. Patch 0.6.3 accepts the observed fully tool-free OpenClaw 2026.10.3
+    variant that omits `result.meta.agentMeta.bridgeCalls` and
+    `result.meta.toolSummary`. It does not infer zero calls: the alternative
+    form requires an empty advertised tool surface, an empty successful-tool
+    receipt, disabled code mode, and empty optional attempted/failed tool lists.
+    Present bridge counters remain exact and zero-only; missing other required
+    attestations, unknown fields and conflicts fail closed.

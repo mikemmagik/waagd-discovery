@@ -279,18 +279,21 @@ class GatewayEditor:
                 raise EditorialError("gateway_tool_attestation_missing")
             return containers
 
-        bridge = self._one(
-            self._values(containers, "bridgeCalls"), "gateway_tool_attestation_missing"
-        )
-        bridge_keys = {"search", "describe", "call"}
-        if (
-            not isinstance(bridge, dict)
-            or set(bridge) != bridge_keys
-            or any(type(bridge.get(key)) is not int or bridge[key] < 0 for key in bridge_keys)
-        ):
-            raise EditorialError("gateway_tool_attestation_missing")
-        if any(bridge[key] != 0 for key in bridge_keys):
-            raise EditorialError("gateway_tools_used")
+        bridge_values = self._values(containers, "bridgeCalls")
+        if bridge_values:
+            bridge = self._one(bridge_values, "gateway_tool_attestation_missing")
+            bridge_keys = {"search", "describe", "call"}
+            if (
+                not isinstance(bridge, dict)
+                or set(bridge) != bridge_keys
+                or any(type(bridge.get(key)) is not int or bridge[key] < 0 for key in bridge_keys)
+            ):
+                raise EditorialError("gateway_tool_attestation_missing")
+            if any(bridge[key] != 0 for key in bridge_keys):
+                raise EditorialError("gateway_tools_used")
+        # A fully tool-free Gateway run may omit bridgeCalls. It is accepted only
+        # after the independent receipt, advertised-tool-surface and code-mode
+        # attestations below have all been validated; absence is never a zero.
 
         receipt = self._one(
             self._values(containers, "terminalReceipt"), "gateway_tool_attestation_missing"
