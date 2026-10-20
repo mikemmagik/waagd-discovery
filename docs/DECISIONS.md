@@ -128,3 +128,11 @@
     closed. A nonempty advertised surface is rejected even when the observed call
     counters are zero. This patch changes neither editorial/publication contracts,
     Bridge state nor the site interface.
+
+35. Patch 0.6.2 follows the actual Gateway-backed `openclaw agent --json`
+    nesting: run telemetry lives in `result.meta.agentMeta` and the advertised
+    policy report lives in `result.meta.systemPromptReport`. The adapter accepts
+    only documented neutral terminal-receipt provenance fields in addition to its
+    zero-tool attestations; unknown fields, malformed neutral values, missing
+    attestations, and conflicting duplicates fail closed. This does not change
+    PublicationIntent, Bridge, verifier, site or default-deny contracts.

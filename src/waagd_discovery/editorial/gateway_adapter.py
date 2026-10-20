@@ -227,13 +227,23 @@ class GatewayEditor:
 
         roots = (envelope,) if result is envelope else (envelope, result)
         metas: list[dict[str, Any]] = []
+        agent_metas: list[dict[str, Any]] = []
         for root in roots:
             if "meta" in root:
                 value = root["meta"]
                 if not isinstance(value, dict):
                     raise EditorialError("gateway_tool_attestation_missing")
                 metas.append(value)
-        containers = (*roots, *metas)
+        for meta in metas:
+            if "agentMeta" in meta:
+                value = meta["agentMeta"]
+                if not isinstance(value, dict):
+                    raise EditorialError("gateway_tool_attestation_missing")
+                agent_metas.append(value)
+        # Gateway-backed `openclaw agent --json` reports execution telemetry in
+        # result.meta.agentMeta, while its policy report remains in result.meta.
+        # Include both levels so duplicated attestations must agree.
+        containers = (*roots, *metas, *agent_metas)
 
         summaries = self._values(containers, "toolSummary")
         detailed_fields = (
@@ -285,22 +295,31 @@ class GatewayEditor:
         receipt = self._one(
             self._values(containers, "terminalReceipt"), "gateway_tool_attestation_missing"
         )
-        receipt_keys = {
+        receipt_tool_keys = {
             "successfulToolNames",
             "attemptedToolNames",
             "failedToolNames",
             "toolNames",
         }
+        receipt_neutral_keys = {
+            "runId",
+            "sessionId",
+            "turnId",
+            "requested",
+            "effective",
+            "rerouted",
+            "terminalDisposition",
+        }
         if (
             not isinstance(receipt, dict)
-            or not set(receipt) <= receipt_keys
+            or not set(receipt) <= receipt_tool_keys | receipt_neutral_keys
             or not isinstance(receipt.get("successfulToolNames"), list)
             or not all(isinstance(name, str) for name in receipt["successfulToolNames"])
         ):
             raise EditorialError("gateway_tool_attestation_missing")
         if receipt["successfulToolNames"]:
             raise EditorialError("gateway_tools_used")
-        for key in receipt_keys - {"successfulToolNames"}:
+        for key in receipt_tool_keys - {"successfulToolNames"}:
             if key in receipt:
                 if not isinstance(receipt[key], list) or not all(
                     isinstance(name, str) for name in receipt[key]
@@ -308,6 +327,26 @@ class GatewayEditor:
                     raise EditorialError("gateway_tool_attestation_missing")
                 if receipt[key]:
                     raise EditorialError("gateway_tools_used")
+        for key in {"runId", "sessionId", "turnId"} & set(receipt):
+            if not isinstance(receipt[key], str) or not receipt[key]:
+                raise EditorialError("gateway_tool_attestation_missing")
+        for key in {"requested", "effective"} & set(receipt):
+            value = receipt[key]
+            if (
+                not isinstance(value, dict)
+                or not value
+                or not all(
+                    isinstance(name, str) and isinstance(item, str) for name, item in value.items()
+                )
+            ):
+                raise EditorialError("gateway_tool_attestation_missing")
+        if "rerouted" in receipt and type(receipt["rerouted"]) is not bool:
+            raise EditorialError("gateway_tool_attestation_missing")
+        if "terminalDisposition" in receipt and receipt["terminalDisposition"] not in {
+            "visible",
+            "not-visible",
+        }:
+            raise EditorialError("gateway_tool_attestation_missing")
 
         report = self._one(
             self._values(containers, "systemPromptReport"), "gateway_tool_attestation_missing"
