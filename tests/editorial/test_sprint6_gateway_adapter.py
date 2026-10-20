@@ -107,12 +107,33 @@ def envelope(*, calls: int = 0, text: str | None = None) -> bytes:
     return json.dumps(value).encode()
 
 
+def openclaw_2026_10_3(*, text: str | None = None) -> dict[str, Any]:
+    """De-identified shape captured from `openclaw agent --json` 2026.10.3."""
+
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures" / "openclaw-agent-2026.10.3.json").read_text()
+    )
+    fixture["payloads"][0]["text"] = text if text is not None else json.dumps(decision())
+    return fixture
+
+
 def test_gateway_success_fixed_argv_and_sanitized_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "must-not-leak")
     executable = fake_cli(tmp_path, envelope())
     assert GatewayEditor(executable).evaluate(request()) == decision()
+
+
+def test_gateway_accepts_openclaw_2026_10_3_top_level_attestation(tmp_path: Path) -> None:
+    response = openclaw_2026_10_3()
+    assert (
+        GatewayEditor(
+            fake_cli(tmp_path, json.dumps(response).encode()),
+            budget_policy=GatewayBudgetPolicy(max_reported_cost_usd=0.02),
+        ).evaluate(request())
+        == decision()
+    )
 
 
 def test_simulation_and_wrong_agent_rejected_before_process(tmp_path: Path) -> None:
@@ -143,6 +164,74 @@ def test_simulation_and_wrong_agent_rejected_before_process(tmp_path: Path) -> N
 def test_gateway_rejects_bad_or_tool_using_output(tmp_path: Path, output: bytes, code: str) -> None:
     with pytest.raises(EditorialError, match=code):
         GatewayEditor(fake_cli(tmp_path, output)).evaluate(request())
+
+
+@pytest.mark.parametrize(
+    ("mutate", "code"),
+    [
+        (
+            lambda value: value["bridgeCalls"].update({"call": 1}),
+            "gateway_tools_used",
+        ),
+        (
+            lambda value: value.pop("terminalReceipt"),
+            "gateway_tool_attestation_missing",
+        ),
+        (
+            lambda value: value["terminalReceipt"].update({"successfulToolNames": ["read"]}),
+            "gateway_tools_used",
+        ),
+        (
+            lambda value: value["systemPromptReport"]["tools"].update({"entries": ["tool_search"]}),
+            "gateway_tools_exposed",
+        ),
+        (
+            lambda value: value.update({"codeModeEngaged": True}),
+            "gateway_tools_used",
+        ),
+        (
+            lambda value: value.update({"meta": {"toolSummary": {"calls": 1}}}),
+            "gateway_tools_used",
+        ),
+        (
+            lambda value: value.update({"toolSummary": {"calls": 0, "tools": ["read"]}}),
+            "gateway_tool_attestation_conflict",
+        ),
+    ],
+)
+def test_gateway_rejects_openclaw_2026_10_3_unattested_or_tool_enabled_output(
+    tmp_path: Path, mutate: Any, code: str
+) -> None:
+    response = openclaw_2026_10_3()
+    mutate(response)
+    with pytest.raises(EditorialError, match=code):
+        GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode())).evaluate(request())
+
+
+def test_gateway_rejects_openclaw_2026_10_3_model_error_and_invalid_json(tmp_path: Path) -> None:
+    failed = openclaw_2026_10_3()
+    failed.update({"ok": False, "status": "error", "error": {"kind": "model"}})
+    for raw in (json.dumps(failed).encode(), b"{bad json", b"\xff"):
+        with pytest.raises(EditorialError, match="gateway_response_invalid"):
+            GatewayEditor(fake_cli(tmp_path, raw)).evaluate(request())
+
+
+def test_gateway_rejects_conflicting_openclaw_tool_summaries(tmp_path: Path) -> None:
+    response = openclaw_2026_10_3()
+    response["toolSummary"] = {"calls": 0, "tools": []}
+    response["meta"] = {"toolSummary": {"calls": 1, "tools": ["read"]}}
+    with pytest.raises(EditorialError, match="gateway_tool_attestation_conflict"):
+        GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode())).evaluate(request())
+
+
+def test_gateway_does_not_treat_false_code_mode_as_complete_attestation(tmp_path: Path) -> None:
+    response = {
+        "status": "ok",
+        "payloads": [{"text": json.dumps(decision())}],
+        "codeModeEngaged": False,
+    }
+    with pytest.raises(EditorialError, match="gateway_tool_attestation_missing"):
+        GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode())).evaluate(request())
 
 
 def test_nonzero_exit_is_ambiguous_even_if_output_looks_valid(tmp_path: Path) -> None:

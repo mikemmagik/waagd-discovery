@@ -121,3 +121,10 @@
     Keep automatic publication default-deny and require VERIFIED evidence, trusted
     policy, and the separate site kill switch. A stable release does not authorize a
     deployment or mutation of the protected v0.4.1 Bridge delivery.
+34. Patch 0.6.1 accepts the documented additive OpenClaw 2026.10.3 run-stat
+    layout while retaining the legacy nested tool summary. New-format replies must
+    attest zero bridge calls, zero terminal tool names, an empty advertised tool
+    surface and disabled code mode; missing or conflicting attestations fail
+    closed. A nonempty advertised surface is rejected even when the observed call
+    counters are zero. This patch changes neither editorial/publication contracts,
+    Bridge state nor the site interface.

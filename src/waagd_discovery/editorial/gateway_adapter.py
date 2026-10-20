@@ -205,6 +205,132 @@ class GatewayEditor:
                 pass
             process.wait(timeout=2)
 
+    @staticmethod
+    def _values(containers: tuple[dict[str, Any], ...], field: str) -> list[Any]:
+        """Return every reported value so conflicting attestations fail closed."""
+
+        return [container[field] for container in containers if field in container]
+
+    @staticmethod
+    def _one(values: list[Any], missing: str) -> Any:
+        if not values:
+            raise EditorialError(missing)
+        value = values[0]
+        if any(other != value for other in values[1:]):
+            raise EditorialError("gateway_tool_attestation_conflict")
+        return value
+
+    def _validate_tool_attestation(
+        self, envelope: dict[str, Any], result: dict[str, Any]
+    ) -> tuple[dict[str, Any], ...]:
+        """Accept legacy and 2026.10.3 attestations without treating absence as zero."""
+
+        roots = (envelope,) if result is envelope else (envelope, result)
+        metas: list[dict[str, Any]] = []
+        for root in roots:
+            if "meta" in root:
+                value = root["meta"]
+                if not isinstance(value, dict):
+                    raise EditorialError("gateway_tool_attestation_missing")
+                metas.append(value)
+        containers = (*roots, *metas)
+
+        summaries = self._values(containers, "toolSummary")
+        detailed_fields = (
+            "bridgeCalls",
+            "terminalReceipt",
+            "systemPromptReport",
+            "codeModeEngaged",
+        )
+        detailed = any(
+            any(field in container for container in containers) for field in detailed_fields
+        )
+
+        if summaries:
+            summary = self._one(summaries, "gateway_tool_attestation_missing")
+            if not isinstance(summary, dict):
+                raise EditorialError("gateway_tool_attestation_missing")
+            calls = summary.get("calls")
+            names = summary.get("tools", [])
+            if (
+                type(calls) is not int
+                or calls < 0
+                or not isinstance(names, list)
+                or not all(isinstance(name, str) for name in names)
+            ):
+                raise EditorialError("gateway_tool_attestation_missing")
+            if calls != 0 or names:
+                if calls == 0:
+                    raise EditorialError("gateway_tool_attestation_conflict")
+                raise EditorialError("gateway_tools_used")
+
+        if not detailed:
+            if not summaries:
+                raise EditorialError("gateway_tool_attestation_missing")
+            return containers
+
+        bridge = self._one(
+            self._values(containers, "bridgeCalls"), "gateway_tool_attestation_missing"
+        )
+        if not isinstance(bridge, dict) or any(
+            type(bridge.get(key)) is not int or bridge[key] < 0
+            for key in ("search", "describe", "call")
+        ):
+            raise EditorialError("gateway_tool_attestation_missing")
+        if any(bridge[key] != 0 for key in ("search", "describe", "call")):
+            raise EditorialError("gateway_tools_used")
+
+        receipt = self._one(
+            self._values(containers, "terminalReceipt"), "gateway_tool_attestation_missing"
+        )
+        if (
+            not isinstance(receipt, dict)
+            or not isinstance(receipt.get("successfulToolNames"), list)
+            or not all(isinstance(name, str) for name in receipt["successfulToolNames"])
+        ):
+            raise EditorialError("gateway_tool_attestation_missing")
+        if receipt["successfulToolNames"]:
+            raise EditorialError("gateway_tools_used")
+        for key in ("attemptedToolNames", "failedToolNames", "toolNames"):
+            if key in receipt:
+                if not isinstance(receipt[key], list) or not all(
+                    isinstance(name, str) for name in receipt[key]
+                ):
+                    raise EditorialError("gateway_tool_attestation_missing")
+                if receipt[key]:
+                    raise EditorialError("gateway_tools_used")
+
+        report = self._one(
+            self._values(containers, "systemPromptReport"), "gateway_tool_attestation_missing"
+        )
+        if not isinstance(report, dict) or not isinstance(report.get("tools"), dict):
+            raise EditorialError("gateway_tool_attestation_missing")
+        tools = report["tools"]
+        entries = tools.get("entries")
+        if not isinstance(entries, list):
+            raise EditorialError("gateway_tool_attestation_missing")
+        if entries:
+            raise EditorialError("gateway_tools_exposed")
+        if "toolSearch" in tools and tools["toolSearch"] is not False:
+            raise EditorialError("gateway_tools_exposed")
+
+        code_mode = self._one(
+            self._values(containers, "codeModeEngaged"), "gateway_tool_attestation_missing"
+        )
+        if type(code_mode) is not bool:
+            raise EditorialError("gateway_tool_attestation_missing")
+        if code_mode:
+            raise EditorialError("gateway_tools_used")
+        return containers
+
+    def _reported_cost(self, containers: tuple[dict[str, Any], ...]) -> Any:
+        values = self._values(containers, "costUsd")
+        for container in containers:
+            agent_meta = container.get("agentMeta")
+            if isinstance(agent_meta, dict) and "costUsd" in agent_meta:
+                values.append(agent_meta["costUsd"])
+        return self._one(values, "gateway_cost_unverified")
+
     def _parse(self, raw: bytes, request: dict[str, Any]) -> dict[str, Any]:
         try:
             envelope = io.decode(raw)
@@ -233,21 +359,14 @@ class GatewayEditor:
                 or any(value not in (None, []) for key, value in item.items() if key != "text")
             ):
                 raise EditorialError("gateway_response_invalid")
-            meta = envelope.get("meta", result.get("meta"))
-            if not isinstance(meta, dict):
-                raise EditorialError("gateway_tool_attestation_missing")
-            summary = meta.get("toolSummary")
-            if not isinstance(summary, dict) or type(summary.get("calls")) is not int:
-                raise EditorialError("gateway_tool_attestation_missing")
-            if summary["calls"] != 0:
-                raise EditorialError("gateway_tools_used")
+            containers = self._validate_tool_attestation(envelope, result)
             if self.budget_policy.max_reported_cost_usd is not None:
-                agent_meta = meta.get("agentMeta")
-                cost = agent_meta.get("costUsd") if isinstance(agent_meta, dict) else None
+                cost = self._reported_cost(containers)
                 if (
                     not isinstance(cost, (float, int))
                     or isinstance(cost, bool)
                     or not math.isfinite(cost)
+                    or cost < 0
                     or cost > self.budget_policy.max_reported_cost_usd
                 ):
                     raise EditorialError("gateway_cost_unverified")
