@@ -149,6 +149,33 @@ def test_agent_decision_cannot_add_capabilities(field: str) -> None:
         validate_decision(output, make_request(candidate(), verification()))
 
 
+def test_decision_schema_diagnostic_names_only_path_validator_and_expected_type() -> None:
+    output = decision()
+    output["model_identifier"] = 7
+    with pytest.raises(EditorialError) as raised:
+        validate_decision(output, make_request(candidate(), verification()))
+    assert str(raised.value) == "editorial_schema_invalid:$.model_identifier:type:string"
+    assert ATTACK not in str(raised.value)
+    assert "7" not in str(raised.value)
+
+
+def test_decision_schema_diagnostic_identifies_noninteger_schema_version() -> None:
+    output = decision()
+    output["schema_version"] = "1"
+    with pytest.raises(EditorialError) as raised:
+        validate_decision(output, make_request(candidate(), verification()))
+    assert str(raised.value) == "editorial_schema_invalid:$.schema_version:type:integer"
+
+
+def test_decision_schema_diagnostic_names_missing_required_field_without_output_text() -> None:
+    output = decision()
+    output.pop("headline")
+    with pytest.raises(EditorialError) as raised:
+        validate_decision(output, make_request(candidate(), verification()))
+    assert str(raised.value) == "editorial_schema_invalid:$.headline:required:headline"
+    assert ATTACK not in str(raised.value)
+
+
 @pytest.mark.parametrize("status", ["PARTIAL", "FAILED"])
 def test_http_success_and_failed_lookup_cannot_become_ready(status: str) -> None:
     output = decision("READY_FOR_REVIEW")

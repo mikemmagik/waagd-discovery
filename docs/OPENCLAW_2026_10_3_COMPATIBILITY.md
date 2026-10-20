@@ -66,3 +66,30 @@ Do not ACK, dismiss, reset, or migrate the protected pending delivery
 preflight. Roll back by stopping the new container and restoring the prior
 application image against the preserved schema-4 volume; do not delete volumes
 or rewrite Bridge state.
+
+## Editorial-decision output check
+
+The Gateway editor treats the model reply as untrusted data. The next compatible
+Discovery patch adds a trusted, schema-guided output contract to every request;
+it does not relax `editorial-decision-v1` or the editorial policy.
+
+For a synthetic candidate whose verification status is `PARTIAL`, the only safe
+success result is `NEEDS_VERIFICATION`. It must include a nonempty
+`factual_summary`, `unverified_claims`, and `open_questions`; it must not claim
+`READY_FOR_REVIEW`, add a date, evidence identifier, or URL not supplied in the
+request, or use a rejection reason.
+
+Run the existing isolated `GatewayEditor.evaluate()` smoke with that synthetic
+request after installing the patch. Record only the outcome code and decision:
+
+- pass: `NEEDS_VERIFICATION` with no error;
+- schema failure: `editorial_schema_invalid:<path>:<validator>:<expected>`;
+- any other failure: retain the existing fail-closed result and do not retry by
+  changing the model output manually.
+
+The schema diagnostic is capped and contains only JSON paths, field names,
+validator names, and expected types. It never includes the model reply,
+candidate text, evidence text, URLs, or credentials. Do not record the raw
+Gateway response. This smoke is operator-owned and does not authorize Bridge
+ACKs, publication, scheduler changes, or a change to the shared OpenClaw
+configuration.

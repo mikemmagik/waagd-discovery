@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from typing import Any, Protocol
@@ -26,7 +27,7 @@ EDITORIAL_POLICY = (
 
 
 class EditorialError(ValueError):
-    """A fixed, safe diagnostic code, without source content or paths."""
+    """A safe diagnostic code; schema failures may name only schema paths and validators."""
 
 
 class Verifier(Protocol):
@@ -54,15 +55,69 @@ def digest(value: dict[str, Any]) -> str:
     return hashlib.sha256(encode(value)).hexdigest()
 
 
-def _validate(value: Any, filename: str) -> None:
+def _schema_diagnostics(value: Any, filename: str) -> str:
+    """Bounded schema-only diagnostics: never include model or source values."""
+
+    if not isinstance(value, dict):
+        return "$:type:object"
+    schema = json.loads(files("waagd_discovery").joinpath(filename).read_text())
+    errors = sorted(
+        Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(value),
+        key=lambda error: (tuple(str(part) for part in error.absolute_path), error.validator or ""),
+    )
+    details: list[str] = []
+    for error in errors[:5]:
+        path = "$" + "".join(
+            f"[{part}]" if isinstance(part, int) else f".{part}" for part in error.absolute_path
+        )
+        expected = error.validator_value
+        if error.validator == "required":
+            missing = re.match(r"'([^']+)' is a required property", error.message)
+            if missing:
+                path += f".{missing.group(1)}"
+                expected = missing.group(1)
+        if error.validator == "type":
+            expected = "/".join(expected) if isinstance(expected, list) else expected
+        elif error.validator not in {
+            "type",
+            "required",
+            "additionalProperties",
+            "enum",
+            "const",
+            "format",
+            "pattern",
+            "maxLength",
+            "maxItems",
+            "uniqueItems",
+        }:
+            expected = error.validator
+        details.append(f"{path}:{error.validator}:{expected}")
+    return ",".join(details) or "$:schema:invalid"
+
+
+def _validate(value: Any, filename: str, *, diagnose: bool = False) -> None:
     try:
-        if not isinstance(value, dict) or type(value.get("schema_version")) is not int:
+        if not isinstance(value, dict):
+            if diagnose:
+                raise EditorialError("editorial_schema_invalid:$:type:object")
+            raise EditorialError("editorial_schema_invalid")
+        if type(value.get("schema_version")) is not int:
+            if diagnose:
+                raise EditorialError("editorial_schema_invalid:$.schema_version:type:integer")
             raise EditorialError("editorial_schema_invalid")
         if len(encode(value)) > 128 * 1024:
             raise EditorialError("editorial_payload_too_large")
         schema = json.loads(files("waagd_discovery").joinpath(filename).read_text())
         Draft202012Validator(schema, format_checker=FormatChecker()).validate(value)
+    except EditorialError:
+        raise
     except (ValidationError, BridgeError, ValueError, TypeError, RecursionError, OverflowError):
+        if diagnose:
+            try:
+                detail = _schema_diagnostics(value, filename)
+            except (BridgeError, ValueError, TypeError, RecursionError, OverflowError):
+                detail = "$:schema:invalid"
+            raise EditorialError(f"editorial_schema_invalid:{detail}") from None
         raise EditorialError("editorial_schema_invalid") from None
 
 
@@ -174,7 +229,7 @@ def make_request(
 
 def validate_decision(value: Any, request: dict[str, Any]) -> None:
     validate_request(request)
-    _validate(value, "editorial-decision-v1.schema.json")
+    _validate(value, "editorial-decision-v1.schema.json", diagnose=True)
     candidate = request["candidate"]
     verification = request["verification"]
     if value["candidate_key"] != candidate["candidate_key"] or value["source"] != candidate["url"]:
