@@ -374,6 +374,16 @@ def test_missing_success_status_or_delivery_attempt_fails_closed(tmp_path: Path)
         GatewayEditor(fake_cli(tmp_path, json.dumps(delivered).encode())).evaluate(request())
 
 
+def test_gateway_reports_schema_path_without_model_reply_content(tmp_path: Path) -> None:
+    bad = decision()
+    bad["model_identifier"] = 7
+    response = openclaw_2026_10_3_tool_free(text=json.dumps(bad))
+    with pytest.raises(EditorialError) as raised:
+        GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode())).evaluate(request())
+    assert str(raised.value) == "editorial_schema_invalid:$.model_identifier:type:string"
+    assert "7" not in str(raised.value)
+
+
 def test_cost_and_schema_fail_closed(tmp_path: Path) -> None:
     with pytest.raises(EditorialError, match="gateway_request_too_large"):
         GatewayEditor(
