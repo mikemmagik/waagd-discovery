@@ -113,7 +113,7 @@ def openclaw_2026_10_3(*, text: str | None = None) -> dict[str, Any]:
     fixture = json.loads(
         (Path(__file__).parent / "fixtures" / "openclaw-agent-2026.10.3.json").read_text()
     )
-    fixture["payloads"][0]["text"] = text if text is not None else json.dumps(decision())
+    fixture["result"]["payloads"][0]["text"] = text if text is not None else json.dumps(decision())
     return fixture
 
 
@@ -125,15 +125,15 @@ def test_gateway_success_fixed_argv_and_sanitized_environment(
     assert GatewayEditor(executable).evaluate(request()) == decision()
 
 
-def test_gateway_accepts_openclaw_2026_10_3_top_level_attestation(tmp_path: Path) -> None:
+def test_gateway_parses_full_openclaw_2026_10_3_gateway_envelope(tmp_path: Path) -> None:
     response = openclaw_2026_10_3()
-    assert (
-        GatewayEditor(
-            fake_cli(tmp_path, json.dumps(response).encode()),
-            budget_policy=GatewayBudgetPolicy(max_reported_cost_usd=0.02),
-        ).evaluate(request())
-        == decision()
+    editor = GatewayEditor(
+        fake_cli(tmp_path, json.dumps(response).encode()),
+        budget_policy=GatewayBudgetPolicy(max_reported_cost_usd=0.02),
     )
+    raw = json.dumps(response).encode()
+    assert editor._parse(raw, request()) == decision()
+    assert editor.evaluate(request()) == decision()
 
 
 def test_simulation_and_wrong_agent_rejected_before_process(tmp_path: Path) -> None:
@@ -170,39 +170,49 @@ def test_gateway_rejects_bad_or_tool_using_output(tmp_path: Path, output: bytes,
     ("mutate", "code"),
     [
         (
-            lambda value: value["bridgeCalls"].update({"call": 1}),
+            lambda value: value["result"]["meta"]["agentMeta"]["bridgeCalls"].update({"call": 1}),
             "gateway_tools_used",
         ),
         (
-            lambda value: value["bridgeCalls"].update({"unknown": 1}),
+            lambda value: value["result"]["meta"]["agentMeta"]["bridgeCalls"].update(
+                {"unknown": 1}
+            ),
             "gateway_tool_attestation_missing",
         ),
         (
-            lambda value: value.pop("terminalReceipt"),
+            lambda value: value["result"]["meta"]["agentMeta"].pop("terminalReceipt"),
             "gateway_tool_attestation_missing",
         ),
         (
-            lambda value: value["terminalReceipt"].update({"successfulToolNames": ["read"]}),
+            lambda value: value["result"]["meta"]["agentMeta"]["terminalReceipt"].update(
+                {"successfulToolNames": ["read"]}
+            ),
             "gateway_tools_used",
         ),
         (
-            lambda value: value["terminalReceipt"].update({"otherToolNames": ["shell"]}),
+            lambda value: value["result"]["meta"]["agentMeta"]["terminalReceipt"].update(
+                {"otherToolNames": ["shell"]}
+            ),
             "gateway_tool_attestation_missing",
         ),
         (
-            lambda value: value["systemPromptReport"]["tools"].update({"entries": ["tool_search"]}),
+            lambda value: value["result"]["meta"]["systemPromptReport"]["tools"].update(
+                {"entries": ["tool_search"]}
+            ),
             "gateway_tools_exposed",
         ),
         (
-            lambda value: value.update({"codeModeEngaged": True}),
+            lambda value: value["result"]["meta"]["agentMeta"].update({"codeModeEngaged": True}),
             "gateway_tools_used",
         ),
         (
-            lambda value: value.update({"meta": {"toolSummary": {"calls": 1}}}),
+            lambda value: value["result"]["meta"].update({"toolSummary": {"calls": 1}}),
             "gateway_tools_used",
         ),
         (
-            lambda value: value.update({"toolSummary": {"calls": 0, "tools": ["read"]}}),
+            lambda value: value["result"]["meta"].update(
+                {"toolSummary": {"calls": 0, "tools": ["read"]}}
+            ),
             "gateway_tool_attestation_conflict",
         ),
     ],
@@ -229,6 +239,20 @@ def test_gateway_rejects_conflicting_openclaw_tool_summaries(tmp_path: Path) -> 
     response["toolSummary"] = {"calls": 0, "tools": []}
     response["meta"] = {"toolSummary": {"calls": 1, "tools": ["read"]}}
     with pytest.raises(EditorialError, match="gateway_tool_attestation_conflict"):
+        GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode())).evaluate(request())
+
+
+def test_gateway_rejects_conflicting_nested_openclaw_attestation(tmp_path: Path) -> None:
+    response = openclaw_2026_10_3()
+    response["meta"] = {"agentMeta": {"bridgeCalls": {"search": 0, "describe": 0, "call": 1}}}
+    with pytest.raises(EditorialError, match="gateway_tool_attestation_conflict"):
+        GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode())).evaluate(request())
+
+
+def test_gateway_rejects_invalid_neutral_openclaw_receipt_metadata(tmp_path: Path) -> None:
+    response = openclaw_2026_10_3()
+    response["result"]["meta"]["agentMeta"]["terminalReceipt"]["rerouted"] = "false"
+    with pytest.raises(EditorialError, match="gateway_tool_attestation_missing"):
         GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode())).evaluate(request())
 
 

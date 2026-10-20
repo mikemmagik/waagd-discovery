@@ -1,26 +1,49 @@
 {
   "ok": true,
   "status": "ok",
-  "payloads": [
-    {
-      "text": ""
+  "result": {
+    "payloads": [
+      {
+        "text": ""
+      }
+    ],
+    "meta": {
+      "toolSummary": {
+        "calls": 0,
+        "tools": []
+      },
+      "agentMeta": {
+        "costUsd": 0.01,
+        "codeModeEngaged": false,
+        "bridgeCalls": {
+          "search": 0,
+          "describe": 0,
+          "call": 0
+        },
+        "terminalReceipt": {
+          "runId": "run-redacted",
+          "sessionId": "session-redacted",
+          "turnId": "turn-redacted",
+          "requested": {
+            "provider": "openrouter",
+            "model": "minimax/minimax-m3.1-flash:free"
+          },
+          "effective": {
+            "provider": "openrouter",
+            "model": "minimax/minimax-m3.1-flash:free",
+            "responseModel": "minimax/minimax-m3.1-flash:free"
+          },
+          "rerouted": false,
+          "terminalDisposition": "visible",
+          "successfulToolNames": []
+        }
+      },
+      "systemPromptReport": {
+        "tools": {
+          "entries": [],
+          "toolSearch": false
+        }
+      }
     }
-  ],
-  "costUsd": 0.01,
-  "codeModeEngaged": false,
-  "bridgeCalls": {
-    "search": 0,
-    "describe": 0,
-    "call": 0
-  },
-  "terminalReceipt": {
-    "successfulToolNames": []
-  },
-  "systemPromptReport": {
-    "tools": {
-      "entries": [],
-      "toolSearch": false
-    }
-  },
-  "model": "minimax/minimax-m3.1-flash:free"
+  }
 }
