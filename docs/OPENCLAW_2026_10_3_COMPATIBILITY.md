@@ -117,3 +117,31 @@ Any other result is fail-closed. For a schema failure, retain only the safe
 `editorial_schema_invalid:<path>:<validator>:<expected>` code and do not retain
 the raw Gateway reply. The command does not authorize a retry with changed
 policy, an ACK, an automatic publication, or a scheduler change.
+
+Each smoke invocation supplies OpenClaw a new random `editorial-smoke-*` session
+key. The normal editorial controller retains its deterministic session key, so
+this isolation does not alter its idempotent recovery behavior.
+
+The smoke command accepts `--retry-format-once`. It makes at most two calls and
+only repeats a completed, attested formatting failure (`empty_response`,
+`model_json_invalid`, or `schema_invalid:*`) in a new session. Its default total
+limit is 120 seconds and USD 0.10, divided across attempts; uncertain Gateway
+outcomes are never retried. Use it for the final operator check:
+
+```sh
+OPENCLAW_CONFIG_PATH=/absolute/private/claw2-openclaw.json uv run --frozen python scripts/gateway-editorial-live-smoke.py --gateway-executable /absolute/path/to/openclaw --retry-format-once
+```
+
+Failure output contains only one of `model_json_invalid`, `empty_response`,
+`envelope_invalid`, or `schema_invalid:<path>:<validator>:<expected>` where
+applicable, plus the attested Gateway status and terminal disposition when
+reported. It never includes model text, prompt data, URLs, or credentials.
+
+The observed `minimax/minimax-m3.1-flash:free` endpoint supports JSON output
+but not JSON Schema enforcement, and the two live results have shown both an
+overlong field and non-JSON text. It is therefore not reliable enough for an
+unattended structured editorial workflow. After separate cost approval, use `openai/gpt-4.1-mini` through OpenRouter:
+its model page advertises JSON Schema structured outputs in `response_format`.
+Configure it only in the isolated `claw2` editor and require the structured
+parameter to be honored by the selected provider. Do not enable response repair:
+the WAAGD adapter must validate the original response and fail closed.

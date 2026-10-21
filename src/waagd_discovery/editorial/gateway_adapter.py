@@ -8,6 +8,7 @@ import hashlib
 import math
 import os
 import re
+import secrets
 import select
 import signal
 import stat
@@ -133,9 +134,19 @@ class GatewayEditor:
         self.agent_id = agent_id
         self.timeout = float(timeout)
         self.budget_policy = budget_policy or GatewayBudgetPolicy()
+        self._last_completion: dict[str, str] | None = None
 
-    def evaluate(self, request: dict[str, Any]) -> dict[str, Any]:
+    @property
+    def last_completion(self) -> dict[str, str] | None:
+        """Safe completion metadata from the last attested Gateway response."""
+
+        return None if self._last_completion is None else dict(self._last_completion)
+
+    def evaluate(self, request: dict[str, Any], *, fresh_session: bool = False) -> dict[str, Any]:
         validate_request(request)
+        if type(fresh_session) is not bool:
+            raise EditorialError("gateway_session_policy_invalid")
+        self._last_completion = None
         if request["simulation"] is not False:
             raise EditorialError("gateway_simulation_forbidden")
         payload = io.encode(request)
@@ -164,7 +175,11 @@ class GatewayEditor:
                 "--agent",
                 self.agent_id,
                 "--session-key",
-                "editorial-" + hashlib.sha256(payload).hexdigest(),
+                (
+                    "editorial-smoke-" + secrets.token_hex(16)
+                    if fresh_session
+                    else "editorial-" + hashlib.sha256(payload).hexdigest()
+                ),
                 "--message-file",
                 str(message_path),
                 "--json",
@@ -415,47 +430,67 @@ class GatewayEditor:
                 values.append(agent_meta["costUsd"])
         return self._one(values, "gateway_cost_unverified")
 
+    def _record_completion(self, envelope: dict[str, Any], result: dict[str, Any]) -> None:
+        """Keep only safe completion fields after a complete tool attestation."""
+
+        completion = {"gateway_status": str(envelope["status"])}
+        roots = (envelope,) if result is envelope else (envelope, result)
+        for root in roots:
+            meta = root.get("meta")
+            if not isinstance(meta, dict):
+                continue
+            agent_meta = meta.get("agentMeta")
+            if not isinstance(agent_meta, dict):
+                continue
+            receipt = agent_meta.get("terminalReceipt")
+            if isinstance(receipt, dict) and receipt.get("terminalDisposition") in {
+                "visible",
+                "not-visible",
+            }:
+                completion["terminal_disposition"] = receipt["terminalDisposition"]
+        self._last_completion = completion
+
     def _parse(self, raw: bytes, request: dict[str, Any]) -> dict[str, Any]:
         try:
             envelope = io.decode(raw)
-            if not isinstance(envelope, dict):
-                raise EditorialError("gateway_response_invalid")
-            if (
-                envelope.get("ok") is False
-                or envelope.get("error")
-                or envelope.get("deliveryStatus")
-            ):
-                raise EditorialError("gateway_response_invalid")
-            if envelope.get("status") not in ("ok", "completed"):
-                raise EditorialError("gateway_response_invalid")
-            result = envelope.get("result", envelope)
-            if not isinstance(result, dict):
-                raise EditorialError("gateway_response_invalid")
-            if result.get("deliveryStatus"):
-                raise EditorialError("gateway_response_invalid")
-            payloads = result.get("payloads")
-            if not isinstance(payloads, list) or len(payloads) != 1:
-                raise EditorialError("gateway_response_invalid")
-            item = payloads[0]
-            if (
-                not isinstance(item, dict)
-                or not isinstance(item.get("text"), str)
-                or any(value not in (None, []) for key, value in item.items() if key != "text")
-            ):
-                raise EditorialError("gateway_response_invalid")
-            containers = self._validate_tool_attestation(envelope, result)
-            if self.budget_policy.max_reported_cost_usd is not None:
-                cost = self._reported_cost(containers)
-                if (
-                    not isinstance(cost, (float, int))
-                    or isinstance(cost, bool)
-                    or not math.isfinite(cost)
-                    or cost < 0
-                    or cost > self.budget_policy.max_reported_cost_usd
-                ):
-                    raise EditorialError("gateway_cost_unverified")
-            decision = io.decode(item["text"].encode("utf-8"))
-            validate_decision(decision, request)
-            return decision  # type: ignore[no-any-return]
         except (io.BridgeError, UnicodeError):
-            raise EditorialError("gateway_response_invalid") from None
+            raise EditorialError("gateway_envelope_invalid") from None
+        if not isinstance(envelope, dict):
+            raise EditorialError("gateway_envelope_invalid")
+        if envelope.get("ok") is False or envelope.get("error") or envelope.get("deliveryStatus"):
+            raise EditorialError("gateway_envelope_invalid")
+        if envelope.get("status") not in ("ok", "completed"):
+            raise EditorialError("gateway_envelope_invalid")
+        result = envelope.get("result", envelope)
+        if not isinstance(result, dict) or result.get("deliveryStatus"):
+            raise EditorialError("gateway_envelope_invalid")
+        payloads = result.get("payloads")
+        if not isinstance(payloads, list) or len(payloads) != 1:
+            raise EditorialError("gateway_envelope_invalid")
+        item = payloads[0]
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("text"), str)
+            or any(value not in (None, []) for key, value in item.items() if key != "text")
+        ):
+            raise EditorialError("gateway_envelope_invalid")
+        containers = self._validate_tool_attestation(envelope, result)
+        self._record_completion(envelope, result)
+        if self.budget_policy.max_reported_cost_usd is not None:
+            cost = self._reported_cost(containers)
+            if (
+                not isinstance(cost, (float, int))
+                or isinstance(cost, bool)
+                or not math.isfinite(cost)
+                or cost < 0
+                or cost > self.budget_policy.max_reported_cost_usd
+            ):
+                raise EditorialError("gateway_cost_unverified")
+        if not item["text"].strip():
+            raise EditorialError("gateway_empty_response")
+        try:
+            decision = io.decode(item["text"].encode("utf-8"))
+        except (io.BridgeError, UnicodeError):
+            raise EditorialError("gateway_model_json_invalid") from None
+        validate_decision(decision, request)
+        return decision  # type: ignore[no-any-return]

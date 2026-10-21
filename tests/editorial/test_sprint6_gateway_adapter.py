@@ -72,8 +72,19 @@ def decision() -> dict[str, Any]:
     }
 
 
-def fake_cli(tmp_path: Path, output: bytes, *, exit_code: int = 0, delay: int = 0) -> Path:
+def fake_cli(
+    tmp_path: Path,
+    output: bytes,
+    *,
+    exit_code: int = 0,
+    delay: int = 0,
+    session_log: Path | None = None,
+) -> Path:
     path = tmp_path / "fake-openclaw"
+    record = ""
+    if session_log is not None:
+        record = f"log = open({str(session_log)!r}, 'a')\n"
+        record += "log.write(args[args.index('--session-key') + 1] + '\\n')\nlog.close()\n"
     source = (
         f"#!{sys.executable}\n"
         "import os, pathlib, sys, time\n"
@@ -83,6 +94,7 @@ def fake_cli(tmp_path: Path, output: bytes, *, exit_code: int = 0, delay: int = 
         "assert '--message-file' in args and '--json' in args\n"
         "assert '--local' not in args and '--deliver' not in args\n"
         "assert '--session-key' in args\n"
+        f"{record}"
         "assert 'AWS_SECRET_ACCESS_KEY' not in os.environ\n"
         "message = pathlib.Path(args[args.index('--message-file') + 1]).read_bytes()\n"
         "assert b'Editorial request JSON:' in message\n"
@@ -138,6 +150,23 @@ def test_gateway_success_fixed_argv_and_sanitized_environment(
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "must-not-leak")
     executable = fake_cli(tmp_path, envelope())
     assert GatewayEditor(executable).evaluate(request()) == decision()
+
+
+def test_gateway_smoke_sessions_are_fresh_without_changing_default_idempotency(
+    tmp_path: Path,
+) -> None:
+    sessions = tmp_path / "sessions"
+    editor = GatewayEditor(fake_cli(tmp_path, envelope(), session_log=sessions))
+    editor.evaluate(request())
+    editor.evaluate(request())
+    editor.evaluate(request(), fresh_session=True)
+    editor.evaluate(request(), fresh_session=True)
+    recorded = sessions.read_text().splitlines()
+    assert recorded[0] == recorded[1]
+    assert recorded[0].startswith("editorial-")
+    assert recorded[2].startswith("editorial-smoke-")
+    assert recorded[3].startswith("editorial-smoke-")
+    assert recorded[2] != recorded[3]
 
 
 def test_gateway_parses_full_openclaw_2026_10_3_gateway_envelope(tmp_path: Path) -> None:
@@ -237,7 +266,7 @@ def test_simulation_and_wrong_agent_rejected_before_process(tmp_path: Path) -> N
 @pytest.mark.parametrize(
     ("output", "code"),
     [
-        (b"not json", "gateway_response_invalid"),
+        (b"not json", "gateway_envelope_invalid"),
         (envelope(calls=1), "gateway_tools_used"),
         (
             json.dumps(
@@ -320,8 +349,22 @@ def test_gateway_rejects_openclaw_2026_10_3_model_error_and_invalid_json(tmp_pat
     failed = openclaw_2026_10_3()
     failed.update({"ok": False, "status": "error", "error": {"kind": "model"}})
     for raw in (json.dumps(failed).encode(), b"{bad json", b"\xff"):
-        with pytest.raises(EditorialError, match="gateway_response_invalid"):
+        with pytest.raises(EditorialError, match="gateway_envelope_invalid"):
             GatewayEditor(fake_cli(tmp_path, raw)).evaluate(request())
+
+
+@pytest.mark.parametrize(
+    ("text", "code"),
+    [("", "gateway_empty_response"), ("not JSON", "gateway_model_json_invalid")],
+)
+def test_gateway_distinguishes_empty_and_invalid_model_json(
+    tmp_path: Path, text: str, code: str
+) -> None:
+    response = openclaw_2026_10_3_tool_free(text=text)
+    editor = GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode()))
+    with pytest.raises(EditorialError, match=code):
+        editor.evaluate(request())
+    assert editor.last_completion == {"gateway_status": "ok"}
 
 
 def test_gateway_rejects_conflicting_openclaw_tool_summaries(tmp_path: Path) -> None:
@@ -369,11 +412,11 @@ def test_hung_gateway_is_terminated_and_requires_reconciliation(tmp_path: Path) 
 def test_missing_success_status_or_delivery_attempt_fails_closed(tmp_path: Path) -> None:
     no_status = json.loads(envelope())
     del no_status["status"]
-    with pytest.raises(EditorialError, match="gateway_response_invalid"):
+    with pytest.raises(EditorialError, match="gateway_envelope_invalid"):
         GatewayEditor(fake_cli(tmp_path, json.dumps(no_status).encode())).evaluate(request())
     delivered = json.loads(envelope())
     delivered["result"]["deliveryStatus"] = {"requested": True, "status": "sent"}
-    with pytest.raises(EditorialError, match="gateway_response_invalid"):
+    with pytest.raises(EditorialError, match="gateway_envelope_invalid"):
         GatewayEditor(fake_cli(tmp_path, json.dumps(delivered).encode())).evaluate(request())
 
 
