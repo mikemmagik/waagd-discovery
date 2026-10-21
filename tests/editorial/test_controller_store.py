@@ -386,12 +386,14 @@ def test_selected_trusted_candidates_alone_reach_idempotent_v2_export(tmp_path):
     with EditorialStore(controller.store_path, simulation=False, readonly=True) as store:
         first = exportable(store, policy=PublicationPolicy(automatic_enabled=True))
         second = exportable(store, policy=PublicationPolicy(automatic_enabled=True))
+        limited = exportable(store, limit=1, policy=PublicationPolicy(automatic_enabled=True))
 
     assert len(first) == len(second) == 3
     assert [item["intent_id"] for item in first] == [item["intent_id"] for item in second]
     assert [item["content_hash"] for item in first] == [item["content_hash"] for item in second]
     assert {item["version"] for item in first} == {2}
     assert {item["editorial"]["review_route"] for item in first} == {"trusted_publisher"}
+    assert len(limited) == 1
 
 
 def test_results_persist_before_ack_and_no_repeat_generation(tmp_path):

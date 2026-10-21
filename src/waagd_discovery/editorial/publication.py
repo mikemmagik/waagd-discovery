@@ -279,7 +279,8 @@ def exportable(
         "JOIN (SELECT candidate_key,revision,MIN(delivery_id) delivery_id "
         "FROM delivery_candidates GROUP BY candidate_key,revision) dc "
         "ON dc.candidate_key=c.candidate_key AND dc.revision=c.current_revision "
-        "WHERE c.current_revision>0 ORDER BY c.candidate_key LIMIT ?"
+        "WHERE c.current_revision>0 AND d.decision='READY_FOR_REVIEW' "
+        "ORDER BY c.candidate_key LIMIT ?"
     )
     rows = store.connection.execute(query, (limit,)).fetchall()
     result = []
