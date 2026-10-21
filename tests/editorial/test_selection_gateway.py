@@ -23,7 +23,8 @@ def executable(tmp_path: Path, outputs: list[str]) -> Path:
         f"state=pathlib.Path({str(tmp_path / 'calls')!r})\n"
         "count=int(state.read_text()) if state.exists() else 0\n"
         "state.write_text(str(count + 1))\n"
-        "assert b'Shortlist JSON' in pathlib.Path(sys.argv[sys.argv.index('--message-file') + 1]).read_bytes()\n"
+        "assert b'Shortlist JSON' in pathlib.Path("
+        "sys.argv[sys.argv.index('--message-file') + 1]).read_bytes()\n"
         "answer=outputs[min(count,len(outputs)-1)]\n"
         "print(json.dumps({'status':'ok','result':{'payloads':[{'text':answer}],'meta':{'agentMeta':{'terminalReceipt':{'successfulToolNames':[]},'codeModeEngaged':False},'systemPromptReport':{'tools':{'entries':[]}}}}}))\n"
     )
@@ -34,7 +35,12 @@ def executable(tmp_path: Path, outputs: list[str]) -> Path:
 def shortlist() -> SelectionResult:
     return SelectionResult(
         shortlist=[
-            {"candidate_key": key * 64, "title": key, "description": "", "publisher": "The Guardian"}
+            {
+                "candidate_key": key * 64,
+                "title": key,
+                "description": "",
+                "publisher": "The Guardian",
+            }
             for key in "abcde"
         ],
         selected=[],

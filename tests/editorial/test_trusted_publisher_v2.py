@@ -8,6 +8,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from test_independent_contracts import (
+    candidate as verified_candidate,
+)
+from test_independent_contracts import (
+    decision as verified_decision,
+)
+from test_independent_contracts import (
+    inbox,
+)
+from test_independent_contracts import (
+    verification as verified_result,
+)
 
 from waagd_discovery.editorial.contracts import EditorialError, make_request, trusted_decision
 from waagd_discovery.editorial.publication import (
@@ -129,10 +141,6 @@ def test_tampered_v2_provenance_is_rejected() -> None:
 
 
 def test_independently_verified_route_remains_v1() -> None:
-    from test_independent_contracts import candidate as verified_candidate
-    from test_independent_contracts import decision as verified_decision
-    from test_independent_contracts import inbox, verification as verified_result
-
     ready = verified_decision("READY_FOR_REVIEW")
     ready["risks"] = []
     intent = _payload(
