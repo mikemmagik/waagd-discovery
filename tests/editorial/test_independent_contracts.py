@@ -250,6 +250,23 @@ def test_trusted_verified_builder_owns_identity_evidence_and_dates() -> None:
 
 
 @pytest.mark.parametrize(
+    "field",
+    ["candidate_key", "source", "created_at", "model_identifier", "factual_summary"],
+)
+def test_trusted_verified_builder_rejects_extra_untrusted_provenance(field: str) -> None:
+    request = make_request(candidate(), verification("VERIFIED"))
+    creative: dict[str, str] = {
+        "satirical_angle": "Institutions audit their own oversight.",
+        "headline": "Fixture headline",
+        "summary": "Synthetic test summary.",
+        "article": " ".join(["synthetic"] * 90),
+    }
+    creative[field] = "untrusted override"
+    with pytest.raises(EditorialError, match="trusted_creative_missing"):
+        trusted_decision(request, creative=creative, now=NOW)
+
+
+@pytest.mark.parametrize(
     "field", ["verification_evidence", "checked_sources", "candidate_key", "source"]
 )
 def test_editor_cannot_invent_provenance(field: str) -> None:

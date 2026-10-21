@@ -13,12 +13,11 @@ import hashlib
 import json
 import math
 import os
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from waagd_discovery.editorial.contracts import EditorialError, make_request
+from waagd_discovery.editorial.contracts import EditorialError, make_request, trusted_decision
 from waagd_discovery.editorial.gateway_adapter import GatewayBudgetPolicy, GatewayEditor
 
 _URL = "https://example.invalid/waagd-editorial-smoke"
@@ -138,13 +137,12 @@ def main() -> int:
     if not args.verified:
         # This is deliberately independent of an OpenClaw installation.  It
         # proves the PARTIAL path abstains without a model invocation.
-        editor = GatewayEditor(Path(sys.executable))
         try:
-            result = editor.evaluate(_request())
+            result = trusted_decision(_request())
         except EditorialError as error:
-            return _error(str(error), editor.last_completion)
+            return _error(str(error))
         if result["decision"] != "NEEDS_VERIFICATION":
-            return _error("gateway_partial_decision_invalid", editor.last_completion)
+            return _error("gateway_partial_decision_invalid")
         print(
             json.dumps(
                 {"decision": "NEEDS_VERIFICATION", "schema_version": 1, "status": "ok"},

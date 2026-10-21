@@ -290,7 +290,12 @@ def trusted_decision(
             "model_identifier": "trusted-policy-v1",
         }
     elif status == "VERIFIED":
-        if creative is None:
+        allowed_creative = {"satirical_angle", "headline", "summary", "article"}
+        if (
+            not isinstance(creative, dict)
+            or set(creative) != allowed_creative
+            or not all(isinstance(value, str) for value in creative.values())
+        ):
             raise EditorialError("trusted_creative_missing")
         evidence = {item["id"]: item for item in verification["evidence"]}
         evidence_ids = sorted(
@@ -315,7 +320,10 @@ def trusted_decision(
             "risks": [],
             "rejection_reason": None,
             "model_identifier": "openclaw-gateway-editor",
-            **creative,
+            "satirical_angle": creative["satirical_angle"],
+            "headline": creative["headline"],
+            "summary": creative["summary"],
+            "article": creative["article"],
         }
     else:  # Protected by the request schema; keep this boundary fail-closed.
         raise EditorialError("trusted_verification_invalid")
