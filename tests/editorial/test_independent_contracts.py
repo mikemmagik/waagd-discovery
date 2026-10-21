@@ -167,6 +167,24 @@ def test_decision_schema_diagnostic_identifies_noninteger_schema_version() -> No
     assert str(raised.value) == "editorial_schema_invalid:$.schema_version:type:integer"
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("headline", "h" * 81, "editorial_schema_invalid:$.headline:maxLength:80"),
+        ("summary", "s" * 161, "editorial_schema_invalid:$.summary:maxLength:160"),
+        ("article", "a" * 2001, "editorial_schema_invalid:$.article:maxLength:2000"),
+    ],
+)
+def test_decision_schema_rejects_overlong_editorial_text(
+    field: str, value: str, expected: str
+) -> None:
+    output = decision()
+    output[field] = value
+    with pytest.raises(EditorialError) as raised:
+        validate_decision(output, make_request(candidate(), verification()))
+    assert str(raised.value) == expected
+
+
 def test_decision_schema_diagnostic_names_missing_required_field_without_output_text() -> None:
     output = decision()
     output.pop("headline")
