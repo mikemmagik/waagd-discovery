@@ -191,6 +191,19 @@ def validate_verification(value: Any, candidate_key: str) -> None:
                 raise EditorialError("claim_without_independent_evidence")
     if value["evidence"] and value["canonical_url"] not in {e["url"] for e in value["evidence"]}:
         raise EditorialError("canonical_url_without_evidence")
+    if value["verification_status"] == "TRUSTED_PUBLISHER":
+        trust = value.get("publisher_trust")
+        if (
+            not isinstance(trust, dict)
+            or set(trust) != {"publisher_id", "rss_url"}
+            or not value["evidence"]
+            or value["claim_support"]
+            or value["errors"]
+            or any(item["source_kind"] != "article" for item in value["evidence"])
+        ):
+            raise EditorialError("trusted_publisher_provenance_invalid")
+    elif value.get("publisher_trust") is not None:
+        raise EditorialError("unexpected_publisher_trust")
     if value["verification_status"] == "FAILED" and not value["errors"]:
         raise EditorialError("failed_verification_without_reason")
     if value["verification_status"] == "PARTIAL" and not value["uncertainties"]:
@@ -289,7 +302,7 @@ def trusted_decision(
             "rejection_reason": "UNVERIFIABLE",
             "model_identifier": "trusted-policy-v1",
         }
-    elif status == "VERIFIED":
+    elif status in {"VERIFIED", "TRUSTED_PUBLISHER"}:
         allowed_creative = {"satirical_angle", "headline", "summary", "article"}
         if (
             not isinstance(creative, dict)
@@ -305,19 +318,33 @@ def trusted_decision(
                 for identifier in support["evidence_ids"]
             }
         )
-        if not evidence_ids or not set(evidence_ids) <= set(evidence):
-            raise EditorialError("trusted_verification_invalid")
-        facts = list(dict.fromkeys(support["claim"] for support in verification["claim_support"]))
+        if status == "VERIFIED":
+            if not evidence_ids or not set(evidence_ids) <= set(evidence):
+                raise EditorialError("trusted_verification_invalid")
+            facts = list(
+                dict.fromkeys(support["claim"] for support in verification["claim_support"])
+            )
+            factual_summary = "The listed material claims have independent supporting evidence."
+            unverified_claims: list[str] = []
+            risks: list[str] = []
+        else:
+            evidence_ids = sorted(evidence)
+            facts = ["The configured publisher published the linked report."]
+            factual_summary = (
+                "Publisher identity is trusted; material claims were not independently verified."
+            )
+            unverified_claims = ["The report's material claims were not independently verified."]
+            risks = ["TRUSTED_PUBLISHER route: no independent factual verification."]
         result = {
             **base,
             "decision": "READY_FOR_REVIEW",
-            "factual_summary": "The listed material claims have independent supporting evidence.",
+            "factual_summary": factual_summary,
             "established_facts": facts,
-            "unverified_claims": [],
+            "unverified_claims": unverified_claims,
             "open_questions": [],
             "checked_sources": sorted({evidence[item]["url"] for item in evidence_ids}),
             "verification_evidence": evidence_ids,
-            "risks": [],
+            "risks": risks,
             "rejection_reason": None,
             "model_identifier": "openclaw-gateway-editor",
             "satirical_angle": creative["satirical_angle"],
@@ -355,8 +382,9 @@ def validate_decision(value: Any, request: dict[str, Any]) -> None:
             for support in verification["claim_support"]
             for identifier in support["evidence_ids"]
         }
+        trusted = verification["verification_status"] == "TRUSTED_PUBLISHER"
         if (
-            verification["verification_status"] != "VERIFIED"
+            verification["verification_status"] not in {"VERIFIED", "TRUSTED_PUBLISHER"}
             or not value["verification_evidence"]
             or not value["established_facts"]
             or not all(
@@ -364,9 +392,22 @@ def validate_decision(value: Any, request: dict[str, Any]) -> None:
                 for k in ("factual_summary", "satirical_angle", "headline", "summary", "article")
             )
             or not 80 <= len(value["article"].split()) <= 150
-            or value["unverified_claims"]
             or value["rejection_reason"] is not None
-            or not needed_evidence <= set(value["verification_evidence"])
+            or (
+                not trusted
+                and (
+                    value["unverified_claims"]
+                    or not needed_evidence <= set(value["verification_evidence"])
+                )
+            )
+            or (
+                trusted
+                and (
+                    not value["unverified_claims"]
+                    or not value["risks"]
+                    or set(value["verification_evidence"]) != ids
+                )
+            )
         ):
             raise EditorialError("ready_without_verified_material")
     elif value["decision"] == "NEEDS_VERIFICATION":

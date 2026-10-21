@@ -21,6 +21,7 @@ from typing import Any
 
 from waagd_discovery.bridge import io
 from waagd_discovery.editorial.contracts import EditorialError, trusted_decision, validate_request
+from waagd_discovery.editorial.trusted_publishers import sensitive_risks
 
 _MAXIMUM = 128 * 1024
 _OUTPUT_GUIDE = (
@@ -536,5 +537,5 @@ class GatewayEditor:
                 raise EditorialError(f"gateway_creative_schema_invalid:{field}")
             # Citations, URLs, explicit dates and typographic quotes would turn
             # an otherwise creative field into untrusted provenance or a claim.
-            if _CREATIVE_UNSAFE.search(text):
+            if _CREATIVE_UNSAFE.search(text) or sensitive_risks(text):
                 raise EditorialError("gateway_creative_safety_invalid")

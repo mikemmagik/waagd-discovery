@@ -589,20 +589,15 @@ def test_private_corroboration_policy_is_strict_and_constructs_verifier_rules(tm
         load_corroboration_policies(path)
 
 
-def test_private_dynamic_corroboration_policy_needs_no_candidate_key(tmp_path):
+def test_private_dynamic_corroboration_policy_is_rejected(tmp_path):
     directory = tmp_path.resolve() / "policy"
     directory.mkdir(mode=0o700)
     directory.chmod(0o700)
     path = directory / "corroboration.yaml"
-    path.write_text(
-        "corroboration:\n"
-        "  automatic:\n"
-        "    endpoint_template: https://verify.example/check?candidate_url={candidate_url}\n"
-    )
+    path.write_text("corroboration:\n  automatic: {}\n")
     path.chmod(0o600)
-    rules, automatic = load_corroboration_rules(path)
-    assert rules == {}
-    assert automatic is not None
+    with pytest.raises(EditorialError, match="corroboration_policy_invalid"):
+        load_corroboration_rules(path)
 
 
 def test_gateway_candidate_limit_rejects_batch_before_editor_invocation(tmp_path):
