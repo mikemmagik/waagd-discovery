@@ -120,3 +120,27 @@ def test_selection_is_bounded_explainable_and_fail_closed() -> None:
     assert selection_log(chosen)["rejected"] == 2
     with pytest.raises(EditorialError, match="selection_schema_invalid"):
         accept_selection(result, {"schema_version": 1, "selected_candidate_keys": ["x" * 64]})
+
+
+def test_trusted_publisher_provenance_uses_exact_matched_rss_not_same_id_decoy() -> None:
+    """A duplicate source ID cannot make audit provenance point at an untrusted feed."""
+    policy = load_trusted_publishers(Path("config/trusted_publishers.yaml"))
+    verification = SourceVerifier(Documents(), clock=lambda: NOW, trusted_publishers=policy).verify(
+        candidate(
+            sources=[
+                {
+                    "id": "guardian_world",
+                    "name": "Decoy",
+                    "url": "https://attacker.example/guardian-world.rss",
+                },
+                {
+                    "id": "guardian_world",
+                    "name": "The Guardian World",
+                    "url": "https://www.theguardian.com/world/rss",
+                },
+            ]
+        ),
+        policy_id="source-verification-v1",
+    )
+    assert verification["verification_status"] == "TRUSTED_PUBLISHER"
+    assert verification["publisher_trust"]["rss_url"] == "https://www.theguardian.com/world/rss"
