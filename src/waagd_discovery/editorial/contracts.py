@@ -227,6 +227,102 @@ def make_request(
     return result
 
 
+def trusted_decision(
+    request: dict[str, Any], *, creative: dict[str, str] | None = None, now: datetime | None = None
+) -> dict[str, Any]:
+    """Build provenance and policy fields without trusting an editor response.
+
+    PARTIAL and FAILED verification never reach a model.  VERIFIED requests may
+    supply only the already syntax-checked creative text fields; all identity,
+    evidence, dates and the publication-review gate remain host-derived.
+    """
+
+    validate_request(request)
+    candidate = request["candidate"]
+    verification = request["verification"]
+    status = verification["verification_status"]
+    base: dict[str, Any] = {
+        "schema_version": 1,
+        "candidate_key": candidate["candidate_key"],
+        "source": candidate["url"],
+        "date": verification["publication_date"] or verification["event_date"],
+        "created_at": utc(now).isoformat(),
+        "prompt_version": PROMPT_VERSION,
+    }
+    if status == "PARTIAL":
+        result = {
+            **base,
+            "decision": "NEEDS_VERIFICATION",
+            "factual_summary": "Independent verification remains incomplete.",
+            "satirical_angle": "",
+            "headline": "",
+            "summary": "",
+            "article": "",
+            "established_facts": [],
+            "unverified_claims": ["The supplied material has not been independently verified."],
+            "open_questions": [
+                "Which independently governed evidence corroborates the material claims?"
+            ],
+            # Feed URLs are merely candidate metadata.  They are deliberately
+            # absent; retrieved verification evidence is the only source input.
+            "checked_sources": sorted({item["url"] for item in verification["evidence"]}),
+            "verification_evidence": [item["id"] for item in verification["evidence"]],
+            "risks": ["Independent corroboration is incomplete."],
+            "rejection_reason": None,
+            "model_identifier": "trusted-policy-v1",
+        }
+    elif status == "FAILED":
+        result = {
+            **base,
+            "decision": "REJECTED",
+            "factual_summary": "Source verification failed; editorial processing is blocked.",
+            "satirical_angle": "",
+            "headline": "",
+            "summary": "",
+            "article": "",
+            "established_facts": [],
+            "unverified_claims": [],
+            "open_questions": [],
+            "checked_sources": [],
+            "verification_evidence": [],
+            "risks": ["Verification failed."],
+            "rejection_reason": "UNVERIFIABLE",
+            "model_identifier": "trusted-policy-v1",
+        }
+    elif status == "VERIFIED":
+        if creative is None:
+            raise EditorialError("trusted_creative_missing")
+        evidence = {item["id"]: item for item in verification["evidence"]}
+        evidence_ids = sorted(
+            {
+                identifier
+                for support in verification["claim_support"]
+                for identifier in support["evidence_ids"]
+            }
+        )
+        if not evidence_ids or not set(evidence_ids) <= set(evidence):
+            raise EditorialError("trusted_verification_invalid")
+        facts = list(dict.fromkeys(support["claim"] for support in verification["claim_support"]))
+        result = {
+            **base,
+            "decision": "READY_FOR_REVIEW",
+            "factual_summary": "The listed material claims have independent supporting evidence.",
+            "established_facts": facts,
+            "unverified_claims": [],
+            "open_questions": [],
+            "checked_sources": sorted({evidence[item]["url"] for item in evidence_ids}),
+            "verification_evidence": evidence_ids,
+            "risks": [],
+            "rejection_reason": None,
+            "model_identifier": "openclaw-gateway-editor",
+            **creative,
+        }
+    else:  # Protected by the request schema; keep this boundary fail-closed.
+        raise EditorialError("trusted_verification_invalid")
+    validate_decision(result, request)
+    return result
+
+
 def validate_decision(value: Any, request: dict[str, Any]) -> None:
     validate_request(request)
     _validate(value, "editorial-decision-v1.schema.json", diagnose=True)

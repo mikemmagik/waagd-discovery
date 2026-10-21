@@ -20,37 +20,32 @@ from pathlib import Path
 from typing import Any
 
 from waagd_discovery.bridge import io
-from waagd_discovery.editorial.contracts import EditorialError, validate_decision, validate_request
+from waagd_discovery.editorial.contracts import EditorialError, trusted_decision, validate_request
 
 _MAXIMUM = 128 * 1024
 _OUTPUT_GUIDE = (
     b"Output contract: return JSON only, without Markdown, code fences, prose, or extra keys.\n"
-    b"Required keys: schema_version, candidate_key, decision, source, date, factual_summary, "
-    b"satirical_angle, headline, summary, article, established_facts, unverified_claims, "
-    b"open_questions, checked_sources, verification_evidence, risks, rejection_reason, "
-    b"created_at, model_identifier, prompt_version.\n"
-    b"schema_version is integer 1. decision is READY_FOR_REVIEW, NEEDS_VERIFICATION, or "
-    b"REJECTED. candidate_key is 64 lowercase hexadecimal characters. source is an http(s) URL. "
-    b"date is an RFC3339 timestamp or null. factual_summary, satirical_angle, headline, "
-    b"summary, article, and model_identifier are strings. established_facts, unverified_claims, "
-    b"open_questions, and risks are arrays of strings. checked_sources is an array of http(s) "
-    b"URLs; verification_evidence is an array of unique 64-character lowercase hexadecimal IDs. "
-    b"rejection_reason is null, NO_SATIRICAL_ANGLE, DUPLICATE, UNVERIFIABLE, MISLEADING, "
-    b"OUTDATED, EDITORIAL_RISK, or OTHER. created_at is an RFC3339 timestamp. prompt_version "
-    b"is waagd-editorial-v1.\n"
-    b"Exact limits: source and checked-source URLs are at most 2048 characters; factual_summary "
-    b"is at most 4000; satirical_angle is at most 1000; headline is at most 80; summary should "
-    b"target at most 120 and must not exceed 160; article is at most 2000; model_identifier is "
-    b"at most 100. Each fact, claim, question, or risk is at most 1000 characters. Each of "
-    b"established_facts, unverified_claims, open_questions, and risks has at most 30 items; "
-    b"checked_sources and verification_evidence have at most 20.\n"
-    b"For verification_status PARTIAL, return decision NEEDS_VERIFICATION, never "
-    b"READY_FOR_REVIEW. Copy candidate_key and source exactly from the request. date is null "
-    b"unless it exactly equals a supplied verification date. rejection_reason is null. "
-    b"factual_summary is nonempty; unverified_claims and open_questions are nonempty arrays of "
-    b"strings. checked_sources may contain only supplied candidate or evidence URLs; "
-    b"verification_evidence may contain only supplied evidence IDs. Use empty strings or arrays "
-    b"where no safe satire exists. Never invent facts, evidence IDs, dates, URLs, or sources.\n"
+    b"Required keys: satirical_angle, headline, summary, article. All four are strings. "
+    b"satirical_angle is at most 1000 characters; headline is at most 80; summary should target "
+    b"at most 120 and must not exceed 160; article is at most 2000 and must contain 80 to 150 "
+    b"words.\n"
+    b"This is creative commentary only. Do not output a decision, candidate key, source, date, "
+    b"publisher, factual summary, evidence, checked source, model name, policy, risk, quote, "
+    b"URL, citation, markdown, or any extra key. Do not state new facts: use dry intelligent "
+    b"English satire about decisions and institutions, never tragedy victims. Do not quote or "
+    b"attribute anyone. The trusted host supplies all provenance, factual fields, and policy.\n"
+)
+
+_CREATIVE_FIELDS = frozenset({"satirical_angle", "headline", "summary", "article"})
+_CREATIVE_LIMITS = {
+    "satirical_angle": 1000,
+    "headline": 80,
+    "summary": 160,
+    "article": 2000,
+}
+_CREATIVE_UNSAFE = re.compile(
+    r"https?://|\bwww\.|[\"“”]|\b(?:19|20)\d{2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
+    re.IGNORECASE,
 )
 
 
@@ -135,6 +130,7 @@ class GatewayEditor:
         self.timeout = float(timeout)
         self.budget_policy = budget_policy or GatewayBudgetPolicy()
         self._last_completion: dict[str, str] | None = None
+        self._last_metrics: dict[str, str] | None = None
 
     @property
     def last_completion(self) -> dict[str, str] | None:
@@ -142,13 +138,31 @@ class GatewayEditor:
 
         return None if self._last_completion is None else dict(self._last_completion)
 
+    @property
+    def last_metrics(self) -> dict[str, str] | None:
+        """Safe outcome dimensions suitable for host metrics, never model text."""
+
+        return None if self._last_metrics is None else dict(self._last_metrics)
+
     def evaluate(self, request: dict[str, Any], *, fresh_session: bool = False) -> dict[str, Any]:
         validate_request(request)
         if type(fresh_session) is not bool:
             raise EditorialError("gateway_session_policy_invalid")
         self._last_completion = None
+        self._last_metrics = None
         if request["simulation"] is not False:
             raise EditorialError("gateway_simulation_forbidden")
+        verification_status = request["verification"]["verification_status"]
+        if verification_status in {"PARTIAL", "FAILED"}:
+            # A missing or failed factual foundation is not a model-formatting
+            # problem.  Do not spend a model turn to learn that it is unsafe.
+            result = trusted_decision(request)
+            self._last_metrics = {
+                "path": "deterministic_policy",
+                "verification_status": verification_status,
+                "outcome": result["decision"],
+            }
+            return result
         payload = io.encode(request)
         # The policy is schema-bound. Delimiters improve clarity, but are not a
         # security boundary against malicious article text inside the JSON.
@@ -208,8 +222,23 @@ class GatewayEditor:
         if process.returncode != 0:
             # A connection failure may occur after Gateway accepted the turn.
             # The caller must reconcile session state before another paid attempt.
+            self._last_metrics = {"path": "gateway_creative", "outcome": "outcome_unknown"}
             raise EditorialError("gateway_outcome_unknown")
-        return self._parse(raw, request)
+        try:
+            result = self._parse(raw, request)
+        except EditorialError as error:
+            self._last_metrics = {
+                "path": "gateway_creative",
+                "outcome": "rejected",
+                "reason": str(error),
+            }
+            raise
+        self._last_metrics = {
+            "path": "gateway_creative",
+            "verification_status": verification_status,
+            "outcome": result["decision"],
+        }
+        return result
 
     def _read_bounded(self, process: subprocess.Popen[bytes]) -> bytes:
         assert process.stdout is not None
@@ -489,8 +518,23 @@ class GatewayEditor:
         if not item["text"].strip():
             raise EditorialError("gateway_empty_response")
         try:
-            decision = io.decode(item["text"].encode("utf-8"))
+            creative = io.decode(item["text"].encode("utf-8"))
         except (io.BridgeError, UnicodeError):
             raise EditorialError("gateway_model_json_invalid") from None
-        validate_decision(decision, request)
-        return decision  # type: ignore[no-any-return]
+        self._validate_creative(creative)
+        return trusted_decision(request, creative=creative)
+
+    @staticmethod
+    def _validate_creative(value: Any) -> None:
+        """Keep the model on a deliberately narrow, non-provenance surface."""
+
+        if not isinstance(value, dict) or set(value) != _CREATIVE_FIELDS:
+            raise EditorialError("gateway_creative_schema_invalid")
+        for field, maximum in _CREATIVE_LIMITS.items():
+            text = value.get(field)
+            if not isinstance(text, str) or len(text) > maximum:
+                raise EditorialError(f"gateway_creative_schema_invalid:{field}")
+            # Citations, URLs, explicit dates and typographic quotes would turn
+            # an otherwise creative field into untrusted provenance or a claim.
+            if _CREATIVE_UNSAFE.search(text):
+                raise EditorialError("gateway_creative_safety_invalid")

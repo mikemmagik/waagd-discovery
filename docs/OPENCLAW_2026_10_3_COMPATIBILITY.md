@@ -67,81 +67,55 @@ preflight. Roll back by stopping the new container and restoring the prior
 application image against the preserved schema-4 volume; do not delete volumes
 or rewrite Bridge state.
 
-## Editorial-decision output check
+## Editorial smoke checks
 
-The Gateway editor treats the model reply as untrusted data. The next compatible
-Discovery patch adds a trusted, schema-guided output contract to every request;
-it does not relax `editorial-decision-v1` or the editorial policy.
+Use the two commands in the zero-cost policy section below. The PARTIAL command
+is deterministic and never invokes OpenClaw. The VERIFIED command invokes only
+the isolated `waagd` Gateway with a synthetic fixture; it is a format and
+attestation check, not independent verification of news. Neither command opens
+Discovery SQLite or Bridge state, publishes, ACKs a delivery, enables the
+scheduler, or changes a shared Gateway configuration.
 
-For a synthetic candidate whose verification status is `PARTIAL`, the only safe
-success result is `NEEDS_VERIFICATION`. It must include a nonempty
-`factual_summary`, `unverified_claims`, and `open_questions`; it must not claim
-`READY_FOR_REVIEW`, add a date, evidence identifier, or URL not supplied in the
-request, or use a rejection reason.
+## Zero-cost editorial policy
 
-Run the existing isolated `GatewayEditor.evaluate()` smoke with that synthetic
-request after installing the patch. Record only the outcome code and decision:
+The Gateway is no longer asked to create factual or provenance fields. The
+trusted host validates the request and constructs `candidate_key`, canonical
+source, permitted verification date, evidence IDs, checked evidence URLs,
+`created_at`, and model identity. Candidate feed URLs are metadata only and are
+not promoted into `checked_sources` merely because they were supplied.
 
-- pass: `NEEDS_VERIFICATION` with no error;
-- schema failure: `editorial_schema_invalid:<path>:<validator>:<expected>`;
-- any other failure: retain the existing fail-closed result and do not retry by
-  changing the model output manually.
+`PARTIAL` never starts OpenClaw: it deterministically returns a valid
+`NEEDS_VERIFICATION` decision. `FAILED` deterministically returns `REJECTED`
+with `UNVERIFIABLE`, so neither status can produce a publication intent.
+`VERIFIED` is the only path that invokes the isolated model. The model may return
+only `satirical_angle`, `headline`, `summary`, and `article`; the host rejects
+extra fields, overlong strings, URLs, explicit dates, and quotation characters,
+then builds and validates the complete existing `editorial-decision-v1` result.
+The final `READY_FOR_REVIEW` gate still requires validated independent evidence.
+Publication remains default-deny.
 
-The schema diagnostic is capped and contains only JSON paths, field names,
-validator names, and expected types. It never includes the model reply,
-candidate text, evidence text, URLs, or credentials. Do not record the raw
-Gateway response. This smoke is operator-owned and does not authorize Bridge
-ACKs, publication, scheduler changes, or a change to the shared OpenClaw
-configuration.
+The `minimax/minimax-m3.1-flash:free` route remains the only model route. A
+single fresh-session retry is allowed only for a completed and attested JSON or
+creative-schema formatting failure. Gateway ambiguity, tool use, budget failure,
+or creative safety failure is final and fail-closed. Safe per-invocation metrics
+are exposed as route, verification status, outcome, and safe error code; no
+model response, prompt, source text, or credential is recorded.
 
-## One-shot live editorial smoke
-
-On `claw2`, from the checked-out release candidate, run this single command as
-the isolated Discovery service user. Substitute only the two absolute paths;
-the configuration must be the isolated `waagd` OpenClaw configuration, never
-Shmul or the Telegram agent configuration.
-
-```sh
-OPENCLAW_CONFIG_PATH=/absolute/private/claw2-openclaw.json uv run --frozen python scripts/gateway-editorial-live-smoke.py --gateway-executable /absolute/path/to/openclaw
-```
-
-It calls `GatewayEditor.evaluate()` once with an in-memory synthetic candidate
-and `verification_status=PARTIAL`. It creates no SQLite, Bridge, export, or
-publication state. A passing invocation prints exactly:
-
-```json
-{"decision":"NEEDS_VERIFICATION","schema_version":1,"status":"ok"}
-```
-
-Any other result is fail-closed. For a schema failure, retain only the safe
-`editorial_schema_invalid:<path>:<validator>:<expected>` code and do not retain
-the raw Gateway reply. The command does not authorize a retry with changed
-policy, an ACK, an automatic publication, or a scheduler change.
-
-Each smoke invocation supplies OpenClaw a new random `editorial-smoke-*` session
-key. The normal editorial controller retains its deterministic session key, so
-this isolation does not alter its idempotent recovery behavior.
-
-The smoke command accepts `--retry-format-once`. It makes at most two calls and
-only repeats a completed, attested formatting failure (`empty_response`,
-`model_json_invalid`, or `schema_invalid:*`) in a new session. Its default total
-limit is 120 seconds and USD 0.10, divided across attempts; uncertain Gateway
-outcomes are never retried. Use it for the final operator check:
+Run these two checks from the isolated checkout. They use no Discovery, Bridge,
+or publication state.
 
 ```sh
-OPENCLAW_CONFIG_PATH=/absolute/private/claw2-openclaw.json uv run --frozen python scripts/gateway-editorial-live-smoke.py --gateway-executable /absolute/path/to/openclaw --retry-format-once
+uv run --frozen python scripts/gateway-editorial-live-smoke.py
 ```
 
-Failure output contains only one of `model_json_invalid`, `empty_response`,
-`envelope_invalid`, or `schema_invalid:<path>:<validator>:<expected>` where
-applicable, plus the attested Gateway status and terminal disposition when
-reported. It never includes model text, prompt data, URLs, or credentials.
+The first command must print `NEEDS_VERIFICATION` and must not contact OpenClaw.
+The second is only a model-format smoke: its VERIFIED evidence is synthetic test
+fixture data, not independent verification of a real news item.
 
-The observed `minimax/minimax-m3.1-flash:free` endpoint supports JSON output
-but not JSON Schema enforcement, and the two live results have shown both an
-overlong field and non-JSON text. It is therefore not reliable enough for an
-unattended structured editorial workflow. After separate cost approval, use `openai/gpt-4.1-mini` through OpenRouter:
-its model page advertises JSON Schema structured outputs in `response_format`.
-Configure it only in the isolated `claw2` editor and require the structured
-parameter to be honored by the selected provider. Do not enable response repair:
-the WAAGD adapter must validate the original response and fail closed.
+```sh
+OPENCLAW_CONFIG_PATH=/absolute/private/claw2-openclaw.json uv run --frozen python scripts/gateway-editorial-live-smoke.py --verified --gateway-executable /absolute/path/to/openclaw --retry-format-once
+```
+
+A passing second command prints `READY_FOR_REVIEW` with
+`fixture: synthetic_verified`. It does not authorize publication, ACK, scheduler
+activation, or a change to the shared Gateway.

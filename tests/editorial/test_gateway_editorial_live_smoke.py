@@ -1,46 +1,25 @@
-"""The operator smoke command uses only a synthetic in-memory Gateway request."""
+"""The operator smoke command uses only synthetic in-memory editor fixtures."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import subprocess
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "gateway-editorial-live-smoke.py"
-URL = "https://example.invalid/waagd-editorial-smoke"
-KEY = hashlib.sha256(URL.encode("utf-8")).hexdigest()
-NOW = datetime(2026, 10, 21, tzinfo=UTC).isoformat()
 
 
-def _decision(**changes: object) -> dict[str, object]:
+def _creative(**changes: object) -> dict[str, object]:
     result: dict[str, object] = {
-        "schema_version": 1,
-        "candidate_key": KEY,
-        "decision": "NEEDS_VERIFICATION",
-        "source": URL,
-        "date": None,
-        "factual_summary": "The synthetic candidate has not been independently corroborated.",
-        "satirical_angle": "",
-        "headline": "",
-        "summary": "",
-        "article": "",
-        "established_facts": ["A synthetic candidate was supplied."],
-        "unverified_claims": ["The synthetic report describes a real event."],
-        "open_questions": ["Which independent source corroborates the report?"],
-        "checked_sources": [],
-        "verification_evidence": [],
-        "risks": ["No independent corroboration exists."],
-        "rejection_reason": None,
-        "created_at": NOW,
-        "model_identifier": "fake-openclaw",
-        "prompt_version": "waagd-editorial-v1",
+        "satirical_angle": "Bureaucracy mistakes activity for progress.",
+        "headline": "A Committee Finds Another Committee",
+        "summary": "A tidy machine keeps moving while the answer waits outside the meeting room.",
+        "article": " ".join(["bureaucracy"] * 90),
     }
     return {**result, **changes}
 
@@ -55,7 +34,7 @@ def _gateway(
     response = {
         "status": "ok",
         "result": {
-            "payloads": [{"text": json.dumps(_decision()) if text is None else text}],
+            "payloads": [{"text": json.dumps(_creative()) if text is None else text}],
             "meta": {"toolSummary": {"calls": 0, "tools": []}, "costUsd": 0.01},
         },
     }
@@ -80,27 +59,22 @@ def _gateway(
     return path
 
 
-def _environment(config: Path) -> dict[str, str]:
+def _environment(config: Path | None = None) -> dict[str, str]:
     environment = dict(os.environ)
-    environment["OPENCLAW_CONFIG_PATH"] = str(config)
     environment["PYTHONPATH"] = str(ROOT / "src")
+    if config is not None:
+        environment["OPENCLAW_CONFIG_PATH"] = str(config)
+    else:
+        environment.pop("OPENCLAW_CONFIG_PATH", None)
     return environment
 
 
-def test_live_smoke_command_accepts_isolated_tool_free_gateway(tmp_path: Path) -> None:
-    config = tmp_path / "claw2.json"
-    config.write_text("{}")
-    config.chmod(0o600)
+def test_partial_live_smoke_is_deterministic_and_does_not_call_gateway(tmp_path: Path) -> None:
     gateway = _gateway(tmp_path)
     command = [sys.executable, str(SCRIPT), "--gateway-executable", str(gateway)]
     results = [
         subprocess.run(
-            command,
-            cwd=ROOT,
-            env=_environment(config),
-            text=True,
-            capture_output=True,
-            check=False,
+            command, cwd=ROOT, env=_environment(), text=True, capture_output=True, check=False
         )
         for _ in range(2)
     ]
@@ -112,9 +86,7 @@ def test_live_smoke_command_accepts_isolated_tool_free_gateway(tmp_path: Path) -
             "schema_version": 1,
             "status": "ok",
         }
-    sessions = (tmp_path / "sessions").read_text().splitlines()
-    assert len(sessions) == 2
-    assert sessions[0] != sessions[1]
+    assert not (tmp_path / "sessions").exists()
 
 
 @pytest.mark.parametrize(
@@ -123,10 +95,10 @@ def test_live_smoke_command_accepts_isolated_tool_free_gateway(tmp_path: Path) -
         ("", None, "empty_response"),
         ("model prose", None, "model_json_invalid"),
         (None, b"not an envelope", "envelope_invalid"),
-        (json.dumps(_decision(summary="s" * 161)), None, "schema_invalid:$.summary:maxLength:160"),
+        (json.dumps(_creative(summary="s" * 161)), None, "creative_schema_invalid"),
     ],
 )
-def test_live_smoke_reports_safe_diagnostics(
+def test_verified_live_smoke_reports_safe_diagnostics(
     tmp_path: Path, text: str | None, raw: bytes | None, error: str
 ) -> None:
     config = tmp_path / "claw2.json"
@@ -136,6 +108,7 @@ def test_live_smoke_reports_safe_diagnostics(
         [
             sys.executable,
             str(SCRIPT),
+            "--verified",
             "--gateway-executable",
             str(_gateway(tmp_path, text=text, raw=raw)),
         ],
@@ -154,7 +127,7 @@ def test_live_smoke_reports_safe_diagnostics(
         assert payload["generation"] == {"gateway_status": "ok"}
 
 
-def test_live_smoke_retries_one_definite_format_failure_in_new_session(tmp_path: Path) -> None:
+def test_verified_live_smoke_retries_one_format_failure_in_new_session(tmp_path: Path) -> None:
     config = tmp_path / "claw2.json"
     config.write_text("{}")
     config.chmod(0o600)
@@ -162,7 +135,7 @@ def test_live_smoke_retries_one_definite_format_failure_in_new_session(tmp_path:
         {
             "status": "ok",
             "result": {
-                "payloads": [{"text": json.dumps(_decision())}],
+                "payloads": [{"text": json.dumps(_creative())}],
                 "meta": {"toolSummary": {"calls": 0, "tools": []}, "costUsd": 0.01},
             },
         }
@@ -171,6 +144,7 @@ def test_live_smoke_retries_one_definite_format_failure_in_new_session(tmp_path:
         [
             sys.executable,
             str(SCRIPT),
+            "--verified",
             "--gateway-executable",
             str(
                 _gateway(
@@ -203,17 +177,27 @@ def test_live_smoke_retries_one_definite_format_failure_in_new_session(tmp_path:
         check=False,
     )
     assert result.returncode == 0
-    assert json.loads(result.stdout)["decision"] == "NEEDS_VERIFICATION"
+    assert json.loads(result.stdout) == {
+        "decision": "READY_FOR_REVIEW",
+        "fixture": "synthetic_verified",
+        "schema_version": 1,
+        "status": "ok",
+    }
     sessions = (tmp_path / "sessions").read_text().splitlines()
     assert len(sessions) == 2 and sessions[0] != sessions[1]
 
 
-def test_live_smoke_command_requires_explicit_isolated_config(tmp_path: Path) -> None:
-    environment = _environment(tmp_path / "missing-claw2.json")
+def test_verified_live_smoke_requires_explicit_isolated_config(tmp_path: Path) -> None:
     result = subprocess.run(
-        [sys.executable, str(SCRIPT), "--gateway-executable", str(_gateway(tmp_path))],
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--verified",
+            "--gateway-executable",
+            str(_gateway(tmp_path)),
+        ],
         cwd=ROOT,
-        env=environment,
+        env=_environment(),
         text=True,
         capture_output=True,
         check=False,

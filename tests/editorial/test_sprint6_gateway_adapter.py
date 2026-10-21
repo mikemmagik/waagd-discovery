@@ -18,7 +18,7 @@ KEY = hashlib.sha256(URL.encode()).hexdigest()
 NOW = datetime(2026, 10, 19, tzinfo=UTC).isoformat()
 
 
-def request() -> dict[str, Any]:
+def request(status: str = "VERIFIED") -> dict[str, Any]:
     candidate = {
         "candidate_key": KEY,
         "id": 1,
@@ -29,20 +29,49 @@ def request() -> dict[str, Any]:
         "published_at": NOW,
         "sources": [{"id": "fixture", "name": "Fixture", "url": "https://news.example/rss"}],
     }
+    evidence = [
+        {
+            "id": "a" * 64,
+            "url": URL,
+            "retrieved_at": NOW,
+            "sha256": "c" * 64,
+            "excerpt": "Synthetic fixture assertion.",
+            "source_kind": "article",
+        }
+    ]
+    if status == "VERIFIED":
+        evidence.append(
+            {
+                **evidence[0],
+                "id": "b" * 64,
+                "url": "https://independent.example.test/attestation",
+                "source_kind": "attestation",
+            }
+        )
     verification = {
         "schema_version": 1,
         "candidate_key": KEY,
-        "verification_status": "PARTIAL",
+        "verification_status": status,
         "canonical_url": URL,
         "fetched_at": None,
         "http_status": None,
         "publisher": None,
         "publication_date": None,
         "event_date": None,
-        "evidence": [],
-        "uncertainties": ["No independent corroboration."],
-        "errors": [],
-        "claim_support": [],
+        "evidence": evidence,
+        "uncertainties": [] if status == "VERIFIED" else ["No independent corroboration."],
+        "errors": ["source_unavailable"] if status == "FAILED" else [],
+        "claim_support": (
+            [
+                {
+                    "claim": "Synthetic fixture assertion.",
+                    "evidence_ids": ["a" * 64, "b" * 64],
+                    "independently_confirmed": True,
+                }
+            ]
+            if status == "VERIFIED"
+            else []
+        ),
     }
     return make_request(candidate, verification, simulation=False)
 
@@ -72,6 +101,33 @@ def decision() -> dict[str, Any]:
     }
 
 
+def creative(**changes: object) -> dict[str, str]:
+    article = " ".join(
+        [
+            "The committee discovered that every emergency becomes tidier when it is filed twice.",
+            "Its paperwork applauded the paperwork, then requested a smaller meeting "
+            "about applause.",
+            "Nobody solved anything, but every folder achieved a sense of purpose.",
+            "A spokesperson for forms declined to comment because the comment required "
+            "another form.",
+            "The resulting system looked less like a machine and more like a polite queue "
+            "wearing a tie.",
+            "Observers were invited to admire the process from a respectful distance behind "
+            "a velvet rope.",
+            "By sunset, the institution had produced a timetable for deciding when to begin "
+            "deciding.",
+            "It was a triumph of motion, provided nobody confused motion with arrival.",
+        ]
+    )
+    result: dict[str, str] = {
+        "satirical_angle": "Bureaucracy mistakes activity for progress.",
+        "headline": "A Committee Finds Another Committee",
+        "summary": "A tidy machine keeps moving while the answer waits outside the meeting room.",
+        "article": article,
+    }
+    return {**result, **changes}  # type: ignore[return-value]
+
+
 def fake_cli(
     tmp_path: Path,
     output: bytes,
@@ -99,7 +155,7 @@ def fake_cli(
         "message = pathlib.Path(args[args.index('--message-file') + 1]).read_bytes()\n"
         "assert b'Editorial request JSON:' in message\n"
         "assert b'Output contract: return JSON only' in message\n"
-        "assert b'For verification_status PARTIAL, return decision NEEDS_VERIFICATION' in message\n"
+        "assert b'Required keys: satirical_angle, headline, summary, article' in message\n"
         "assert b'headline is at most 80' in message\n"
         "assert b'summary should target at most 120 and must not exceed 160' in message\n"
         "assert b'article is at most 2000' in message\n"
@@ -117,7 +173,7 @@ def envelope(*, calls: int = 0, text: str | None = None) -> bytes:
     value = {
         "status": "ok",
         "result": {
-            "payloads": [{"text": text if text is not None else json.dumps(decision())}],
+            "payloads": [{"text": text if text is not None else json.dumps(creative())}],
             "meta": {"toolSummary": {"calls": calls}, "agentMeta": {"costUsd": 0.01}},
         },
     }
@@ -130,7 +186,7 @@ def openclaw_2026_10_3(*, text: str | None = None) -> dict[str, Any]:
     fixture = json.loads(
         (Path(__file__).parent / "fixtures" / "openclaw-agent-2026.10.3.json").read_text()
     )
-    fixture["result"]["payloads"][0]["text"] = text if text is not None else json.dumps(decision())
+    fixture["result"]["payloads"][0]["text"] = text if text is not None else json.dumps(creative())
     return fixture
 
 
@@ -140,7 +196,7 @@ def openclaw_2026_10_3_tool_free(*, text: str | None = None) -> dict[str, Any]:
     fixture = json.loads(
         (Path(__file__).parent / "fixtures" / "openclaw-agent-2026.10.3-tool-free.json").read_text()
     )
-    fixture["result"]["payloads"][0]["text"] = text if text is not None else json.dumps(decision())
+    fixture["result"]["payloads"][0]["text"] = text if text is not None else json.dumps(creative())
     return fixture
 
 
@@ -149,7 +205,10 @@ def test_gateway_success_fixed_argv_and_sanitized_environment(
 ) -> None:
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "must-not-leak")
     executable = fake_cli(tmp_path, envelope())
-    assert GatewayEditor(executable).evaluate(request()) == decision()
+    result = GatewayEditor(executable).evaluate(request())
+    assert result["decision"] == "READY_FOR_REVIEW"
+    assert result["headline"] == creative()["headline"]
+    assert result["candidate_key"] == KEY
 
 
 def test_gateway_smoke_sessions_are_fresh_without_changing_default_idempotency(
@@ -176,16 +235,16 @@ def test_gateway_parses_full_openclaw_2026_10_3_gateway_envelope(tmp_path: Path)
         budget_policy=GatewayBudgetPolicy(max_reported_cost_usd=0.02),
     )
     raw = json.dumps(response).encode()
-    assert editor._parse(raw, request()) == decision()
-    assert editor.evaluate(request()) == decision()
+    assert editor._parse(raw, request())["decision"] == "READY_FOR_REVIEW"
+    assert editor.evaluate(request())["decision"] == "READY_FOR_REVIEW"
 
 
 def test_gateway_parses_full_openclaw_2026_10_3_tool_free_gateway_envelope(tmp_path: Path) -> None:
     response = openclaw_2026_10_3_tool_free()
     editor = GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode()))
     raw = json.dumps(response).encode()
-    assert editor._parse(raw, request()) == decision()
-    assert editor.evaluate(request()) == decision()
+    assert editor._parse(raw, request())["decision"] == "READY_FOR_REVIEW"
+    assert editor.evaluate(request())["decision"] == "READY_FOR_REVIEW"
 
 
 def test_gateway_accepts_empty_optional_tool_receipt_lists_in_tool_free_form(
@@ -195,10 +254,12 @@ def test_gateway_accepts_empty_optional_tool_receipt_lists_in_tool_free_form(
     response["result"]["meta"]["agentMeta"]["terminalReceipt"].update(
         {"attemptedToolNames": [], "failedToolNames": [], "toolNames": []}
     )
-    assert (
-        GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode())).evaluate(request())
-        == decision()
-    )
+    result = GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode())).evaluate(request())
+    assert result["decision"] == "READY_FOR_REVIEW"
+    assert result["checked_sources"] == [
+        "https://independent.example.test/attestation",
+        URL,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -261,6 +322,31 @@ def test_simulation_and_wrong_agent_rejected_before_process(tmp_path: Path) -> N
         GatewayEditor(executable, agent_id="main")
     with pytest.raises(EditorialError, match="gateway_simulation_forbidden"):
         GatewayEditor(executable).evaluate({**request(), "simulation": True})
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [("PARTIAL", "NEEDS_VERIFICATION"), ("FAILED", "REJECTED")],
+)
+def test_unverified_policy_decisions_do_not_invoke_gateway(
+    tmp_path: Path, status: str, expected: str
+) -> None:
+    executable = fake_cli(tmp_path, b"this must never execute")
+    editor = GatewayEditor(executable)
+    result = editor.evaluate(request(status))
+    assert result["decision"] == expected
+    assert result["model_identifier"] == "trusted-policy-v1"
+    assert editor.last_metrics == {
+        "path": "deterministic_policy",
+        "verification_status": status,
+        "outcome": expected,
+    }
+    if status == "PARTIAL":
+        assert result["checked_sources"] == [URL]
+        assert result["verification_evidence"] == ["a" * 64]
+    else:
+        assert result["checked_sources"] == []
+        assert result["verification_evidence"] == []
 
 
 @pytest.mark.parametrize(
@@ -421,12 +507,12 @@ def test_missing_success_status_or_delivery_attempt_fails_closed(tmp_path: Path)
 
 
 def test_gateway_reports_schema_path_without_model_reply_content(tmp_path: Path) -> None:
-    bad = decision()
-    bad["model_identifier"] = 7
+    bad = creative()
+    bad["headline"] = "x" * 81
     response = openclaw_2026_10_3_tool_free(text=json.dumps(bad))
     with pytest.raises(EditorialError) as raised:
         GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode())).evaluate(request())
-    assert str(raised.value) == "editorial_schema_invalid:$.model_identifier:type:string"
+    assert str(raised.value) == "gateway_creative_schema_invalid:headline"
     assert "7" not in str(raised.value)
 
 
@@ -440,9 +526,8 @@ def test_cost_and_schema_fail_closed(tmp_path: Path) -> None:
             fake_cli(tmp_path, envelope()),
             budget_policy=GatewayBudgetPolicy(max_reported_cost_usd=0.001),
         ).evaluate(request())
-    bad = decision()
-    bad["decision"] = "READY_FOR_REVIEW"
-    with pytest.raises(EditorialError, match="ready_without_verified_material"):
+    bad = creative(article='A source said "a thing" happened.')
+    with pytest.raises(EditorialError, match="gateway_creative_safety_invalid"):
         GatewayEditor(fake_cli(tmp_path, envelope(text=json.dumps(bad)))).evaluate(request())
 
 

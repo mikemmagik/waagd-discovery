@@ -14,6 +14,7 @@ from waagd_discovery.editorial.contracts import (
     EditorialError,
     digest,
     make_request,
+    trusted_decision,
     validate_decision,
     validate_input,
     validate_request,
@@ -206,6 +207,46 @@ def test_verified_fixture_can_support_human_review_without_publication() -> None
     request = make_request(candidate(), verification("VERIFIED"))
     validate_decision(decision("READY_FOR_REVIEW"), request)
     assert "publication" in request["policy"]
+
+
+def test_trusted_partial_builder_abstains_without_feed_provenance() -> None:
+    item = candidate()
+    item["sources"].append(
+        {"id": "unverified-feed", "name": "Unverified feed", "url": "https://feed.example.test/x"}
+    )
+    request = make_request(item, verification())
+    result = trusted_decision(request, now=NOW)
+    assert result["decision"] == "NEEDS_VERIFICATION"
+    assert result["model_identifier"] == "trusted-policy-v1"
+    assert "https://feed.example.test/x" not in result["checked_sources"]
+    assert result["verification_evidence"] == ["a" * 64]
+    validate_decision(result, request)
+
+
+def test_trusted_failed_builder_blocks_review_and_publication() -> None:
+    request = make_request(candidate(), verification("FAILED"))
+    result = trusted_decision(request, now=NOW)
+    assert result["decision"] == "REJECTED"
+    assert result["rejection_reason"] == "UNVERIFIABLE"
+    assert result["verification_evidence"] == []
+    validate_decision(result, request)
+
+
+def test_trusted_verified_builder_owns_identity_evidence_and_dates() -> None:
+    request = make_request(candidate(), verification("VERIFIED"))
+    creative = {
+        "satirical_angle": "Institutions audit their own oversight.",
+        "headline": "Fixture headline",
+        "summary": "Synthetic test summary.",
+        "article": " ".join(["synthetic"] * 90),
+    }
+    result = trusted_decision(request, creative=creative, now=NOW)
+    assert result["candidate_key"] == KEY
+    assert result["source"] == URL
+    assert result["checked_sources"] == [URL, "https://independent.example.test/attestation"]
+    assert result["verification_evidence"] == ["a" * 64, "b" * 64]
+    assert result["created_at"] == NOW.isoformat()
+    validate_decision(result, request)
 
 
 @pytest.mark.parametrize(
