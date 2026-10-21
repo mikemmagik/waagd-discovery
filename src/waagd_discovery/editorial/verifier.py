@@ -289,11 +289,12 @@ class SourceVerifier:
                 if policy is not None:
                     self._corroborate(result, extracted[:8000], policy)
                 elif self.trusted_publishers is not None:
-                    publisher = self.trusted_publishers.match(candidate, document.url)
+                    match = self.trusted_publishers.match(candidate, document.url)
                     risks = sensitive_risks(
                         candidate.get("title"), candidate.get("description"), extracted[:8000]
                     )
-                    if publisher is not None and not risks:
+                    if match is not None and not risks:
+                        publisher = match.publisher
                         # This is publisher-identity evidence only.  It deliberately
                         # makes no claim that the article's material facts are true.
                         result.update(
@@ -302,11 +303,7 @@ class SourceVerifier:
                                 "publisher": publisher.name,
                                 "publisher_trust": {
                                     "publisher_id": publisher.id,
-                                    "rss_url": next(
-                                        source["url"]
-                                        for source in candidate["sources"]
-                                        if source.get("id") in publisher.source_ids
-                                    ),
+                                    "rss_url": match.rss_url,
                                 },
                                 "uncertainties": [
                                     "Publisher identity is trusted; material claims were not "
@@ -314,7 +311,7 @@ class SourceVerifier:
                                 ],
                             }
                         )
-                    elif publisher is not None:
+                    elif match is not None:
                         result["uncertainties"].append(
                             "Trusted publisher report requires sensitive-story review: "
                             + ",".join(risks)

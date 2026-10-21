@@ -29,11 +29,17 @@ class TrustedPublisher:
 
 
 @dataclass(frozen=True)
+class TrustedPublisherMatch:
+    publisher: TrustedPublisher
+    rss_url: str
+
+
+@dataclass(frozen=True)
 class TrustedPublisherPolicy:
     publishers: tuple[TrustedPublisher, ...]
 
-    def match(self, candidate: dict[str, Any], canonical_url: str) -> TrustedPublisher | None:
-        """Return a configured publisher only for a feed-bound, HTTPS final URL."""
+    def match(self, candidate: dict[str, Any], canonical_url: str) -> TrustedPublisherMatch | None:
+        """Return the exact allowlisted feed binding for an HTTPS final URL."""
         try:
             parsed = _https(canonical_url)
             sources = candidate["sources"]
@@ -49,7 +55,7 @@ class TrustedPublisherPolicy:
                         and isinstance(source.get("url"), str)
                         and _normalized_rss(source["url"]) in publisher.rss_urls
                     ):
-                        return publisher
+                        return TrustedPublisherMatch(publisher, _normalized_rss(source["url"]))
         except (KeyError, TypeError, ValueError):
             return None
         return None
