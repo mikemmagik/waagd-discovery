@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "intent_id": "auto-independently-verified-20261022",
+  "content_hash": "9d7afd337dfad02954c1e2fe03bf3805c2207de8dcd05ada0cecd1b4022a7f6a",
+  "origin": "auto",
+  "authorization": { "kind": "discovery", "approved": true },
+  "editorial": {
+    "decision_id": "decision-independent-1",
+    "source_event_id": "candidate:independent-1;revision:1",
+    "source_attribution": "Independent source packet",
+    "approved_at": "2026-10-22T00:00:00.000Z",
+    "publication_policy": {
+      "version": "verified-policy-v1",
+      "outcome": "approved"
+    },
+    "review_route": "independently_verified",
+    "trusted_publisher": null
+  },
+  "post": {
+    "type": "news",
+    "origin": "auto",
+    "url": "https://example.com/independently-verified-fixture",
+    "canonical_url": "https://example.com/independently-verified-fixture",
+    "source_item_id": "independent-example-20261022",
+    "title": "An independently verified fixture",
+    "source": "Example News",
+    "preview": null,
+    "embed": null,
+    "body": "A complete fixture article from the independently verified route.",
+    "references": [
+      {
+        "url": "https://example.com/independently-verified-fixture",
+        "title": "Independent fixture source"
+      }
+    ]
+  }
+}

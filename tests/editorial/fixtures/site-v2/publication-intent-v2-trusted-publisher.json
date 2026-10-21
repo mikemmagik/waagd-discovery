@@ -1,0 +1,49 @@
+{
+  "version": 2,
+  "intent_id": "auto-trusted-publisher-20261022",
+  "content_hash": "fa3ddef95aa2e0519c0731a55c5f04e56790311246931bbee2d06814ffa6a3d6",
+  "origin": "auto",
+  "authorization": { "kind": "discovery", "approved": true },
+  "editorial": {
+    "decision_id": "decision-trusted-1",
+    "source_event_id": "candidate:trusted-1;revision:1",
+    "source_attribution": "The Guardian",
+    "approved_at": "2026-10-22T00:00:00.000Z",
+    "publication_policy": {
+      "version": "trusted-policy-v1",
+      "outcome": "approved"
+    },
+    "review_route": "trusted_publisher",
+    "trusted_publisher": {
+      "publisher_id": "guardian",
+      "publisher_name": "The Guardian",
+      "trusted_rss_url": "https://www.theguardian.com/world/rss",
+      "article_url": "https://www.theguardian.com/world/2026/oct/22/example",
+      "article_host": "www.theguardian.com",
+      "verified_at": "2026-10-22T00:00:00.000Z",
+      "safety_gates": {
+        "publisher_identity": true,
+        "safe_retrieval": true,
+        "sensitive_content": "clear"
+      }
+    }
+  },
+  "post": {
+    "type": "news",
+    "origin": "auto",
+    "url": "https://www.theguardian.com/world/2026/oct/22/example",
+    "canonical_url": "https://www.theguardian.com/world/2026/oct/22/example",
+    "source_item_id": "guardian-example-20261022",
+    "title": "A trusted publisher fixture",
+    "source": "The Guardian",
+    "preview": null,
+    "embed": null,
+    "body": "A complete fixture article from a trusted publisher route.",
+    "references": [
+      {
+        "url": "https://www.theguardian.com/world/2026/oct/22/example",
+        "title": "The Guardian fixture source"
+      }
+    ]
+  }
+}
