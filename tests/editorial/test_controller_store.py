@@ -5,6 +5,7 @@ import hashlib
 import json
 import sqlite3
 import stat
+import sys
 import uuid
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
@@ -31,9 +32,11 @@ from waagd_discovery.editorial.contracts import (
     validate_decision,
 )
 from waagd_discovery.editorial.controller import Controller
-from waagd_discovery.editorial.publication import exportable
+from waagd_discovery.editorial.gateway_adapter import GatewayEditor
+from waagd_discovery.editorial.publication import export_file, exportable
 from waagd_discovery.editorial.publication_policy import PublicationPolicy
 from waagd_discovery.editorial.selection import accept_selection
+from waagd_discovery.editorial.selection_gateway import GatewaySelector
 from waagd_discovery.editorial.store import EditorialStore
 from waagd_discovery.editorial.trusted_publishers import load_trusted_publishers
 from waagd_discovery.editorial.verifier import FetchDocument, SourceVerifier, SyntheticVerifier
@@ -189,6 +192,44 @@ class CanonicalDocuments:
         )
 
 
+class CliTrustedVerifier:
+    def __init__(self, *args, **kwargs):
+        del args, kwargs
+
+    def verify(self, candidate, *, policy_id):
+        assert policy_id == "source-verification-v1"
+        return {
+            "schema_version": 1,
+            "candidate_key": candidate["candidate_key"],
+            "verification_status": "TRUSTED_PUBLISHER",
+            "canonical_url": candidate["url"],
+            "fetched_at": NOW.isoformat(),
+            "http_status": 200,
+            "publisher": "The Guardian",
+            "publication_date": None,
+            "event_date": None,
+            "evidence": [
+                {
+                    "id": "a" * 64,
+                    "url": candidate["url"],
+                    "retrieved_at": NOW.isoformat(),
+                    "sha256": "b" * 64,
+                    "excerpt": "Synthetic trusted publisher fixture.",
+                    "source_kind": "article",
+                }
+            ],
+            "uncertainties": [
+                "Publisher identity is trusted; facts are not independently verified."
+            ],
+            "errors": [],
+            "claim_support": [],
+            "publisher_trust": {
+                "publisher_id": "guardian",
+                "rss_url": "https://www.theguardian.com/world/rss",
+            },
+        }
+
+
 class TrustedEditor:
     def __init__(self, *, fail_once=False):
         self.calls = []
@@ -235,6 +276,47 @@ class PlannedSelector:
         )
 
 
+class InterruptSelector:
+    def __init__(self):
+        self.calls = 0
+
+    def select(self, plan):
+        del plan
+        self.calls += 1
+        raise KeyboardInterrupt
+
+
+def real_selector_executable(tmp_path):
+    path = tmp_path / "fake-openclaw"
+    path.write_text(
+        f"#!{sys.executable}\n"
+        "import json, pathlib, sys\n"
+        f"state=pathlib.Path({str(tmp_path / 'selector-calls')!r})\n"
+        "message=pathlib.Path(sys.argv[sys.argv.index('--message-file') + 1]).read_bytes()\n"
+        "if b'Shortlist JSON:' in message:\n"
+        "  count=int(state.read_text()) if state.exists() else 0\n"
+        "  state.write_text(str(count + 1))\n"
+        "  payload=json.loads(message.split(b'Shortlist JSON:\\n', 1)[1])\n"
+        "  keys=(\n"
+        "    [item['candidate_key'] for item in payload['candidates'][:4]]\n"
+        "    if count == 0 else []\n"
+        "  )\n"
+        "  text=json.dumps({'schema_version': 1, 'selected_candidate_keys': keys})\n"
+        "else:\n"
+        "  text=json.dumps({'satirical_angle':'A fictional institution worships procedure.',"
+        "'headline':'A Fictional Institution Finds More Forms',"
+        "'summary':'The paperwork schedules a meeting about its next meeting.',"
+        "'article':' '.join([\n"
+        "  'The fictional institution filed another meeting and called it progress.'\n"
+        "] * 12)})\n"
+        "print(json.dumps({'status':'ok','result':{'payloads':[{'text':text}],"
+        "'meta':{'agentMeta':{'costUsd':0.0,'terminalReceipt':{'successfulToolNames':[]},"
+        "'codeModeEngaged':False},'systemPromptReport':{'tools':{'entries':[]}}}}}))\n"
+    )
+    path.chmod(0o700)
+    return path
+
+
 def trusted_candidate(index):
     url = f"https://www.theguardian.com/world/2026/oct/22/fixture-{index:04x}"
     return {
@@ -255,7 +337,7 @@ def trusted_candidate(index):
     }
 
 
-def trusted_setup(tmp_path, *, count=84, selected=4, fail_once=False):
+def trusted_setup(tmp_path, *, count=84, selected=4, fail_once=False, allow_ack=False):
     root = tmp_path.resolve()
     inbox_directory = root / "workspace" / "waagd-discovery"
     inbox_directory.mkdir(parents=True, mode=0o700)
@@ -283,7 +365,7 @@ def trusted_setup(tmp_path, *, count=84, selected=4, fail_once=False):
         verifier,
         editor,
         simulation=False,
-        allow_ack=False,
+        allow_ack=allow_ack,
         selector=selector,
     )
     return controller, bridge, editor, selector, value
@@ -314,6 +396,49 @@ def test_controller_selects_only_gateway_choices_and_persists_selection_log(tmp_
     assert sum(item["status"] == "selected" for item in items) == 4
     assert sum(item["editorial_status"] == "completed" for item in items) == 4
     assert {item["export_status"] for item in items} == {"not_exported"}
+
+
+def test_controller_processes_eighty_four_trusted_candidates_across_valid_bridge_batches(tmp_path):
+    # Bridge v2 intentionally caps each immutable delivery at 50 candidates.
+    # This covers the 84-item operational flow as two independently ACKed
+    # deliveries without weakening that boundary.
+    controller, bridge, editor, selector, _ = trusted_setup(
+        tmp_path, count=50, selected=4, allow_ack=True
+    )
+
+    assert controller.process(NOW)["status"] == "acknowledged"
+    second = envelope(
+        str(uuid.uuid4()),
+        [trusted_candidate(index) for index in range(50, 84)],
+        NOW,
+        NOW + timedelta(hours=1),
+        schema_version=2,
+    )
+    controller.inbox.write_bytes(io.encode(second))
+    controller.inbox.chmod(0o600)
+    bridge.value = second
+    bridge.acknowledged = False
+
+    assert controller.process(NOW)["status"] == "acknowledged"
+    assert selector.calls == 4
+    assert len(editor.calls) == 4
+    assert len(rows(controller, "decisions")) == 84
+    assert sum(item["status"] == "selected" for item in rows(controller, "selection_items")) == 4
+
+
+def test_controller_uses_real_gateway_selector_before_selected_only_editorial(tmp_path):
+    controller, _, _, _, _ = trusted_setup(tmp_path, count=50, selected=0)
+    editor = GatewayEditor(real_selector_executable(tmp_path))
+    controller.editor = editor
+    controller.selector = GatewaySelector(editor)
+
+    assert controller.process(NOW)["status"] == "results_saved"
+    assert (tmp_path / "selector-calls").read_text() == "2"
+    assert sum(item["status"] == "selected" for item in rows(controller, "selection_items")) == 4
+    assert (
+        sum(item["editorial_status"] == "completed" for item in rows(controller, "selection_items"))
+        == 4
+    )
 
 
 def test_controller_empty_selection_calls_no_editor_and_records_rejections(tmp_path):
@@ -349,6 +474,31 @@ def test_controller_restarts_after_editorial_interruption_without_reselecting(tm
     assert selector.calls == 1
     assert len(editor.calls) == 2
     assert len(rows(controller, "decisions")) == 3
+
+
+def test_restart_after_ambiguous_selection_never_replays_gateway_call(tmp_path):
+    controller, bridge, editor, _, _ = trusted_setup(tmp_path, count=3, selected=1)
+    interrupted = InterruptSelector()
+    controller.selector = interrupted
+
+    with pytest.raises(KeyboardInterrupt):
+        controller.process(NOW)
+    assert interrupted.calls == 1
+    restarted = Controller(
+        controller.inbox,
+        controller.store_path,
+        bridge,
+        controller.verifier,
+        editor,
+        simulation=False,
+        allow_ack=False,
+        selector=interrupted,
+    )
+    result = restarted.process(NOW)
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "selection_outcome_unknown"
+    assert interrupted.calls == 1
+    assert editor.calls == []
 
 
 def test_controller_blocks_invalid_selection_before_any_editorial_call(tmp_path):
@@ -394,6 +544,16 @@ def test_selected_trusted_candidates_alone_reach_idempotent_v2_export(tmp_path):
     assert {item["version"] for item in first} == {2}
     assert {item["editorial"]["review_route"] for item in first} == {"trusted_publisher"}
     assert len(limited) == 1
+    output = tmp_path / "publication" / "publication-intent.json"
+    assert (
+        export_file(
+            controller.store_path,
+            output,
+            policy=PublicationPolicy(automatic_enabled=True),
+        )["status"]
+        == "exported"
+    )
+    assert {item["export_status"] for item in rows(controller, "selection_items")} >= {"exported"}
 
 
 def test_results_persist_before_ack_and_no_repeat_generation(tmp_path):
@@ -873,6 +1033,54 @@ def test_gateway_requires_explicit_runtime_and_all_three_config_switches(tmp_pat
     assert main([*arguments, "--config", str(config), "gateway-process"]) == 1
     assert "gateway_processing_not_authorized" in capsys.readouterr().out
     assert not (root / "private").exists()
+
+
+def test_gateway_cli_wires_real_selector_into_controller(tmp_path, capsys, monkeypatch):
+    bridge, _ = real_bridge(tmp_path)
+    root = tmp_path.resolve()
+    config = root / "gateway.yaml"
+    config.write_text(
+        "editorial: {enabled: true}\nnetwork: {enabled: true}\nllm: {enabled: true}\n"
+    )
+    policy_directory = root / "policy"
+    policy_directory.mkdir(mode=0o700)
+    policy_directory.chmod(0o700)
+    policy = policy_directory / "trusted.yaml"
+    policy.write_text(Path("config/trusted_publishers.yaml").read_text())
+    policy.chmod(0o600)
+    monkeypatch.setattr("waagd_discovery.editorial.verifier.SourceVerifier", CliTrustedVerifier)
+
+    assert (
+        main(
+            [
+                "--config",
+                str(config),
+                "--inbox",
+                str(bridge.inbox_dir / "inbox.json"),
+                "--store",
+                str(root / "private" / "editorial.sqlite3"),
+                "--export",
+                str(root / "exports" / "candidates.json"),
+                "--workspace-root",
+                str(root / "workspace"),
+                "--state-dir",
+                str(root / "bridge-state"),
+                "--no-simulation",
+                "--allow-gateway",
+                "--gateway-executable",
+                str(real_selector_executable(tmp_path)),
+                "--gateway-max-candidates",
+                "2",
+                "--gateway-max-cost-usd",
+                "0.10",
+                "--trusted-publishers",
+                str(policy),
+                "gateway-process",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["status"] == "results_saved"
 
 
 def test_mock_worker_is_separate_bounded_data_only(tmp_path, monkeypatch):

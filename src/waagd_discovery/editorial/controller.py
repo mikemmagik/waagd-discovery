@@ -544,6 +544,11 @@ class Controller:
                     )
                 if run["status"] == "completed":
                     selected = set(io.decode(run["selected"].encode()))
+                elif run["status"] == "in_flight":
+                    store.mark_delivery(
+                        envelope["delivery_id"], "operator_required", "selection_outcome_unknown"
+                    )
+                    return self._result(store, envelope["delivery_id"])
                 elif run["status"] == "started":
                     from waagd_discovery.editorial.selection import SelectionResult
 
@@ -578,6 +583,7 @@ class Controller:
                         )
                     else:
                         try:
+                            store.begin_selection_call(envelope["delivery_id"])
                             chosen: list[str] = []
                             for batch in batches:
                                 if len(chosen) == available:

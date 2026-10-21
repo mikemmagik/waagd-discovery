@@ -434,6 +434,24 @@ class EditorialStore:
                     (reason_code, run[0]),
                 )
 
+    def begin_selection_call(self, delivery: str) -> None:
+        """Durably claim one non-idempotent Gateway turn before invoking it.
+
+        A process death after the model receives a request leaves ``in_flight``.
+        That ambiguous outcome is deliberately operator-required: replaying a
+        creative selection call could create a different choice for the same
+        run, so automatic recovery must not invoke it again.
+        """
+
+        with self.transaction():
+            updated = self.connection.execute(
+                "UPDATE selection_runs SET status='in_flight' "
+                "WHERE delivery_id=? AND status='started'",
+                (delivery,),
+            ).rowcount
+            if updated != 1:
+                raise EditorialError("selection_state_invalid")
+
     def selected_today(self, day: str, *, excluding_delivery: str | None = None) -> int:
         query = (
             "SELECT COUNT(*) FROM selection_items i JOIN selection_runs r ON r.run_id=i.run_id "
@@ -460,6 +478,16 @@ class EditorialStore:
                 "WHERE run_id=(SELECT run_id FROM selection_runs WHERE delivery_id=?) "
                 "AND candidate_key=? AND status='selected'",
                 (status, export_status, delivery, key),
+            )
+
+    def mark_selection_exported(self, key: str) -> None:
+        """Record a completed data-only export for the selected candidate."""
+
+        with self.transaction():
+            self.connection.execute(
+                "UPDATE selection_items SET export_status='exported' "
+                "WHERE candidate_key=? AND status='selected'",
+                (key,),
             )
 
     def start_attempt(

@@ -427,4 +427,10 @@ def export_file(
         io.atomic_write(directory, output.name, encoded)
     finally:
         os.close(directory)
+    # The data-only handoff is durable before audit state changes. If the host
+    # dies in this narrow interval, the same immutable intent can be exported
+    # again; a later successful call records it without changing the intent.
+    key = value["editorial"]["source_event_id"].split(";", 1)[0].removeprefix("candidate:")
+    with EditorialStore(store_path, simulation=False) as store:
+        store.mark_selection_exported(key)
     return {"status": "exported", "count": 1, "path": output.name}
