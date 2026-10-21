@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from waagd_discovery.editorial.contracts import EditorialError, make_request, trusted_decision
-from waagd_discovery.editorial.selection import accept_selection, selection_log, shortlist
+from waagd_discovery.editorial.selection import (
+    accept_selection,
+    selection_log,
+    shortlist,
+    shortlist_batches,
+)
 from waagd_discovery.editorial.trusted_publishers import load_trusted_publishers
 from waagd_discovery.editorial.verifier import FetchDocument, SourceVerifier
 
@@ -120,6 +125,32 @@ def test_selection_is_bounded_explainable_and_fail_closed() -> None:
     assert selection_log(chosen)["rejected"] == 2
     with pytest.raises(EditorialError, match="selection_schema_invalid"):
         accept_selection(result, {"schema_version": 1, "selected_candidate_keys": ["x" * 64]})
+
+
+def test_eighty_four_eligible_candidates_are_partitioned_into_bounded_turns() -> None:
+    candidates = []
+    for index in range(84):
+        url = f"https://www.theguardian.com/world/2026/oct/22/fixture-{index:04x}"
+        candidates.append(
+            candidate(
+                candidate_key=hashlib.sha256(url.encode()).hexdigest(),
+                url=url,
+                title=f"Council {index:04x} approves a fictional procedure",
+                verification_status="TRUSTED_PUBLISHER",
+            )
+        )
+
+    batches = shortlist_batches(candidates)
+
+    assert [len(batch.shortlist) for batch in batches] == [25, 25, 25, 9]
+    first = accept_selection(
+        batches[0],
+        {
+            "schema_version": 1,
+            "selected_candidate_keys": [item["candidate_key"] for item in batches[0].shortlist[:4]],
+        },
+    )
+    assert len(first.selected) == 4
 
 
 def test_trusted_publisher_provenance_uses_exact_matched_rss_not_same_id_decoy() -> None:

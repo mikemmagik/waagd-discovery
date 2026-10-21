@@ -21,21 +21,14 @@ The existing candidate-specific independent-corroboration route remains the only
 
 For `TRUSTED_PUBLISHER`, the free Gateway receives the bounded original report as untrusted material and may return only four creative fields. Trusted code owns URL, source, publisher identity, date, evidence and provenance. Model output with URLs, quotations, dates or high-risk language is rejected. Automated handling holds reports involving personal accusations, sexual violence, minors or acute violence. Political topics are not blocked as a category.
 
-The selector accepts only compact candidate identity, headline, summary and publisher fields. It may choose zero through five candidates; malformed or ineligible IDs fail closed. Its log records only counts and reason codes, never raw model responses. It is not a factual or publication authorizer.
+The selector accepts only compact candidate identity, headline, summary and publisher fields. It may choose zero through five candidates; malformed or ineligible IDs fail closed. Candidates are deterministically de-duplicated and split into bounded 25-item model turns. The private Editorial Store records the run ID, UTC day, shortlist hashes, selected and rejected status, reason code, editorial completion and export state; it never stores the model reply or prompt. A completed selection is reused after restart. The local five-item limit is a safety ceiling; the Site remains authoritative for its atomic daily quota.
 
 ## Site dependency before automatic publication
 
-PublicationIntent v1 can carry an honest route marker in existing editorial metadata, but Site v0.1.1 does not persist a structured route or atomically enforce a daily automatic-publication budget. Discovery therefore intentionally continues to export only independently `VERIFIED` decisions.
+The Trusted Publisher route produces **PublicationIntent v2** with the explicit `editorial.review_route=trusted_publisher` and structured publisher provenance. The existing independently `VERIFIED` route remains PublicationIntent v1. The local producer is contract-tested against the Site v2 fixtures at `10717e490309c4c742097095456200ea4ba24dff`.
 
-The Site owner must agree and implement a versioned Publisher change before this route can publish:
-
-1. Add `editorial.review_route` to a new PublicationIntent version, with closed values `independently_verified` and `trusted_publisher`.
-2. Persist that route in the durable receipt and publication audit record.
-3. In the same D1 transaction that creates an automatic post, count successful automatic receipts for the UTC day and reject the sixth distinct intent. Exact replay returns its existing receipt and consumes no slot.
-4. Keep Telegram outside the count, preserve `auto_paused` by default, and apply the transaction to retries and concurrent requests.
-
-Until that Site change is released and accepted, do not export a `TRUSTED_PUBLISHER` decision as a PublicationIntent or enable automatic publication.
+The Site release and operator acceptance are still prerequisites for automatic delivery. Its Publisher must keep route provenance in its durable receipt, enforce the daily automatic quota atomically in D1, preserve idempotent replay, keep Telegram outside that quota, and leave `auto_paused` enabled by default. Discovery has no Publisher client and cannot enable publication itself.
 
 ## Operator prerequisites for a later isolated run
 
-Use an isolated Discovery copy only. Keep the v0.4.1 scheduler, SQLite database, Bridge state and protected delivery `dbf6d7a2-395e-40c6-8e91-7866aab89e53` untouched. Review the allowlist and source IDs, retain the default pause, and use the existing free, tool-free Gateway only after a separate operator plan. No command here authorizes a live OpenClaw, Cloudflare, Telegram, RSS or Site run.
+Use an isolated Discovery copy only. Keep the v0.4.1 scheduler, SQLite database, Bridge state and protected delivery `dbf6d7a2-395e-40c6-8e91-7866aab89e53` untouched. Review the allowlist and source IDs, retain the default pause, and use the existing free, tool-free Gateway only after a separate operator plan. Run editorial processing with its explicit Gateway permission; run the separate `waagd-publication-export` command only with an explicitly enabled publication policy and the exact `publication-intent.json` output name. No command here authorizes a live OpenClaw, Cloudflare, Telegram, RSS or Site run.

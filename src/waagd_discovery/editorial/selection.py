@@ -42,6 +42,10 @@ def shortlist(candidates: list[dict[str, Any]]) -> SelectionResult:
         key = candidate.get("candidate_key")
         if not isinstance(key, str) or key in rejected:
             continue
+        exclusion = candidate.get("selection_exclusion")
+        if isinstance(exclusion, str) and exclusion:
+            rejected[key] = exclusion
+            continue
         if candidate.get("verification_status") != "TRUSTED_PUBLISHER":
             rejected[key] = "not_trusted_publisher"
             continue
@@ -66,6 +70,56 @@ def shortlist(candidates: list[dict[str, Any]]) -> SelectionResult:
         selected=[],
         rejected=rejected,
     )
+
+
+def shortlist_batches(candidates: list[dict[str, Any]]) -> list[SelectionResult]:
+    """Partition the deterministic shortlist into bounded independent Gateway turns.
+
+    The input bridge may contain more eligible items than one model turn can
+    safely carry.  Batches preserve deterministic order and contain no more
+    than ``MAX_SHORTLIST`` items, while the Controller retains the global daily
+    five-item cap before it authorizes any editorial call.
+    """
+
+    first = shortlist(candidates)
+    if len(candidates) <= MAX_SHORTLIST:
+        return [first]
+    rejected = dict(first.rejected)
+    accepted_keys = {item["candidate_key"] for item in first.shortlist}
+    accepted = list(first.shortlist)
+    for candidate in sorted(
+        candidates,
+        key=lambda item: (str(item.get("published_at", "")), str(item.get("candidate_key", ""))),
+        reverse=True,
+    ):
+        key = candidate.get("candidate_key")
+        if not isinstance(key, str) or key in rejected or key in accepted_keys:
+            continue
+        exclusion = candidate.get("selection_exclusion")
+        if isinstance(exclusion, str) and exclusion:
+            rejected[key] = exclusion
+            continue
+        if candidate.get("verification_status") != "TRUSTED_PUBLISHER":
+            rejected[key] = "not_trusted_publisher"
+            continue
+        if sensitive_risks(candidate.get("title"), candidate.get("description")):
+            rejected[key] = "sensitive_story"
+            continue
+        topic = _topic_key(candidate)
+        if not topic or topic in {_topic_key({"title": item["title"]}) for item in accepted}:
+            rejected[key] = "duplicate_story"
+            continue
+        accepted.append(
+            {
+                field: str(candidate.get(field) or "")
+                for field in ("candidate_key", "title", "description", "publisher")
+            }
+        )
+        accepted_keys.add(key)
+    return [
+        SelectionResult(accepted[index : index + MAX_SHORTLIST], [], dict(rejected))
+        for index in range(0, len(accepted), MAX_SHORTLIST)
+    ]
 
 
 def accept_selection(result: SelectionResult, raw: Any) -> SelectionResult:

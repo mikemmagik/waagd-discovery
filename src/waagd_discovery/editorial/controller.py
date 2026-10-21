@@ -75,6 +75,7 @@ class Controller:
         simulation: bool = True,
         allow_ack: bool = False,
         protected_roots: tuple[Path, ...] = (),
+        selector: Any | None = None,
     ):
         self.inbox = Path(inbox)
         self.store_path = Path(store_path)
@@ -86,7 +87,7 @@ class Controller:
             raise EditorialError("editorial_mode_invalid")
         if simulation and allow_ack:
             raise EditorialError("simulation_ack_forbidden")
-        self.bridge, self.verifier, self.editor = bridge, verifier, editor
+        self.bridge, self.verifier, self.editor, self.selector = bridge, verifier, editor, selector
         self.simulation, self.allow_ack = simulation, allow_ack
         self.protected_roots = (self.inbox.parent.parent, *protected_roots)
         # Validate overlaps before even reading an inbox or constructing a store.
@@ -167,6 +168,7 @@ class Controller:
         now: datetime | None,
         *,
         reconsider: bool = False,
+        verification_only: bool = False,
     ) -> str | None:
         key = candidate["candidate_key"]
         delivery = envelope["delivery_id"]
@@ -207,6 +209,8 @@ class Controller:
             store.save_verification(key, revision, verification, utc(now).isoformat())
             store.finish_attempt(attempt, utc(now).isoformat(), error_code)
         validate_verification(verification, key)
+        if verification_only:
+            return None
         self._fresh(envelope, now)
         request = make_request(candidate, verification, simulation=self.simulation)
         attempt = store.start_attempt(delivery, key, "editorial", utc(now).isoformat())
@@ -215,13 +219,55 @@ class Controller:
             validate_decision(result, request)
         except (EditorialError, io.BridgeError, OSError, ValueError, TypeError):
             store.finish_attempt(attempt, utc(now).isoformat(), "editorial_failed")
+            store.mark_selection_editorial(delivery, key, "failed")
             return "editorial_failed"
         self._fresh(envelope, now)
         store.save_decision(
             key, revision, request, result, None if reconsider else delivery, utc(now).isoformat()
         )
+        if not reconsider:
+            store.mark_selection_editorial(delivery, key, "completed")
         store.finish_attempt(attempt, utc(now).isoformat())
         return None
+
+    def _excluded(
+        self,
+        store: EditorialStore,
+        candidate: dict[str, Any],
+        revision: int,
+        delivery: str,
+        now: datetime | None,
+    ) -> None:
+        verification = store.verification(candidate["candidate_key"], revision)
+        if verification is None:
+            raise EditorialError("selection_state_invalid")
+        request = make_request(candidate, verification, simulation=self.simulation)
+        result = {
+            "schema_version": 1,
+            "candidate_key": candidate["candidate_key"],
+            "decision": "REJECTED",
+            "source": candidate["url"],
+            "date": None,
+            "factual_summary": "The candidate was not selected for editorial processing.",
+            "satirical_angle": "",
+            "headline": "",
+            "summary": "",
+            "article": "",
+            "established_facts": [],
+            "unverified_claims": [],
+            "open_questions": [],
+            "checked_sources": [],
+            "verification_evidence": [],
+            "risks": ["Editorial selection did not choose this candidate."],
+            "rejection_reason": "NO_SATIRICAL_ANGLE",
+            "created_at": utc(now).isoformat(),
+            "model_identifier": "trusted-selection-v1",
+            "prompt_version": "waagd-editorial-v1",
+        }
+        validate_decision(result, request)
+        store.save_decision(
+            candidate["candidate_key"], revision, request, result, delivery, utc(now).isoformat()
+        )
 
     def _checked_completion(self, store: EditorialStore, envelope: dict[str, Any]) -> None:
         """An outbox intent never replaces proof that every result still exists."""
@@ -457,8 +503,120 @@ class Controller:
                 # Never silently regenerate a result lost after an outbox commit.
                 self._checked_completion(store, envelope)
             candidates = {c["candidate_key"]: c for c in envelope["candidates"]}
+            required = store.required(envelope["delivery_id"])
             errors = []
-            for key, revision in store.required(envelope["delivery_id"]):
+            if self.selector is not None:
+                # Verify every candidate first. Only trusted-publisher candidates
+                # may enter selection.
+                for key, revision in required:
+                    self._candidate(
+                        store, envelope, candidates[key], revision, now, verification_only=True
+                    )
+                from waagd_discovery.editorial.selection import shortlist_batches
+
+                run = store.selection(envelope["delivery_id"])
+                if run is None:
+                    eligible = []
+                    canonical_urls: set[str] = set()
+                    for key, revision in required:
+                        if store.has_decision(key, revision):
+                            continue
+                        verification = store.verification(key, revision)
+                        if verification is None:
+                            raise EditorialError("selection_state_invalid")
+                        if verification["verification_status"] != "TRUSTED_PUBLISHER":
+                            continue
+                        value = dict(candidates[key])
+                        value["verification_status"] = verification["verification_status"]
+                        canonical = verification["canonical_url"]
+                        if canonical in canonical_urls:
+                            value["selection_exclusion"] = "duplicate_canonical_url"
+                        else:
+                            canonical_urls.add(canonical)
+                        eligible.append(value)
+                    batches = shortlist_batches(eligible)
+                    run = store.start_selection(
+                        envelope["delivery_id"],
+                        utc(now).date().isoformat(),
+                        [item for batch in batches for item in batch.shortlist],
+                        batches[0].rejected,
+                        utc(now).isoformat(),
+                    )
+                if run["status"] == "completed":
+                    selected = set(io.decode(run["selected"].encode()))
+                elif run["status"] == "started":
+                    from waagd_discovery.editorial.selection import SelectionResult
+
+                    saved = io.decode(run["shortlist"].encode())
+                    if not isinstance(saved, list) or not all(
+                        isinstance(item, dict) for item in saved
+                    ):
+                        raise EditorialError("selection_state_invalid")
+                    batches = [
+                        SelectionResult(saved[index : index + 25], [], {})
+                        for index in range(0, len(saved), 25)
+                    ]
+                    available = max(
+                        0,
+                        5
+                        - store.selected_today(
+                            utc(now).date().isoformat(),
+                            excluding_delivery=envelope["delivery_id"],
+                        ),
+                    )
+                    if not any(batch.shortlist for batch in batches) or not available:
+                        selected = set()
+                        store.finish_selection(
+                            envelope["delivery_id"],
+                            sorted(selected),
+                            utc(now).isoformat(),
+                            reason_code=(
+                                "daily_quota_exhausted"
+                                if not available
+                                else "no_eligible_candidates"
+                            ),
+                        )
+                    else:
+                        try:
+                            chosen: list[str] = []
+                            for batch in batches:
+                                if len(chosen) == available:
+                                    break
+                                choice = self.selector.select(batch)
+                                chosen.extend(choice.selected[: available - len(chosen)])
+                            selected = set(chosen)
+                            store.finish_selection(
+                                envelope["delivery_id"],
+                                sorted(selected),
+                                utc(now).isoformat(),
+                            )
+                        except EditorialError:
+                            store.finish_selection(
+                                envelope["delivery_id"],
+                                [],
+                                utc(now).isoformat(),
+                                "selection_failed",
+                            )
+                            store.mark_delivery(
+                                envelope["delivery_id"], "retryable", "selection_failed"
+                            )
+                            return self._result(store, envelope["delivery_id"])
+                else:
+                    return self._result(store, envelope["delivery_id"])
+                for key, revision in required:
+                    verification = store.verification(key, revision)
+                    if (
+                        verification is not None
+                        and verification["verification_status"] == "TRUSTED_PUBLISHER"
+                        and key not in selected
+                        and not store.has_decision(key, revision)
+                    ):
+                        self._excluded(
+                            store, candidates[key], revision, envelope["delivery_id"], now
+                        )
+            for key, revision in required:
+                if self.selector is not None and store.has_decision(key, revision):
+                    continue
                 try:
                     candidate_error = self._candidate(
                         store, envelope, candidates[key], revision, now

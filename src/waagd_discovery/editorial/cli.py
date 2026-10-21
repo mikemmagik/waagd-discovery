@@ -217,9 +217,10 @@ def main(argv: list[str] | None = None) -> int:
             or not config.llm_enabled
         ):
             raise EditorialError("gateway_processing_not_authorized")
+        maximum_gateway_candidates = 50 if args.trusted_publishers else 10
         if gateway and (
             isinstance(args.gateway_max_candidates, bool)
-            or not 1 <= args.gateway_max_candidates <= 10
+            or not 1 <= args.gateway_max_candidates <= maximum_gateway_candidates
         ):
             raise EditorialError("gateway_candidate_limit")
         if gateway and not 0 < args.gateway_max_cost_usd <= 1:
@@ -234,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
 
             verifier: Verifier
             editor: EditorAdapter
+            selector = None
             if gateway:
                 from waagd_discovery.editorial.gateway_adapter import (
                     GatewayBudgetPolicy,
@@ -259,6 +261,10 @@ def main(argv: list[str] | None = None) -> int:
                         max_reported_cost_usd=args.gateway_max_cost_usd
                     ),
                 )
+                if args.trusted_publishers:
+                    from waagd_discovery.editorial.selection_gateway import GatewaySelector
+
+                    selector = GatewaySelector(editor)
             else:
                 verifier = SyntheticVerifier()
                 editor = MockEditor()
@@ -271,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
                 simulation=args.simulation,
                 allow_ack=args.allow_ack and gateway,
                 protected_roots=protected,
+                selector=selector,
             )
 
         if args.command == "dry-run":

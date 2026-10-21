@@ -8,6 +8,7 @@ import stat
 import uuid
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -26,11 +27,16 @@ from waagd_discovery.editorial.contracts import (
     EditorialError,
     digest,
     make_request,
+    trusted_decision,
     validate_decision,
 )
 from waagd_discovery.editorial.controller import Controller
+from waagd_discovery.editorial.publication import exportable
+from waagd_discovery.editorial.publication_policy import PublicationPolicy
+from waagd_discovery.editorial.selection import accept_selection
 from waagd_discovery.editorial.store import EditorialStore
-from waagd_discovery.editorial.verifier import SyntheticVerifier
+from waagd_discovery.editorial.trusted_publishers import load_trusted_publishers
+from waagd_discovery.editorial.verifier import FetchDocument, SourceVerifier, SyntheticVerifier
 
 NOW = datetime(2026, 10, 18, 12, tzinfo=UTC)
 
@@ -165,6 +171,227 @@ def rows(controller, table):
     with closing(sqlite3.connect(controller.store_path)) as connection:
         connection.row_factory = sqlite3.Row
         return [dict(row) for row in connection.execute(f"SELECT * FROM {table}")]
+
+
+class TrustedDocuments:
+    def fetch(self, value):
+        return FetchDocument(value, 200, b"<p>Fictional institutional reporting.</p>", "text/html")
+
+
+class CanonicalDocuments:
+    def fetch(self, value):
+        del value
+        return FetchDocument(
+            "https://www.theguardian.com/world/2026/oct/22/canonical-fixture",
+            200,
+            b"<p>Fictional institutional reporting.</p>",
+            "text/html",
+        )
+
+
+class TrustedEditor:
+    def __init__(self, *, fail_once=False):
+        self.calls = []
+        self.fail_once = fail_once
+
+    def evaluate(self, request):
+        self.calls.append(request["candidate"]["candidate_key"])
+        if self.fail_once:
+            self.fail_once = False
+            raise OSError("fictional editorial interruption")
+        return trusted_decision(
+            request,
+            creative={
+                "satirical_angle": "A fictional institution celebrates process.",
+                "headline": "A Fictional Institution Celebrates Process",
+                "summary": "The paperwork holds a meeting about another meeting.",
+                "article": " ".join(
+                    ["The fictional institution filed another meeting and called it progress."] * 12
+                ),
+            },
+            now=NOW,
+        )
+
+
+class PlannedSelector:
+    def __init__(self, count=0, *, fail=False):
+        self.count = count
+        self.fail = fail
+        self.calls = 0
+
+    def select(self, plan):
+        self.calls += 1
+        if self.fail:
+            raise EditorialError("selection_failed")
+        count = self.count if self.calls == 1 else 0
+        return accept_selection(
+            plan,
+            {
+                "schema_version": 1,
+                "selected_candidate_keys": [
+                    item["candidate_key"] for item in plan.shortlist[:count]
+                ],
+            },
+        )
+
+
+def trusted_candidate(index):
+    url = f"https://www.theguardian.com/world/2026/oct/22/fixture-{index:04x}"
+    return {
+        "candidate_key": hashlib.sha256(url.encode()).hexdigest(),
+        "id": index + 1,
+        "url": url,
+        "title": f"Council {index:04x} approves fictional procedure",
+        "description": "A synthetic report for isolated offline tests.",
+        "publisher": "The Guardian",
+        "published_at": NOW.isoformat(),
+        "sources": [
+            {
+                "id": "guardian_world",
+                "name": "The Guardian World",
+                "url": "https://www.theguardian.com/world/rss",
+            }
+        ],
+    }
+
+
+def trusted_setup(tmp_path, *, count=84, selected=4, fail_once=False):
+    root = tmp_path.resolve()
+    inbox_directory = root / "workspace" / "waagd-discovery"
+    inbox_directory.mkdir(parents=True, mode=0o700)
+    inbox = inbox_directory / "inbox.json"
+    value = envelope(
+        str(uuid.uuid4()),
+        [trusted_candidate(index) for index in range(count)],
+        NOW,
+        NOW + timedelta(hours=1),
+        schema_version=2,
+    )
+    inbox.write_bytes(io.encode(value))
+    inbox.chmod(0o600)
+    bridge = FakeBridge(value)
+    verifier = SourceVerifier(
+        TrustedDocuments(),
+        clock=lambda: NOW,
+        trusted_publishers=load_trusted_publishers(Path("config/trusted_publishers.yaml")),
+    )
+    editor, selector = TrustedEditor(fail_once=fail_once), PlannedSelector(selected)
+    controller = Controller(
+        inbox,
+        root / "private" / "editorial.sqlite3",
+        bridge,
+        verifier,
+        editor,
+        simulation=False,
+        allow_ack=False,
+        selector=selector,
+    )
+    return controller, bridge, editor, selector, value
+
+
+def test_controller_selects_only_gateway_choices_and_persists_selection_log(tmp_path):
+    # Bridge v2 deliberately admits at most 50 candidates per delivery. The 84-candidate
+    # shortlist rule is separately tested at its contract boundary below.
+    controller, _, editor, selector, value = trusted_setup(tmp_path, count=50, selected=4)
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "results_saved"
+    assert selector.calls == 2
+    assert len(editor.calls) == 4
+    selected = {
+        item["candidate_key"]
+        for item in rows(controller, "selection_items")
+        if item["status"] == "selected"
+    }
+    assert set(editor.calls) == selected
+    assert len(rows(controller, "decisions")) == 50
+    run = rows(controller, "selection_runs")[0]
+    assert run["status"] == "completed"
+    assert run["utc_day"] == "2026-10-18"
+    items = rows(controller, "selection_items")
+    assert len(items) == 50
+    assert sum(item["status"] == "selected" for item in items) == 4
+    assert sum(item["editorial_status"] == "completed" for item in items) == 4
+    assert {item["export_status"] for item in items} == {"not_exported"}
+
+
+def test_controller_empty_selection_calls_no_editor_and_records_rejections(tmp_path):
+    controller, _, editor, selector, _ = trusted_setup(tmp_path, count=8, selected=0)
+
+    assert controller.process(NOW)["status"] == "results_saved"
+    assert selector.calls == 1
+    assert editor.calls == []
+    assert {json.loads(row["result"])["decision"] for row in rows(controller, "decisions")} == {
+        "REJECTED"
+    }
+    assert {item["reason_code"] for item in rows(controller, "selection_items")} == {"not_selected"}
+
+
+def test_controller_restarts_after_editorial_interruption_without_reselecting(tmp_path):
+    controller, bridge, editor, selector, _ = trusted_setup(
+        tmp_path, count=3, selected=1, fail_once=True
+    )
+
+    assert controller.process(NOW)["status"] == "retryable"
+    assert selector.calls == 1
+    restarted = Controller(
+        controller.inbox,
+        controller.store_path,
+        bridge,
+        controller.verifier,
+        editor,
+        simulation=False,
+        allow_ack=False,
+        selector=selector,
+    )
+    assert restarted.process(NOW)["status"] == "results_saved"
+    assert selector.calls == 1
+    assert len(editor.calls) == 2
+    assert len(rows(controller, "decisions")) == 3
+
+
+def test_controller_blocks_invalid_selection_before_any_editorial_call(tmp_path):
+    controller, _, editor, selector, _ = trusted_setup(tmp_path, count=3, selected=1)
+    selector.fail = True
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "retryable"
+    assert result["error_code"] == "selection_failed"
+    assert editor.calls == []
+    assert rows(controller, "decisions") == []
+
+
+def test_controller_canonical_url_duplicate_never_reaches_editor_twice(tmp_path):
+    controller, _, editor, selector, value = trusted_setup(tmp_path, count=2, selected=1)
+    controller.verifier = SourceVerifier(
+        CanonicalDocuments(),
+        clock=lambda: NOW,
+        trusted_publishers=load_trusted_publishers(Path("config/trusted_publishers.yaml")),
+    )
+
+    assert controller.process(NOW)["status"] == "results_saved"
+    assert selector.calls == 1
+    assert len(editor.calls) == 1
+    items = rows(controller, "selection_items")
+    assert {item["reason_code"] for item in items} >= {"duplicate_canonical_url"}
+    assert len(rows(controller, "decisions")) == len(value["candidates"])
+
+
+def test_selected_trusted_candidates_alone_reach_idempotent_v2_export(tmp_path):
+    controller, _, _, _, _ = trusted_setup(tmp_path, count=8, selected=3)
+
+    assert controller.process(NOW)["status"] == "results_saved"
+    with EditorialStore(controller.store_path, simulation=False, readonly=True) as store:
+        first = exportable(store, policy=PublicationPolicy(automatic_enabled=True))
+        second = exportable(store, policy=PublicationPolicy(automatic_enabled=True))
+
+    assert len(first) == len(second) == 3
+    assert [item["intent_id"] for item in first] == [item["intent_id"] for item in second]
+    assert [item["content_hash"] for item in first] == [item["content_hash"] for item in second]
+    assert {item["version"] for item in first} == {2}
+    assert {item["editorial"]["review_route"] for item in first} == {"trusted_publisher"}
 
 
 def test_results_persist_before_ack_and_no_repeat_generation(tmp_path):
@@ -465,7 +692,24 @@ def test_store_never_mixes_simulation_and_real_results(tmp_path):
             pass
 
 
-@pytest.mark.parametrize("version", [-1, 2, 99])
+def test_store_migrates_v1_selection_state_transactionally(tmp_path):
+    path = tmp_path.resolve() / "private" / "editorial.sqlite3"
+    with EditorialStore(path, simulation=True):
+        pass
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("DROP TABLE selection_items")
+        connection.execute("DROP TABLE selection_runs")
+        connection.execute("PRAGMA user_version=1")
+        connection.commit()
+
+    with EditorialStore(path, simulation=True) as store:
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert store.connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='selection_items'"
+        ).fetchone()
+
+
+@pytest.mark.parametrize("version", [-1, 4, 99])
 def test_store_rejects_newer_schema_without_reset(tmp_path, version):
     path = tmp_path.resolve() / "private" / "editorial.sqlite3"
     with EditorialStore(path, simulation=True):
