@@ -93,3 +93,27 @@ candidate text, evidence text, URLs, or credentials. Do not record the raw
 Gateway response. This smoke is operator-owned and does not authorize Bridge
 ACKs, publication, scheduler changes, or a change to the shared OpenClaw
 configuration.
+
+## One-shot live editorial smoke
+
+On `claw2`, from the checked-out release candidate, run this single command as
+the isolated Discovery service user. Substitute only the two absolute paths;
+the configuration must be the isolated `waagd` OpenClaw configuration, never
+Shmul or the Telegram agent configuration.
+
+```sh
+OPENCLAW_CONFIG_PATH=/absolute/private/claw2-openclaw.json uv run --frozen python scripts/gateway-editorial-live-smoke.py --gateway-executable /absolute/path/to/openclaw
+```
+
+It calls `GatewayEditor.evaluate()` once with an in-memory synthetic candidate
+and `verification_status=PARTIAL`. It creates no SQLite, Bridge, export, or
+publication state. A passing invocation prints exactly:
+
+```json
+{"decision":"NEEDS_VERIFICATION","schema_version":1,"status":"ok"}
+```
+
+Any other result is fail-closed. For a schema failure, retain only the safe
+`editorial_schema_invalid:<path>:<validator>:<expected>` code and do not retain
+the raw Gateway reply. The command does not authorize a retry with changed
+policy, an ACK, an automatic publication, or a scheduler change.
