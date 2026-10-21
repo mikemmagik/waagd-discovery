@@ -26,7 +26,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
     WAAGD_FILTER=/app/config/filter.yaml \
     WAAGD_BACKUP_POLICY=/app/config/backup.yaml \
     WAAGD_SCHEDULER_CONFIG=/app/config/scheduler.yaml \
-    WAAGD_HANDOFF_CONFIG=/app/config/handoff.yaml
+    WAAGD_HANDOFF_CONFIG=/app/config/handoff.yaml \
+    WAAGD_TRUSTED_PUBLISHERS=/app/config/trusted_publishers.yaml
 RUN groupadd --gid 10001 discovery \
     && useradd --uid 10001 --gid discovery --no-create-home --shell /usr/sbin/nologin discovery \
     && mkdir -p /data /exports /backups /app/config \
@@ -36,7 +37,7 @@ RUN groupadd --gid 10001 discovery \
     && chmod 0755 /app/config
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
-COPY --chown=0:10001 --chmod=0440 config/sources.yaml config/filter.yaml config/backup.yaml config/scheduler.yaml config/handoff.yaml ./config/
+COPY --chown=0:10001 --chmod=0440 config/sources.yaml config/filter.yaml config/backup.yaml config/scheduler.yaml config/handoff.yaml config/trusted_publishers.yaml ./config/
 USER 10001:10001
 ENTRYPOINT ["waagd-discovery"]
 CMD ["stats"]

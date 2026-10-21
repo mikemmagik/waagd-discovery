@@ -11,6 +11,7 @@
 !config/backup.yaml
 !config/scheduler.yaml
 !config/handoff.yaml
+!config/trusted_publishers.yaml
 **/__pycache__/
 **/*.py[cod]
 **/.env
