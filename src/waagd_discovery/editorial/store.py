@@ -1,6 +1,7 @@
 """Private, independently versioned editorial storage; never a Discovery database."""
 
 import fcntl
+import json
 import os
 import sqlite3
 import uuid
@@ -12,7 +13,7 @@ from typing import Any
 from waagd_discovery.bridge import io
 from waagd_discovery.editorial.contracts import EditorialError, digest
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _SELECTION_RUNS = (
     "CREATE TABLE selection_runs (run_id TEXT PRIMARY KEY, delivery_id TEXT UNIQUE NOT NULL "
     "REFERENCES deliveries, utc_day TEXT NOT NULL, shortlist TEXT NOT NULL, selected TEXT, "
@@ -23,6 +24,13 @@ _SELECTION_ITEMS = (
     "candidate_key TEXT NOT NULL REFERENCES candidates, candidate_hash TEXT NOT NULL, "
     "status TEXT NOT NULL, reason_code TEXT, editorial_status TEXT, export_status TEXT NOT NULL, "
     "PRIMARY KEY(run_id,candidate_key))"
+)
+_PUBLICATION_JOBS = (
+    "CREATE TABLE publication_jobs (intent_id TEXT PRIMARY KEY, "
+    "candidate_key TEXT NOT NULL REFERENCES candidates, revision INTEGER NOT NULL, "
+    "content_hash TEXT NOT NULL, intent TEXT NOT NULL, status TEXT NOT NULL, "
+    "site_outcome TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+    "error_code TEXT, UNIQUE(candidate_key,revision))"
 )
 _SCHEMA = (
     "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK(singleton=1), "
@@ -50,6 +58,7 @@ _SCHEMA = (
     "started_at TEXT NOT NULL, finished_at TEXT, error_code TEXT)",
     _SELECTION_RUNS,
     _SELECTION_ITEMS,
+    _PUBLICATION_JOBS,
     "CREATE TABLE ack_outbox (delivery_id TEXT PRIMARY KEY REFERENCES deliveries, "
     "payload_digest TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, "
     "acknowledged_at TEXT, error_code TEXT)",
@@ -237,12 +246,21 @@ class EditorialStore:
                     self.connection.execute(_SELECTION_RUNS)
                     self.connection.execute(_SELECTION_ITEMS)
                     self.connection.execute("PRAGMA user_version=3")
+                version = 3
             elif version == 2:
                 if self.readonly:
                     raise EditorialError("editorial_schema_migration_required")
                 with self.transaction():
                     self.connection.execute(_SELECTION_ITEMS)
                     self.connection.execute("PRAGMA user_version=3")
+                version = 3
+            if version == 3:
+                if self.readonly:
+                    raise EditorialError("editorial_schema_migration_required")
+                with self.transaction():
+                    self.connection.execute(_PUBLICATION_JOBS)
+                    self.connection.execute("PRAGMA user_version=4")
+                version = 4
             if _schema(self.connection) != _expected_schema():
                 raise EditorialError("editorial_schema_invalid")
             if self.connection.execute("PRAGMA quick_check").fetchall()[0][0] != "ok":
@@ -531,6 +549,145 @@ class EditorialStore:
                 "WHERE candidate_key=? AND status='selected'",
                 (key,),
             )
+
+    def publication_job(self) -> dict[str, Any] | None:
+        """Return the oldest unresolved intent without changing its state.
+
+        ``uncertain`` is deliberately included.  A caller must reconcile that
+        stable identity with the Site before it may submit anything else.
+        """
+
+        row = self.connection.execute(
+            "SELECT * FROM publication_jobs WHERE status IN ('pending','in_flight','uncertain') "
+            "ORDER BY created_at,intent_id LIMIT 1"
+        ).fetchone()
+        return {key: row[key] for key in row.keys()} if row is not None else None
+
+    def save_publication_job(
+        self,
+        intent_id: str,
+        key: str,
+        revision: int,
+        content_hash: str,
+        intent: dict[str, Any],
+        clock: str,
+    ) -> dict[str, Any]:
+        """Durably prepare one immutable Site submission before it is exposed.
+
+        Identity and bytes are bound together.  A revision can never acquire a
+        second publication identity, including after a local crash.
+        """
+
+        try:
+            # The Site digest intentionally includes the established nested
+            # object order for reference records.  The general Bridge encoder
+            # sorts keys, which would mutate those bytes on recovery.
+            encoded = json.dumps(intent, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        except (TypeError, ValueError, UnicodeError, RecursionError):
+            raise EditorialError("publication_state_invalid") from None
+        with self.transaction():
+            existing = self.connection.execute(
+                "SELECT * FROM publication_jobs WHERE intent_id=?", (intent_id,)
+            ).fetchone()
+            if existing is not None:
+                if (
+                    existing["candidate_key"] != key
+                    or existing["revision"] != revision
+                    or existing["content_hash"] != content_hash
+                    or existing["intent"] != encoded
+                ):
+                    raise EditorialError("publication_identity_changed")
+                return {name: existing[name] for name in existing.keys()}
+            try:
+                self.connection.execute(
+                    "INSERT INTO publication_jobs VALUES (?,?,?,?,?,'pending',NULL,?,?,NULL)",
+                    (intent_id, key, revision, content_hash, encoded, clock, clock),
+                )
+            except sqlite3.IntegrityError:
+                raise EditorialError("publication_identity_changed") from None
+            row = self.connection.execute(
+                "SELECT * FROM publication_jobs WHERE intent_id=?", (intent_id,)
+            ).fetchone()
+            if row is None:
+                raise EditorialError("publication_state_invalid")
+            return {name: row[name] for name in row.keys()}
+
+    def begin_publication_submission(self, intent_id: str, clock: str) -> dict[str, Any]:
+        """Claim a prepared submission before a non-idempotent Site invocation."""
+
+        with self.transaction():
+            updated = self.connection.execute(
+                "UPDATE publication_jobs SET status='in_flight',updated_at=?,error_code=NULL "
+                "WHERE intent_id=? AND status='pending'",
+                (clock, intent_id),
+            ).rowcount
+            if updated != 1:
+                raise EditorialError("publication_submission_not_ready")
+            row = self.connection.execute(
+                "SELECT * FROM publication_jobs WHERE intent_id=?", (intent_id,)
+            ).fetchone()
+            if row is None:
+                raise EditorialError("publication_state_invalid")
+            return {name: row[name] for name in row.keys()}
+
+    def recover_publication_submissions(self, clock: str) -> int:
+        """Turn interrupted Site calls into an explicit reconciliation requirement."""
+
+        with self.transaction():
+            return self.connection.execute(
+                "UPDATE publication_jobs SET status='uncertain',updated_at=?,"
+                "error_code='site_outcome_ambiguous' WHERE status='in_flight'",
+                (clock,),
+            ).rowcount
+
+    def record_publication_outcome(self, intent_id: str, outcome: str, clock: str) -> None:
+        """Persist only bounded Site outcomes for an already prepared identity."""
+
+        states = {
+            "created": "delivered",
+            "duplicate": "delivered",
+            "held": "held",
+            "failed": "failed",
+            "uncertain": "uncertain",
+        }
+        status = states.get(outcome)
+        if status is None:
+            raise EditorialError("publication_outcome_invalid")
+        with self.transaction():
+            row = self.connection.execute(
+                "SELECT candidate_key,status FROM publication_jobs WHERE intent_id=?", (intent_id,)
+            ).fetchone()
+            if row is None or row["status"] not in {"in_flight", "uncertain"}:
+                raise EditorialError("publication_outcome_invalid")
+            self.connection.execute(
+                "UPDATE publication_jobs SET status=?,site_outcome=?,updated_at=?,error_code=? "
+                "WHERE intent_id=?",
+                (
+                    status,
+                    outcome,
+                    clock,
+                    None if status == "delivered" else "site_" + outcome,
+                    intent_id,
+                ),
+            )
+            if status == "delivered":
+                self.connection.execute(
+                    "UPDATE selection_items SET export_status='delivered' "
+                    "WHERE candidate_key=? AND status='selected'",
+                    (row["candidate_key"],),
+                )
+
+    def retry_failed_publication(self, intent_id: str, clock: str) -> None:
+        """Make an explicit, known Site failure retryable with the same identity."""
+
+        with self.transaction():
+            updated = self.connection.execute(
+                "UPDATE publication_jobs SET status='pending',updated_at=?,error_code=NULL "
+                "WHERE intent_id=? AND status='failed'",
+                (clock, intent_id),
+            ).rowcount
+            if updated != 1:
+                raise EditorialError("publication_retry_not_allowed")
 
     def start_attempt(
         self, delivery: str | None, key: str | None, operation: str, clock: str

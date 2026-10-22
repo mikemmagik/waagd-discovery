@@ -279,7 +279,10 @@ def exportable(
         "JOIN (SELECT candidate_key,revision,MIN(delivery_id) delivery_id "
         "FROM delivery_candidates GROUP BY candidate_key,revision) dc "
         "ON dc.candidate_key=c.candidate_key AND dc.revision=c.current_revision "
+        "LEFT JOIN publication_jobs p ON p.candidate_key=c.candidate_key "
+        "AND p.revision=c.current_revision "
         "WHERE c.current_revision>0 AND d.decision='READY_FOR_REVIEW' "
+        "AND p.intent_id IS NULL "
         "ORDER BY c.candidate_key LIMIT ?"
     )
     rows = store.connection.execute(query, (limit,)).fetchall()
@@ -309,6 +312,55 @@ def exportable(
         except (io.BridgeError, KeyError, TypeError, ValueError):
             raise EditorialError("publication_store_invalid") from None
     return result
+
+
+def _job_intent(job: dict[str, Any]) -> dict[str, Any]:
+    try:
+        value = io.decode(job["intent"].encode())
+        if not isinstance(value, dict):
+            raise ValueError
+        validate_publication_intent(value)
+        if value["intent_id"] != job["intent_id"] or value["content_hash"] != job["content_hash"]:
+            raise ValueError
+        return cast(dict[str, Any], value)
+    except (io.BridgeError, KeyError, TypeError, ValueError, EditorialError):
+        raise EditorialError("publication_store_invalid") from None
+
+
+def prepare_next_publication(
+    store: EditorialStore, *, policy: PublicationPolicy | None = None, clock: str | None = None
+) -> dict[str, Any] | None:
+    """Prepare or recover exactly one immutable Site submission.
+
+    The caller must process a returned unresolved job before selecting a new
+    candidate.  In particular, an ``uncertain`` job must be reconciled with the
+    Site by its stable identity; it can never be silently resubmitted.
+    """
+
+    if store.simulation:
+        raise EditorialError("publication_simulation_forbidden")
+    now = _timestamp(clock or datetime.now(UTC).isoformat())
+    pending = store.publication_job()
+    if pending is not None:
+        return {"status": pending["status"], "intent": _job_intent(pending)}
+    intents = exportable(store, 1, policy=policy)
+    if not intents:
+        return None
+    intent = intents[0]
+    validate_publication_intent(intent)
+    source_event = intent["editorial"]["source_event_id"]
+    try:
+        prefix, revision = source_event.split(";revision:", 1)
+        key = prefix.removeprefix("candidate:")
+        parsed_revision = int(revision)
+        if not key or parsed_revision < 1:
+            raise ValueError
+    except (AttributeError, TypeError, ValueError):
+        raise EditorialError("publication_store_invalid") from None
+    job = store.save_publication_job(
+        intent["intent_id"], key, parsed_revision, intent["content_hash"], intent, now
+    )
+    return {"status": job["status"], "intent": intent}
 
 
 def validate_publication_intent(value: Any) -> None:
@@ -406,18 +458,18 @@ def export_file(
     io.path_parts(output)
     if output.name != _NAME:
         raise EditorialError("publication_output_invalid")
+    if limit != 1:
+        raise EditorialError("publication_limit_invalid")
     try:
-        with EditorialStore(store_path, simulation=False, readonly=True) as store:
-            intents = exportable(store, limit, policy=policy)
+        with EditorialStore(store_path, simulation=False) as store:
+            prepared = prepare_next_publication(store, policy=policy)
     except EditorialError as error:
         if str(error) != "editorial_simulation_mismatch":
             raise
         with EditorialStore(store_path, simulation=True, readonly=True) as store:
             exportable(store, limit, policy=policy)
         raise EditorialError("publication_simulation_forbidden") from None
-    if len(intents) > 1:
-        raise EditorialError("publication_limit_invalid")
-    value = intents[0] if intents else None
+    value = prepared["intent"] if prepared is not None else None
     if value is None:
         return {"status": "held", "count": 0, "path": output.name}
     validate_publication_intent(value)
@@ -427,10 +479,7 @@ def export_file(
         io.atomic_write(directory, output.name, encoded)
     finally:
         os.close(directory)
-    # The data-only handoff is durable before audit state changes. If the host
-    # dies in this narrow interval, the same immutable intent can be exported
-    # again; a later successful call records it without changing the intent.
-    key = value["editorial"]["source_event_id"].split(";", 1)[0].removeprefix("candidate:")
-    with EditorialStore(store_path, simulation=False) as store:
-        store.mark_selection_exported(key)
+    # Writing a handoff file never counts as Site delivery.  The persistent job
+    # remains pending until a trusted Site adapter records a created/duplicate
+    # outcome.  A crash here therefore reuses exactly the same bytes and ID.
     return {"status": "exported", "count": 1, "path": output.name}
