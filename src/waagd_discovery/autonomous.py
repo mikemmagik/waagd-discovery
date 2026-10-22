@@ -299,7 +299,8 @@ class DailyCoordinator:
             connection.execute("BEGIN IMMEDIATE")
             self._recover_interrupted(connection, stamp)
             completed = connection.execute(
-                "SELECT scheduled_local_date FROM cycles WHERE status='completed' "
+                "SELECT scheduled_local_date FROM cycles "
+                "WHERE status IN ('completed','operator_required') "
                 "ORDER BY finished_at DESC LIMIT 1"
             ).fetchone()
             due = self._due_date(now, completed[0] if completed else None)
