@@ -936,14 +936,34 @@ def test_store_migrates_v1_selection_state_transactionally(tmp_path):
     with closing(sqlite3.connect(path)) as connection:
         connection.execute("DROP TABLE selection_items")
         connection.execute("DROP TABLE selection_runs")
+        connection.execute("DROP TABLE publication_jobs")
         connection.execute("PRAGMA user_version=1")
         connection.commit()
 
     with EditorialStore(path, simulation=True) as store:
-        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 4
         assert store.connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='selection_items'"
         ).fetchone()
+        assert store.connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='publication_jobs'"
+        ).fetchone()
+
+
+def test_store_rejects_hybrid_prepublication_schema_without_reset(tmp_path):
+    path = tmp_path.resolve() / "private" / "editorial.sqlite3"
+    with EditorialStore(path, simulation=True):
+        pass
+    with closing(sqlite3.connect(path)) as connection:
+        # A v3 header with a v4 table is neither a valid source nor target
+        # schema. It must never be silently reused as a migration input.
+        connection.execute("PRAGMA user_version=3")
+        connection.commit()
+    before = path.read_bytes()
+    with pytest.raises(EditorialError, match="editorial_schema_invalid"):
+        with EditorialStore(path, simulation=True):
+            pass
+    assert path.read_bytes() == before
 
 
 @pytest.mark.parametrize("version", [-1, 4, 99])
