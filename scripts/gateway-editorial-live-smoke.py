@@ -126,12 +126,6 @@ def _error(code: str, completion: dict[str, str] | None = None) -> int:
     return 1
 
 
-def _format_error(code: str) -> bool:
-    return code in {"gateway_model_json_invalid", "gateway_empty_response"} or code.startswith(
-        ("gateway_creative_schema_invalid", "editorial_schema_invalid")
-    )
-
-
 def main() -> int:
     args = _arguments()
     if not args.verified:
@@ -165,39 +159,31 @@ def main() -> int:
         or not 0 < args.max_total_cost_usd <= 1
     ):
         return _error("gateway_smoke_budget_invalid")
-    for attempt in range(attempts):
-        editor = GatewayEditor(
-            args.gateway_executable,
-            timeout=args.max_total_timeout / attempts,
-            budget_policy=GatewayBudgetPolicy(
-                max_reported_cost_usd=args.max_total_cost_usd / attempts
-            ),
+    editor = GatewayEditor(
+        args.gateway_executable,
+        timeout=args.max_total_timeout / attempts,
+        budget_policy=GatewayBudgetPolicy(max_reported_cost_usd=args.max_total_cost_usd / attempts),
+        retry_format_once=args.retry_format_once,
+    )
+    try:
+        result = editor.evaluate(_request(verified=True), fresh_session=True)
+    except EditorialError as error:
+        return _error(str(error), editor.last_completion)
+    if result["decision"] != "READY_FOR_REVIEW":
+        return _error("gateway_verified_decision_invalid", editor.last_completion)
+    print(
+        json.dumps(
+            {
+                "decision": "READY_FOR_REVIEW",
+                "fixture": "synthetic_verified",
+                "schema_version": 1,
+                "status": "ok",
+            },
+            sort_keys=True,
+            allow_nan=False,
         )
-        try:
-            result = editor.evaluate(_request(verified=True), fresh_session=True)
-        except EditorialError as error:
-            code = str(error)
-            # A completed, attested formatting failure is definite. It may use
-            # one new session; ambiguous Gateway outcomes are never retried.
-            if attempt == 0 and args.retry_format_once and _format_error(code):
-                continue
-            return _error(code, editor.last_completion)
-        if result["decision"] != "READY_FOR_REVIEW":
-            return _error("gateway_verified_decision_invalid", editor.last_completion)
-        print(
-            json.dumps(
-                {
-                    "decision": "READY_FOR_REVIEW",
-                    "fixture": "synthetic_verified",
-                    "schema_version": 1,
-                    "status": "ok",
-                },
-                sort_keys=True,
-                allow_nan=False,
-            )
-        )
-        return 0
-    raise AssertionError("format retry loop must return")
+    )
+    return 0
 
 
 if __name__ == "__main__":

@@ -48,7 +48,7 @@ def _gateway(
         "assert sys.argv[1] == 'agent'\n"
         "assert '--agent' in sys.argv and sys.argv[sys.argv.index('--agent') + 1] == 'waagd'\n"
         "session = sys.argv[sys.argv.index('--session-key') + 1]\n"
-        "assert session.startswith('editorial-smoke-')\n"
+        "assert session.startswith(('editorial-smoke-', 'editorial-format-retry-'))\n"
         f"sessions = pathlib.Path({str(sessions)!r})\n"
         "index = len(sessions.read_text().splitlines()) if sessions.exists() else 0\n"
         "sessions.open('a').write(session + '\\n')\n"

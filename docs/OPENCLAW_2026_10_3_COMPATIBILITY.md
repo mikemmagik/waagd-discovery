@@ -94,12 +94,14 @@ then builds and validates the complete existing `editorial-decision-v1` result.
 The final `READY_FOR_REVIEW` gate still requires validated independent evidence.
 Publication remains default-deny.
 
-The `minimax/minimax-m3.1-flash:free` route remains the only model route. A
-single fresh-session retry is allowed only for a completed and attested JSON or
-creative-schema formatting failure. Gateway ambiguity, tool use, budget failure,
-or creative safety failure is final and fail-closed. Safe per-invocation metrics
-are exposed as route, verification status, outcome, and safe error code; no
-model response, prompt, source text, or credential is recorded.
+The isolated Gateway continues to use the configured OpenRouter free route; Discovery
+does not pin a particular free model. GatewayEditor permits one fresh-session correction
+only after a completed, fully attested response fails JSON, creative-schema, field-length,
+or word-count validation. The correction receives only a bounded validation code, never
+the previous model text. Gateway ambiguity, timeout, transport failure, tool use, budget
+failure, or creative-safety failure is final and fail-closed: it never triggers an automatic
+second call. Safe per-invocation metrics are exposed as route, verification status, outcome,
+and safe error code; no model response, prompt, source text, or credential is recorded.
 
 Run these two checks from the isolated checkout. They use no Discovery, Bridge,
 or publication state.
