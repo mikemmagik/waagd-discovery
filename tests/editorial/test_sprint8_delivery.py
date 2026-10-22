@@ -57,11 +57,17 @@ def test_uncertain_site_result_is_never_resubmitted(tmp_path: Path) -> None:
     assert first.ids and not second.ids
 
 
-def test_held_item_does_not_block_later_safe_item(tmp_path: Path) -> None:
-    importer = FakeImporter(["held", "created"])
+def test_held_item_is_preserved_for_a_later_site_resume(tmp_path: Path) -> None:
+    importer = FakeImporter(["held", "created", "created"])
+    assert _delivery(tmp_path, importer).run(datetime.now(UTC)) == {
+        "status": "completed",
+        "code": "site_hold",
+        "delivered": 0,
+        "held": 1,
+    }
     assert _delivery(tmp_path, importer).run(datetime.now(UTC)) == {
         "status": "completed",
         "code": None,
-        "delivered": 1,
-        "held": 1,
+        "delivered": 2,
+        "held": 0,
     }

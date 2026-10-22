@@ -11,7 +11,11 @@ from pathlib import Path
 from waagd_discovery.autonomous_cycle import AutonomousCycle, TrustedStageCommand
 from waagd_discovery.editorial.delivery import PublicationDelivery
 from waagd_discovery.editorial.publication_policy import load_publication_policy
-from waagd_discovery.editorial.site_import import CommandSiteImporter, SiteImportCommand
+from waagd_discovery.editorial.site_import import (
+    CommandSiteImporter,
+    PublishImportOutcomeParser,
+    SiteImportCommand,
+)
 from waagd_discovery.models import DiscoveryError
 
 
@@ -30,12 +34,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--publication-policy", type=Path, required=True)
     parser.add_argument("--site-executable", type=Path, required=True)
     parser.add_argument("--site-argument", action="append", default=[])
+    parser.add_argument("--site-working-directory", type=Path, required=True)
     parser.add_argument("--ingress-token-file", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         importer = CommandSiteImporter(
-            SiteImportCommand(args.site_executable, tuple(args.site_argument)),
+            SiteImportCommand(
+                args.site_executable,
+                tuple(args.site_argument),
+                working_directory=args.site_working_directory,
+            ),
             args.ingress_token_file,
+            parser=PublishImportOutcomeParser(),
         )
         delivery = PublicationDelivery(
             args.editorial_store,

@@ -7,13 +7,14 @@ policy classifies every completed command as ``uncertain``: an exit status or
 untrusted output alone cannot prove that a website write did not happen.
 """
 
+import json
 import os
 import re
 import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 from waagd_discovery.bridge import io
 from waagd_discovery.editorial.contracts import EditorialError
@@ -37,8 +38,7 @@ class SiteImportOutcome:
         if self.status not in {"created", "duplicate", "held", "failed", "uncertain"}:
             raise EditorialError("site_outcome_invalid")
         if self.receipt_id is not None and (
-            not isinstance(self.receipt_id, str)
-            or _SAFE_RECEIPT.fullmatch(self.receipt_id) is None
+            not isinstance(self.receipt_id, str) or _SAFE_RECEIPT.fullmatch(self.receipt_id) is None
         ):
             raise EditorialError("site_outcome_invalid")
 
@@ -61,6 +61,24 @@ class ConservativeSiteOutcomeParser:
     def parse(self, returncode: int, output: bytes) -> SiteImportOutcome:
         del returncode, output
         return SiteImportOutcome("uncertain")
+
+
+class PublishImportOutcomeParser:
+    """Strict parser for Site commit ffa34ce's finalized file-import protocol."""
+
+    _codes = {"created": 0, "duplicate": 0, "held": 2, "uncertain": 3, "failed": 1}
+
+    def parse(self, returncode: int, output: bytes) -> SiteImportOutcome:
+        try:
+            value = json.loads(output.decode("utf-8"))
+            if not isinstance(value, dict) or set(value) != {"outcome"}:
+                raise ValueError
+            outcome = value["outcome"]
+            if not isinstance(outcome, str) or self._codes.get(outcome) != returncode:
+                raise ValueError
+            return SiteImportOutcome(cast(SiteOutcomeStatus, outcome))
+        except (UnicodeDecodeError, TypeError, ValueError):
+            return SiteImportOutcome("uncertain")
 
 
 def _private_file(path: Path, *, code: str) -> Path:
@@ -116,9 +134,19 @@ class SiteImportCommand:
     executable: Path
     arguments: tuple[str, ...]
     timeout_seconds: float = 120.0
+    working_directory: Path | None = None
 
     def __post_init__(self) -> None:
         _executable(self.executable)
+        if self.working_directory is not None:
+            try:
+                if (
+                    not self.working_directory.is_absolute()
+                    or not self.working_directory.resolve().is_dir()
+                ):
+                    raise ValueError
+            except OSError:
+                raise EditorialError("site_command_invalid") from None
         if (
             not isinstance(self.arguments, tuple)
             or any(
@@ -188,6 +216,7 @@ class CommandSiteImporter:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 env=self.environment,
+                cwd=self.command.working_directory,
                 timeout=self.command.timeout_seconds,
             )
         except subprocess.TimeoutExpired:

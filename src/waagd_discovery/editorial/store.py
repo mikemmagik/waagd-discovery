@@ -257,9 +257,12 @@ class EditorialStore:
             if version == 3:
                 if self.readonly:
                     raise EditorialError("editorial_schema_migration_required")
-                with self.transaction():
-                    self.connection.execute(_PUBLICATION_JOBS)
-                    self.connection.execute("PRAGMA user_version=4")
+                try:
+                    with self.transaction():
+                        self.connection.execute(_PUBLICATION_JOBS)
+                        self.connection.execute("PRAGMA user_version=4")
+                except sqlite3.Error:
+                    raise EditorialError("editorial_schema_invalid") from None
                 version = 4
             if _schema(self.connection) != _expected_schema():
                 raise EditorialError("editorial_schema_invalid")
@@ -558,7 +561,8 @@ class EditorialStore:
         """
 
         row = self.connection.execute(
-            "SELECT * FROM publication_jobs WHERE status IN ('pending','in_flight','uncertain') "
+            "SELECT * FROM publication_jobs "
+            "WHERE status IN ('pending','in_flight','uncertain','held') "
             "ORDER BY created_at,intent_id LIMIT 1"
         ).fetchone()
         return {key: row[key] for key in row.keys()} if row is not None else None
@@ -618,7 +622,7 @@ class EditorialStore:
         with self.transaction():
             updated = self.connection.execute(
                 "UPDATE publication_jobs SET status='in_flight',updated_at=?,error_code=NULL "
-                "WHERE intent_id=? AND status='pending'",
+                "WHERE intent_id=? AND status IN ('pending','held')",
                 (clock, intent_id),
             ).rowcount
             if updated != 1:

@@ -101,7 +101,7 @@ class PublicationDelivery:
                     return {"status": "operator_required", "code": "site_submission_interrupted"}
                 if status == "failed":
                     store.retry_failed_publication(intent_id, stamp)
-                elif status != "pending":
+                elif status not in {"pending", "held"}:
                     raise EditorialError("publication_store_invalid")
                 _write_intent(self.output, intent)
                 store.begin_publication_submission(intent_id, stamp)
@@ -111,9 +111,13 @@ class PublicationDelivery:
                     delivered += 1
                     continue
                 if outcome.status == "held":
-                    held += 1
-                    continue
+                    return {
+                        "status": "completed",
+                        "code": "site_hold",
+                        "delivered": delivered,
+                        "held": held + 1,
+                    }
                 if outcome.status == "failed":
-                    return {"status": "retryable", "code": "site_import_failed"}
+                    return {"status": "operator_required", "code": "site_import_failed"}
                 return {"status": "operator_required", "code": "site_outcome_ambiguous"}
         return {"status": "completed", "delivered": delivered, "held": held}

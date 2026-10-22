@@ -1,7 +1,6 @@
-"""Offline tests for the provisional, independently replaceable Site boundary."""
+"""Offline tests for the isolated, version-pinned Site importer boundary."""
 
 import json
-import os
 import stat
 import sys
 from pathlib import Path
@@ -11,6 +10,7 @@ import pytest
 from waagd_discovery.editorial.contracts import EditorialError
 from waagd_discovery.editorial.site_import import (
     CommandSiteImporter,
+    PublishImportOutcomeParser,
     SiteImportCommand,
     SiteImportOutcome,
 )
@@ -83,6 +83,21 @@ def test_default_protocol_never_interprets_provisional_site_output(tmp_path: Pat
         _private(root / "token"),
     )
     assert importer.import_intent(_intent(root / "publication-intent.json")) == SiteImportOutcome(
+        "uncertain"
+    )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "code"),
+    [("created", 0), ("duplicate", 0), ("held", 2), ("uncertain", 3), ("failed", 1)],
+)
+def test_finalized_site_outcome_protocol_is_strict(outcome: str, code: int) -> None:
+    parser = PublishImportOutcomeParser()
+    output = json.dumps({"outcome": outcome}).encode()
+    assert parser.parse(code, output) == SiteImportOutcome(outcome)  # type: ignore[arg-type]
+    unexpected_code = 1 if code == 0 else 0
+    assert parser.parse(unexpected_code, output) == SiteImportOutcome("uncertain")
+    assert parser.parse(code, b'{"outcome":"created","extra":true}') == SiteImportOutcome(
         "uncertain"
     )
 
