@@ -153,6 +153,7 @@ def fake_cli(
         f"{record}"
         "assert 'AWS_SECRET_ACCESS_KEY' not in os.environ\n"
         "message = pathlib.Path(args[args.index('--message-file') + 1]).read_bytes()\n"
+        "assert b'the trusted host builds editorial-decision-v1' in message\n"
         "assert b'Editorial request JSON:' in message\n"
         "assert b'Output contract: return JSON only' in message\n"
         "assert b'Required keys: satirical_angle, headline, summary, article' in message\n"
