@@ -1600,6 +1600,128 @@ def test_interrupted_fidelity_turn_is_not_replayed_automatically(tmp_path):
         )
     )
 
-    assert controller.process(NOW)["error_code"] == "editorial_fidelity_outcome_unknown"
+    assert controller.process(NOW)["error_code"] == "editorial_fidelity_gateway_child_exit_nonzero"
     assert controller.process(NOW)["status"] == "operator_required"
     assert editor.calls == 1
+
+
+class FidelityGatewayFailure:
+    """Inject a bounded pre-parsed Gateway failure without retaining output."""
+
+    def __init__(self, code):
+        self.code, self.calls = code, 0
+
+    def review_fidelity(self, payload):
+        del payload
+        self.calls += 1
+        raise EditorialError(self.code)
+
+
+@pytest.mark.parametrize(
+    ("gateway_code", "stored_code"),
+    [
+        ("gateway_timeout", "editorial_fidelity_gateway_timeout"),
+        ("gateway_child_exit_nonzero", "editorial_fidelity_gateway_child_exit_nonzero"),
+        ("gateway_response_too_large", "editorial_fidelity_gateway_response_too_large"),
+        ("gateway_envelope_invalid", "editorial_fidelity_attestation_invalid"),
+        ("gateway_child_launch_failed", "editorial_fidelity_transport_unavailable"),
+    ],
+)
+def test_fidelity_gateway_failures_finish_creative_attempt_without_replay(
+    tmp_path, gateway_code, stored_code
+):
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    controller, bridge, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    value["candidates"][0]["description"] = "A council published a routine filing."
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    editor = DraftEditor("Council Finds Another Form", "A filing acquires a committee and a queue.")
+    gateway = FidelityGatewayFailure(gateway_code)
+    controller.editor = editor
+    controller.fidelity_reviewer = GatewayFidelityReviewer(gateway)
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == stored_code
+    attempts = rows(controller, "attempts")
+    editorial = next(item for item in attempts if item["operation"] == "editorial")
+    fidelity = next(item for item in attempts if item["operation"] == "fidelity")
+    assert (editorial["status"], editorial["error_code"]) == ("completed", None)
+    assert (fidelity["status"], fidelity["error_code"]) == ("failed", stored_code)
+    assert rows(controller, "decisions") == []
+    assert rows(controller, "selection_items") == []
+    assert bridge.acks == 0
+    assert controller.process(NOW)["status"] == "operator_required"
+    assert editor.calls == gateway.calls == 1
+
+
+def test_fidelity_safety_rejection_finishes_creative_attempt_and_never_acks(tmp_path):
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    controller, bridge, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    value["candidates"][0]["description"] = "A council published a routine filing."
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    controller.editor = DraftEditor(
+        "Council Finds Another Form", "A filing acquires a committee and a queue."
+    )
+    controller.fidelity_reviewer = GatewayFidelityReviewer(
+        type(
+            "SafetyGateway",
+            (),
+            {
+                "review_fidelity": lambda self, payload: {
+                    "schema_version": 1,
+                    "verdict": "REJECT",
+                    "findings": [
+                        {
+                            "field": "headline",
+                            "reason_code": "unsupported_attribution",
+                            "evidence_refs": ["candidate_description"],
+                        }
+                    ],
+                }
+            },
+        )()
+    )
+
+    assert controller.process(NOW)["error_code"] == "editorial_fidelity_unsupported_attribution"
+    attempts = rows(controller, "attempts")
+    assert (
+        next(item for item in attempts if item["operation"] == "editorial")["status"] == "completed"
+    )
+    assert next(item for item in attempts if item["operation"] == "fidelity")["status"] == "failed"
+    assert bridge.acks == 0
+
+
+def test_attempt_pair_finish_is_atomic_in_schema_v3_store(tmp_path):
+    controller, _, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    controller.process(NOW)
+    with EditorialStore(controller.store_path, simulation=False) as store:
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        editorial = store.start_attempt(
+            value["delivery_id"],
+            value["candidates"][0]["candidate_key"],
+            "editorial",
+            NOW.isoformat(),
+        )
+        fidelity = store.start_attempt(
+            value["delivery_id"],
+            value["candidates"][0]["candidate_key"],
+            "fidelity",
+            NOW.isoformat(),
+        )
+        with pytest.raises(EditorialError, match="editorial_attempt_state_invalid"):
+            store.finish_attempts(
+                ((editorial, None), ("missing", "editorial_fidelity_gateway_timeout")),
+                NOW.isoformat(),
+            )
+    attempts = rows(controller, "attempts")
+    assert next(item for item in attempts if item["attempt_id"] == editorial)["status"] == "started"
+    assert next(item for item in attempts if item["attempt_id"] == fidelity)["status"] == "started"

@@ -550,6 +550,19 @@ class EditorialStore:
                 ("failed" if error else "completed", clock, error, attempt),
             )
 
+    def finish_attempts(self, attempts: tuple[tuple[str, str | None], ...], clock: str) -> None:
+        """Atomically finish related attempts without inventing a partial outcome."""
+
+        with self.transaction():
+            for attempt, error in attempts:
+                updated = self.connection.execute(
+                    "UPDATE attempts SET status=?,finished_at=?,error_code=? "
+                    "WHERE attempt_id=? AND status='started'",
+                    ("failed" if error else "completed", clock, error, attempt),
+                ).rowcount
+                if updated != 1:
+                    raise EditorialError("editorial_attempt_state_invalid")
+
     def verification(self, key: str, revision: int) -> dict[str, Any] | None:
         row = self.connection.execute(
             "SELECT result FROM verifications WHERE candidate_key=? AND revision=?", (key, revision)

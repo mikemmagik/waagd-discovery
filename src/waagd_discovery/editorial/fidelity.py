@@ -241,8 +241,23 @@ class GatewayFidelityReviewer:
 
     @staticmethod
     def _gateway_code(code: str) -> str:
+        """Map bounded Gateway diagnostics without retaining untrusted text."""
+
+        if code in {"gateway_child_launch_failed", "gateway_unavailable"}:
+            return "editorial_fidelity_transport_unavailable"
+        if code == "gateway_child_exit_nonzero":
+            return "editorial_fidelity_gateway_child_exit_nonzero"
+        if code == "gateway_timeout":
+            return "editorial_fidelity_gateway_timeout"
+        if code == "gateway_response_too_large":
+            return "editorial_fidelity_gateway_response_too_large"
+        if code == "gateway_stream_failure":
+            return "editorial_fidelity_gateway_stream_failure"
         if code == "gateway_outcome_unknown":
             return "editorial_fidelity_outcome_unknown"
-        if code == "gateway_unavailable":
-            return "editorial_fidelity_transport_unavailable"
+        if code.startswith("gateway_tool_") or code in {
+            "gateway_envelope_invalid",
+            "gateway_cost_unverified",
+        }:
+            return "editorial_fidelity_attestation_invalid"
         return "editorial_fidelity_response_invalid"

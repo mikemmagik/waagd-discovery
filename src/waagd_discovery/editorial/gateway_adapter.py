@@ -408,14 +408,17 @@ class GatewayEditor:
                     start_new_session=True,
                 )
             except OSError:
-                raise EditorialError("gateway_unavailable") from None
+                # Popen failed before a child existed, so this is a known
+                # transport failure rather than an ambiguous model outcome.
+                raise EditorialError("gateway_child_launch_failed") from None
             try:
                 raw = self._read_bounded(process)
             finally:
                 if process.poll() is None:
                     self._terminate(process)
         if process.returncode != 0:
-            raise EditorialError("gateway_outcome_unknown")
+            # The child may have handed the request to Gateway before exiting.
+            raise EditorialError("gateway_child_exit_nonzero")
         return raw
 
     def _read_bounded(self, process: subprocess.Popen[bytes]) -> bytes:
@@ -428,7 +431,7 @@ class GatewayEditor:
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise EditorialError("gateway_outcome_unknown")
+                    raise EditorialError("gateway_timeout")
                 readable, _, _ = select.select([descriptor], [], [], min(remaining, 0.1))
                 if not readable:
                     continue
@@ -440,8 +443,11 @@ class GatewayEditor:
                 if size > self.budget_policy.max_response_bytes:
                     raise EditorialError("gateway_response_too_large")
                 chunks.append(chunk)
-        except (OSError, subprocess.TimeoutExpired):
-            raise EditorialError("gateway_outcome_unknown") from None
+        except subprocess.TimeoutExpired:
+            raise EditorialError("gateway_timeout") from None
+        except OSError:
+            # A pipe failure can occur after Gateway received the request.
+            raise EditorialError("gateway_stream_failure") from None
         finally:
             process.stdout.close()
 

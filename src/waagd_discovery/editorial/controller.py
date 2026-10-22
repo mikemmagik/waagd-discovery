@@ -237,7 +237,12 @@ class Controller:
                     raise EditorialError(review.code)
             except (EditorialError, io.BridgeError, OSError, ValueError, TypeError) as error:
                 code = self._editorial_failure_code(error)
-                store.finish_attempt(fidelity_attempt, utc(now).isoformat(), code)
+                # Creative generation completed; fidelity is a separate policy
+                # gate. Finish both records together so the parent never
+                # remains falsely started after a terminal fidelity outcome.
+                store.finish_attempts(
+                    ((attempt, None), (fidelity_attempt, code)), utc(now).isoformat()
+                )
                 store.mark_selection_editorial(delivery, key, "failed")
                 return code
         self._fresh(envelope, now)
@@ -246,9 +251,10 @@ class Controller:
         )
         if not reconsider:
             store.mark_selection_editorial(delivery, key, "completed")
-        store.finish_attempt(attempt, utc(now).isoformat())
         if fidelity_attempt is not None:
-            store.finish_attempt(fidelity_attempt, utc(now).isoformat())
+            store.finish_attempts(((attempt, None), (fidelity_attempt, None)), utc(now).isoformat())
+        else:
+            store.finish_attempt(attempt, utc(now).isoformat())
         return None
 
     @staticmethod
@@ -277,9 +283,17 @@ class Controller:
             return "editorial_format_schema_invalid"
         if code == "gateway_creative_safety_invalid":
             return "editorial_safety_rejected"
-        if code == "gateway_unavailable":
+        if code in {"gateway_unavailable", "gateway_child_launch_failed"}:
             return "editorial_transport_unavailable"
-        if code in {"gateway_outcome_unknown", "gateway_response_too_large"}:
+        if code == "gateway_child_exit_nonzero":
+            return "editorial_gateway_child_exit_nonzero"
+        if code == "gateway_timeout":
+            return "editorial_gateway_timeout"
+        if code == "gateway_response_too_large":
+            return "editorial_gateway_response_too_large"
+        if code == "gateway_stream_failure":
+            return "editorial_gateway_stream_failure"
+        if code == "gateway_outcome_unknown":
             return "editorial_outcome_unknown"
         if code in {
             "editorial_fidelity_unsupported_attribution",
@@ -290,6 +304,11 @@ class Controller:
             "editorial_fidelity_invented_event",
             "editorial_fidelity_response_invalid",
             "editorial_fidelity_transport_unavailable",
+            "editorial_fidelity_gateway_child_exit_nonzero",
+            "editorial_fidelity_gateway_timeout",
+            "editorial_fidelity_gateway_response_too_large",
+            "editorial_fidelity_gateway_stream_failure",
+            "editorial_fidelity_attestation_invalid",
             "editorial_fidelity_outcome_unknown",
         }:
             return code

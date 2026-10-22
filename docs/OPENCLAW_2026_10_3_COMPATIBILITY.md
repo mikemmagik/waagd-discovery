@@ -173,3 +173,16 @@ never repeats an interrupted fidelity Gateway call; it marks the delivery
 
 The review helps detect contradictions and unsupported characterisations. It
 cannot prove complete factual correctness or certify that satire is humorous.
+
+Creative generation and fidelity are retained as separate attempts.  When a
+creative response is complete but fidelity rejects it or reaches a terminal
+Gateway outcome, the editorial attempt is completed and the fidelity attempt
+fails with its own bounded code.  This prevents a failed fidelity gate from
+leaving a misleading `editorial` attempt in `started` state.  A SQLite failure
+while recording the pair leaves both attempts recoverable; recovery marks an
+interrupted fidelity call operator-required and never replays it.
+
+Safe diagnostics distinguish child launch failure, child nonzero exit, timeout,
+oversized response, stream failure, envelope or tool attestation failure, and
+invalid review schema. No raw Gateway output, prompt, stderr, or credential is
+stored with these diagnostics.

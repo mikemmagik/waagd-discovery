@@ -497,12 +497,12 @@ def test_gateway_does_not_treat_false_code_mode_as_complete_attestation(tmp_path
 
 
 def test_nonzero_exit_is_ambiguous_even_if_output_looks_valid(tmp_path: Path) -> None:
-    with pytest.raises(EditorialError, match="gateway_outcome_unknown"):
+    with pytest.raises(EditorialError, match="gateway_child_exit_nonzero"):
         GatewayEditor(fake_cli(tmp_path, envelope(), exit_code=1)).evaluate(request())
 
 
 def test_hung_gateway_is_terminated_and_requires_reconciliation(tmp_path: Path) -> None:
-    with pytest.raises(EditorialError, match="gateway_outcome_unknown"):
+    with pytest.raises(EditorialError, match="gateway_timeout"):
         GatewayEditor(fake_cli(tmp_path, envelope(), delay=30), timeout=5).evaluate(request())
 
 
@@ -634,7 +634,7 @@ def test_gateway_never_retries_an_ambiguous_gateway_outcome(tmp_path: Path) -> N
     sessions = tmp_path / "sessions"
     editor = GatewayEditor(fake_cli(tmp_path, envelope(), exit_code=1, session_log=sessions))
 
-    with pytest.raises(EditorialError, match="^gateway_outcome_unknown$"):
+    with pytest.raises(EditorialError, match="^gateway_child_exit_nonzero$"):
         editor.evaluate(request())
 
     assert len(sessions.read_text().splitlines()) == 1
