@@ -29,11 +29,15 @@ _OUTPUT_GUIDE = (
     b"English-speaking audience. Find one independent satirical angle, rather than retelling the "
     b"news with jokes. Aim at institutional contradictions, perverse incentives, bureaucracy, "
     b"decisions, and organisational behaviour. Political satire is allowed.\n"
-    b"Factual discipline: this is creative commentary only. Do not invent events, statistics, "
-    b"accusations, quotes, dates, sources, or attributed intentions. Do not write reportedly, "
-    b"sources say, officials intend, the administration plans, or equivalent attribution unless "
-    b"the supplied material provides a clear factual basis. Never invent an accusation or an "
-    b"attributed statement.\n"
+    b"Factual discipline: this is creative commentary only. Bind every factual assertion to the "
+    b"supplied candidate and evidence. Do not invent events, policy changes, statistics, "
+    b"accusations, "
+    b"quotes, dates, sources, or attributed intentions. Do not write reportedly, sources say, "
+    b"officials intend, the administration plans, or equivalent attribution unless the supplied "
+    b"material provides a clear factual basis. Do not turn exploratory reporting into a stalled "
+    b"outcome or describe an older policy as a new change. Never invent an accusation or an "
+    b"attributed statement. Satirical metaphors are allowed only when they are clearly commentary, "
+    b"not a claim that an additional real-world event happened.\n"
     b"Output contract: return JSON only, without Markdown, code fences, prose, links, quotations, "
     b"or extra keys. Required keys: satirical_angle, headline, summary, article. All four are "
     b"strings. satirical_angle is at most 1000 characters; headline should target 65 to 70 "
@@ -236,13 +240,15 @@ class GatewayEditor:
                 ):
                     correction = self._format_diagnostic(code)
                     continue
+                if attempt == 1 and self._format_retryable(code):
+                    code = "gateway_format_retry_exhausted:" + self._format_failure_class(code)
                 self._last_metrics = {
                     "path": "gateway_creative",
                     "outcome": "rejected",
                     "reason": code,
                     "format_retry": str(attempt),
                 }
-                raise
+                raise EditorialError(code) from None
             self._last_metrics = {
                 "path": "gateway_creative",
                 "verification_status": verification_status,
@@ -257,6 +263,16 @@ class GatewayEditor:
         return code in _FORMAT_RETRYABLE or code.startswith(
             ("gateway_creative_schema_invalid:", "editorial_schema_invalid:")
         )
+
+    @staticmethod
+    def _format_failure_class(code: str) -> str:
+        if code in {"gateway_model_json_invalid", "gateway_empty_response"}:
+            return "json"
+        if code.startswith("gateway_creative_schema_invalid:"):
+            field = code.rsplit(":", 1)[1]
+            if field in {"headline", "summary", "article", "article_words"}:
+                return "length"
+        return "schema"
 
     @staticmethod
     def _format_diagnostic(code: str) -> str:

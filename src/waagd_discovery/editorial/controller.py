@@ -21,6 +21,7 @@ from waagd_discovery.editorial.contracts import (
     validate_input,
     validate_verification,
 )
+from waagd_discovery.editorial.fidelity import require_source_fidelity
 from waagd_discovery.editorial.store import EditorialStore
 
 
@@ -217,10 +218,12 @@ class Controller:
         try:
             result = self.editor.evaluate(request)
             validate_decision(result, request)
-        except (EditorialError, io.BridgeError, OSError, ValueError, TypeError):
-            store.finish_attempt(attempt, utc(now).isoformat(), "editorial_failed")
+            require_source_fidelity(request, result)
+        except (EditorialError, io.BridgeError, OSError, ValueError, TypeError) as error:
+            code = self._editorial_failure_code(error)
+            store.finish_attempt(attempt, utc(now).isoformat(), code)
             store.mark_selection_editorial(delivery, key, "failed")
-            return "editorial_failed"
+            return code
         self._fresh(envelope, now)
         store.save_decision(
             key, revision, request, result, None if reconsider else delivery, utc(now).isoformat()
@@ -229,6 +232,46 @@ class Controller:
             store.mark_selection_editorial(delivery, key, "completed")
         store.finish_attempt(attempt, utc(now).isoformat())
         return None
+
+    @staticmethod
+    def _editorial_failure_code(error: Exception) -> str:
+        """Map untrusted adapter failures to a compact, durable safe taxonomy."""
+
+        code = str(error)
+        if code.startswith("gateway_format_retry_exhausted:"):
+            return "editorial_format_retry_exhausted:" + code.rsplit(":", 1)[1]
+        if code in {"gateway_model_json_invalid", "gateway_empty_response"}:
+            return "editorial_format_json_invalid"
+        if code.startswith("gateway_creative_schema_invalid:"):
+            field = code.rsplit(":", 1)[1]
+            return (
+                "editorial_format_length_invalid"
+                if field in {"headline", "summary", "article", "article_words"}
+                else "editorial_format_schema_invalid"
+            )
+        if code in {
+            "gateway_creative_schema_invalid",
+            "editorial_schema_invalid",
+        } or code.startswith("editorial_schema_invalid:"):
+            return "editorial_format_schema_invalid"
+        if code == "gateway_creative_safety_invalid":
+            return "editorial_safety_rejected"
+        if code == "gateway_unavailable":
+            return "editorial_transport_unavailable"
+        if code in {"gateway_outcome_unknown", "gateway_response_too_large"}:
+            return "editorial_outcome_unknown"
+        if code.startswith("editorial_fidelity_"):
+            return code
+        if code.startswith("gateway_tool_") or code in {
+            "gateway_envelope_invalid",
+            "gateway_cost_unverified",
+        }:
+            return "editorial_gateway_attestation_invalid"
+        return "editorial_execution_failed"
+
+    @staticmethod
+    def _requires_editorial_operator(code: str) -> bool:
+        return code != "editorial_execution_failed"
 
     def _excluded(
         self,
@@ -497,6 +540,19 @@ class Controller:
         with self._store() as store:
             self._recover(store, now)
             store.register(envelope, utc(now).isoformat())
+            existing = store.connection.execute(
+                "SELECT status,error_code FROM deliveries WHERE delivery_id=?",
+                (envelope["delivery_id"],),
+            ).fetchone()
+            if (
+                existing is not None
+                and existing["status"] == "operator_required"
+                and isinstance(existing["error_code"], str)
+                and existing["error_code"].startswith("editorial_")
+            ):
+                # Selection has its own explicit recovery operation. Editorial
+                # failures must remain stopped until an operator resolves them.
+                return self._result(store, envelope["delivery_id"])
             if store.connection.execute(
                 "SELECT 1 FROM ack_outbox WHERE delivery_id=?", (envelope["delivery_id"],)
             ).fetchone():
@@ -657,7 +713,20 @@ class Controller:
                         return self._result(store, envelope["delivery_id"])
                     raise
             if errors:
-                store.mark_delivery(envelope["delivery_id"], "retryable", "editorial_failed")
+                # Gateway/editorial failures are never replayed through the
+                # normal delivery loop: a completed turn may have been lost,
+                # and an exhausted format retry must not become an unbounded
+                # source of new model decisions. The per-candidate attempt
+                # rows retain the exact safe code for operator review.
+                operator_code = next(
+                    (code for code in errors if self._requires_editorial_operator(code)), None
+                )
+                if operator_code is not None:
+                    store.mark_delivery(envelope["delivery_id"], "operator_required", operator_code)
+                else:
+                    store.mark_delivery(
+                        envelope["delivery_id"], "retryable", "editorial_execution_failed"
+                    )
             else:
                 store.complete_reused(envelope["delivery_id"], utc(now).isoformat())
                 try:
@@ -699,6 +768,9 @@ class Controller:
                     "error_code": "selection_outcome_unknown",
                 }
             store.reopen_failed_selection(delivery)
+            # This is an explicit recovery only for a selection call proven
+            # not to be in flight. Let process resume that durable run.
+            store.mark_delivery(delivery, "processing", None)
         return self.process(now)
 
     def reconsider(self, candidate_key: str, now: datetime | None = None) -> dict[str, Any]:

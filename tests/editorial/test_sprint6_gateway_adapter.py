@@ -159,8 +159,9 @@ def fake_cli(
         "assert b'Required keys: satirical_angle, headline, summary, article' in message\n"
         "assert b'WAAGD style: write sharp, dry, intelligent, deadpan ' "
         "b'absurdist satire' in message\n"
-        "assert b'Do not invent events, statistics, accusations, quotes, dates, ' "
-        "b'sources' in message\n"
+        "assert b'Bind every factual assertion to the supplied candidate and evidence' in message\n"
+        "assert b'Do not invent events, policy changes, statistics, accusations' in message\n"
+        "assert b'Do not turn exploratory reporting into a stalled outcome' in message\n"
         "assert b'officials intend, the administration plans' in message\n"
         "assert b'headline should target 65 to 70' in message\n"
         "assert b'summary should target 100 to 120 characters and must not exceed 160' in message\n"
@@ -448,15 +449,17 @@ def test_gateway_rejects_openclaw_2026_10_3_model_error_and_invalid_json(tmp_pat
 
 
 @pytest.mark.parametrize(
-    ("text", "code"),
+    ("text", "initial_code"),
     [("", "gateway_empty_response"), ("not JSON", "gateway_model_json_invalid")],
 )
-def test_gateway_distinguishes_empty_and_invalid_model_json(
-    tmp_path: Path, text: str, code: str
+def test_gateway_distinguishes_json_failure_before_bounded_retry_exhaustion(
+    tmp_path: Path, text: str, initial_code: str
 ) -> None:
     response = openclaw_2026_10_3_tool_free(text=text)
     editor = GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode()))
-    with pytest.raises(EditorialError, match=code):
+    with pytest.raises(EditorialError, match=f"^{initial_code}$"):
+        editor._parse(json.dumps(response).encode(), request())
+    with pytest.raises(EditorialError, match="^gateway_format_retry_exhausted:json$"):
         editor.evaluate(request())
     assert editor.last_completion == {"gateway_status": "ok"}
 
@@ -520,7 +523,7 @@ def test_gateway_reports_schema_path_without_model_reply_content(tmp_path: Path)
     response = openclaw_2026_10_3_tool_free(text=json.dumps(bad))
     with pytest.raises(EditorialError) as raised:
         GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode())).evaluate(request())
-    assert str(raised.value) == "gateway_creative_schema_invalid:headline"
+    assert str(raised.value) == "gateway_format_retry_exhausted:length"
     assert "7" not in str(raised.value)
 
 
@@ -614,7 +617,7 @@ def test_gateway_fails_closed_after_second_completed_format_failure(tmp_path: Pa
         sequence_cli(tmp_path, [invalid, invalid], sessions=sessions, messages=messages)
     )
 
-    with pytest.raises(EditorialError, match="^gateway_creative_schema_invalid:summary$"):
+    with pytest.raises(EditorialError, match="^gateway_format_retry_exhausted:length$"):
         editor.evaluate(request())
 
     assert len(sessions.read_text().splitlines()) == 2
@@ -622,7 +625,7 @@ def test_gateway_fails_closed_after_second_completed_format_failure(tmp_path: Pa
     assert editor.last_metrics == {
         "path": "gateway_creative",
         "outcome": "rejected",
-        "reason": "gateway_creative_schema_invalid:summary",
+        "reason": "gateway_format_retry_exhausted:length",
         "format_retry": "1",
     }
 
@@ -642,7 +645,9 @@ def test_output_guide_requires_factual_discipline_without_a_phrase_blacklist() -
     from waagd_discovery.editorial.gateway_adapter import _OUTPUT_GUIDE
 
     text = _OUTPUT_GUIDE.decode("ascii")
-    assert "Do not invent events, statistics, accusations, quotes, dates, sources" in text
+    assert "Bind every factual assertion to the supplied candidate and evidence" in text
+    assert "Do not invent events, policy changes, statistics, accusations, quotes, dates" in text
+    assert "Do not turn exploratory reporting into a stalled outcome" in text
     assert "unless the supplied material provides a clear factual basis" in text
     assert "Political satire is allowed" in text
     assert "headline should target 65 to 70" in text

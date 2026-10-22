@@ -121,3 +121,35 @@ OPENCLAW_CONFIG_PATH=/absolute/private/claw2-openclaw.json uv run --frozen pytho
 A passing second command prints `READY_FOR_REVIEW` with
 `fixture: synthetic_verified`. It does not authorize publication, ACK, scheduler
 activation, or a change to the shared Gateway.
+
+## Source-fidelity gate and editorial recovery
+
+A syntactically valid creative JSON reply is not sufficient for
+`READY_FOR_REVIEW`. Before the Controller persists that decision, it compares
+bounded high-risk factual-assertion markers in the four creative fields with the
+candidate title, description, and verified evidence excerpts already present in
+the request. It rejects unsupported organisational attributions, the observed
+`significant effort` → `reasonable chores` reversal, an exploratory merger
+presented as stalled, and unsupported claims that an old policy is new.
+
+This is a fail-closed source-fidelity guard, not an independent fact check and
+not proof that every sentence is factually correct. It has no network, model,
+or persistence access. A rejection is stored only as one of these safe codes:
+`editorial_fidelity_unsupported_attribution`,
+`editorial_fidelity_contradiction`, or
+`editorial_fidelity_misleading_timing`.
+
+The durable editorial attempt also retains a bounded failure taxonomy:
+`editorial_format_json_invalid`, `editorial_format_schema_invalid`,
+`editorial_format_length_invalid`, `editorial_format_retry_exhausted:<kind>`,
+`editorial_safety_rejected`, `editorial_transport_unavailable`,
+`editorial_outcome_unknown`, and `editorial_gateway_attestation_invalid`.
+No prompt, raw model reply, source excerpt, or credential is added to the
+attempt diagnostic.
+
+For any `editorial_*` failure, the delivery becomes `operator_required` and a
+normal restart will not replay the editorial Gateway call. Inspect the matching
+attempt row and preserve the delivery and Bridge state. An ambiguous outcome
+(`editorial_outcome_unknown`) must be reconciled outside automated retry;
+create a separately approved recovery plan rather than rerunning the delivery.
+Known Selection failures keep their existing explicit selection-retry path.

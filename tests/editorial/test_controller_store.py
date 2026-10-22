@@ -1313,3 +1313,90 @@ def test_cli_disabled_dry_run_and_enabled_mock_processing(tmp_path, capsys):
     assert before == {
         p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in bridge.state_dir.iterdir()
     }
+
+
+class GatewayFailureEditor:
+    def __init__(self, code: str):
+        self.code = code
+        self.calls = 0
+
+    def evaluate(self, request):
+        del request
+        self.calls += 1
+        raise EditorialError(self.code)
+
+
+@pytest.mark.parametrize(
+    ("gateway_code", "stored_code"),
+    [
+        ("gateway_model_json_invalid", "editorial_format_json_invalid"),
+        ("gateway_creative_schema_invalid:summary", "editorial_format_length_invalid"),
+        ("gateway_format_retry_exhausted:length", "editorial_format_retry_exhausted:length"),
+        ("gateway_creative_safety_invalid", "editorial_safety_rejected"),
+        ("gateway_unavailable", "editorial_transport_unavailable"),
+        ("gateway_outcome_unknown", "editorial_outcome_unknown"),
+        (
+            "editorial_fidelity_unsupported_attribution",
+            "editorial_fidelity_unsupported_attribution",
+        ),
+    ],
+)
+def test_controller_persists_safe_editorial_failure_taxonomy_without_replay(
+    tmp_path, gateway_code, stored_code
+):
+    controller, _, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    editor = GatewayFailureEditor(gateway_code)
+    controller.editor = editor
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == stored_code
+    attempts = rows(controller, "attempts")
+    assert attempts[-1]["operation"] == "editorial"
+    assert attempts[-1]["status"] == "failed"
+    assert attempts[-1]["error_code"] == stored_code
+    assert rows(controller, "decisions") == []
+    assert controller.process(NOW)["status"] == "operator_required"
+    assert editor.calls == 1
+    assert value["delivery_id"] == result["delivery_id"]
+
+
+class UnsupportedAttributionEditor:
+    def __init__(self):
+        self.calls = 0
+
+    def evaluate(self, request):
+        self.calls += 1
+        return trusted_decision(
+            request,
+            creative={
+                "satirical_angle": "A fictional company mistakes planning for action.",
+                "headline": "Acme Plans Another Procedure",
+                "summary": "A fictional office receives a policy it never announced.",
+                "article": " ".join(
+                    ["Acme plans a policy change while the fictional office files another form."]
+                    * 12
+                ),
+            },
+            now=NOW,
+        )
+
+
+def test_source_fidelity_rejection_is_durable_and_prevents_ready_for_review(tmp_path):
+    controller, _, _, _, _ = setup(tmp_path, count=1, allow_ack=False)
+    editor = UnsupportedAttributionEditor()
+    controller.editor = editor
+    controller.verifier = CliTrustedVerifier()
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "editorial_fidelity_unsupported_attribution"
+    assert rows(controller, "decisions") == []
+    attempt = rows(controller, "attempts")[-1]
+    assert attempt["operation"] == "editorial"
+    assert attempt["error_code"] == "editorial_fidelity_unsupported_attribution"
+    assert editor.calls == 1
+    assert controller.process(NOW)["status"] == "operator_required"
+    assert editor.calls == 1
