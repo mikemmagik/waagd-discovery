@@ -200,7 +200,11 @@ class GatewayFidelityReviewer:
     def _validate(value: Any, request: dict[str, Any]) -> SourceFidelityReview:
         if not isinstance(value, dict) or set(value) != {"schema_version", "verdict", "findings"}:
             raise ValueError
-        if value["schema_version"] != 1 or value["verdict"] not in {"PASS", "REVISE", "REJECT"}:
+        if (
+            type(value["schema_version"]) is not int
+            or value["schema_version"] != 1
+            or value["verdict"] not in {"PASS", "REVISE", "REJECT"}
+        ):
             raise ValueError
         findings = value["findings"]
         if not isinstance(findings, list) or len(findings) > 5:

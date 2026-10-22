@@ -155,3 +155,23 @@ def test_source_fidelity_is_not_a_claim_of_independent_fact_checking() -> None:
     assert SourceFidelityReviewer.__doc__ is not None
     assert "no network, filesystem, model, or persistence access" in SourceFidelityReviewer.__doc__
     assert SourceFidelityReviewer().review(value, result).code is None
+
+
+@pytest.mark.parametrize("schema_version", [True, 1.0, False])
+def test_gateway_fidelity_rejects_noninteger_schema_version(schema_version: object) -> None:
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    value = request(
+        title="Office publishes a routine filing",
+        description="The article describes a filing.",
+        excerpt="The office published a routine filing.",
+    )
+    result = decision(value, article=article())
+
+    class Gateway:
+        def review_fidelity(self, payload: object) -> object:
+            del payload
+            return {"schema_version": schema_version, "verdict": "PASS", "findings": []}
+
+    review = GatewayFidelityReviewer(Gateway()).review(value, result)
+    assert review.code == "editorial_fidelity_response_invalid"
