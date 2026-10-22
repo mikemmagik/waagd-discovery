@@ -1400,3 +1400,23 @@ def test_source_fidelity_rejection_is_durable_and_prevents_ready_for_review(tmp_
     assert editor.calls == 1
     assert controller.process(NOW)["status"] == "operator_required"
     assert editor.calls == 1
+
+
+@pytest.mark.parametrize(
+    "gateway_code",
+    [
+        "gateway_format_retry_exhausted:length:raw-model-response",
+        "editorial_fidelity_unsupported_attribution:raw-prompt",
+    ],
+)
+def test_controller_never_persists_untrusted_editorial_error_suffix(tmp_path, gateway_code):
+    controller, _, _, _, _ = setup(tmp_path, count=1, allow_ack=False)
+    controller.editor = GatewayFailureEditor(gateway_code)
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "editorial_gateway_response_invalid"
+    stored = rows(controller, "attempts")[-1]["error_code"]
+    assert stored == "editorial_gateway_response_invalid"
+    assert "raw-" not in stored

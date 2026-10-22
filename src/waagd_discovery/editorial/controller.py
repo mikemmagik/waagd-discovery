@@ -239,7 +239,10 @@ class Controller:
 
         code = str(error)
         if code.startswith("gateway_format_retry_exhausted:"):
-            return "editorial_format_retry_exhausted:" + code.rsplit(":", 1)[1]
+            kind = code.removeprefix("gateway_format_retry_exhausted:")
+            if kind in {"json", "schema", "length"}:
+                return "editorial_format_retry_exhausted:" + kind
+            return "editorial_gateway_response_invalid"
         if code in {"gateway_model_json_invalid", "gateway_empty_response"}:
             return "editorial_format_json_invalid"
         if code.startswith("gateway_creative_schema_invalid:"):
@@ -260,8 +263,14 @@ class Controller:
             return "editorial_transport_unavailable"
         if code in {"gateway_outcome_unknown", "gateway_response_too_large"}:
             return "editorial_outcome_unknown"
-        if code.startswith("editorial_fidelity_"):
+        if code in {
+            "editorial_fidelity_unsupported_attribution",
+            "editorial_fidelity_contradiction",
+            "editorial_fidelity_misleading_timing",
+        }:
             return code
+        if code.startswith("editorial_fidelity_"):
+            return "editorial_gateway_response_invalid"
         if code.startswith("gateway_tool_") or code in {
             "gateway_envelope_invalid",
             "gateway_cost_unverified",
