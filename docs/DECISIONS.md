@@ -144,3 +144,15 @@
     receipt, disabled code mode, and empty optional attempted/failed tool lists.
     Present bridge counters remain exact and zero-only; missing other required
     attestations, unknown fields and conflicts fail closed.
+
+37. Trusted Publisher policy establishes only a bounded publisher-identity route: exact configured RSS source and URL, HTTPS final host, and fetched article evidence. It never produces independently VERIFIED facts, independent evidence, or claim support. The initial allowlist is The Guardian and Ars Technica; sensitive stories fail closed. The existing manual independent-corroboration route remains the sole source of VERIFIED. The trusted route is paused for automatic publication until the site has a versioned route marker and a transactional, durable UTC quota/receipt implementation.
+
+38. v0.7.0 releases the Trusted Publishers route, bounded 0–5 AI selection,
+    PublicationIntent v2 production, tool-free Editorial Gateway, model-assisted
+    source-fidelity review, and durable recovery. Satire may use clear rhetorical
+    exaggeration, irony and provocative framing that preserves the reported event;
+    the fidelity gate continues to block material invented events, serious false
+    accusations and fundamental factual distortion. Gateway ambiguity stays
+    operator-required and cannot automatically replay, ACK or publish. This
+    release does not authorize deployment, scheduler activation or automatic
+    publication.

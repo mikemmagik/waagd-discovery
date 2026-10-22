@@ -12,7 +12,18 @@ from typing import Any
 from waagd_discovery.bridge import io
 from waagd_discovery.editorial.contracts import EditorialError, digest
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
+_SELECTION_RUNS = (
+    "CREATE TABLE selection_runs (run_id TEXT PRIMARY KEY, delivery_id TEXT UNIQUE NOT NULL "
+    "REFERENCES deliveries, utc_day TEXT NOT NULL, shortlist TEXT NOT NULL, selected TEXT, "
+    "status TEXT NOT NULL, created_at TEXT NOT NULL, finished_at TEXT, error_code TEXT)"
+)
+_SELECTION_ITEMS = (
+    "CREATE TABLE selection_items (run_id TEXT NOT NULL REFERENCES selection_runs, "
+    "candidate_key TEXT NOT NULL REFERENCES candidates, candidate_hash TEXT NOT NULL, "
+    "status TEXT NOT NULL, reason_code TEXT, editorial_status TEXT, export_status TEXT NOT NULL, "
+    "PRIMARY KEY(run_id,candidate_key))"
+)
 _SCHEMA = (
     "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK(singleton=1), "
     "simulation INTEGER NOT NULL CHECK(simulation IN (0,1)))",
@@ -37,6 +48,8 @@ _SCHEMA = (
     "CREATE TABLE attempts (attempt_id TEXT PRIMARY KEY, delivery_id TEXT REFERENCES deliveries, "
     "candidate_key TEXT REFERENCES candidates, operation TEXT NOT NULL, status TEXT NOT NULL, "
     "started_at TEXT NOT NULL, finished_at TEXT, error_code TEXT)",
+    _SELECTION_RUNS,
+    _SELECTION_ITEMS,
     "CREATE TABLE ack_outbox (delivery_id TEXT PRIMARY KEY REFERENCES deliveries, "
     "payload_digest TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, "
     "acknowledged_at TEXT, error_code TEXT)",
@@ -215,8 +228,21 @@ class EditorialStore:
                 with self.transaction():
                     for statement in _SCHEMA:
                         self.connection.execute(statement)
-                    self.connection.execute("PRAGMA user_version=1")
+                    self.connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
                     self.connection.execute("INSERT INTO metadata VALUES (1,?)", (self.simulation,))
+            if version == 1:
+                if self.readonly:
+                    raise EditorialError("editorial_schema_migration_required")
+                with self.transaction():
+                    self.connection.execute(_SELECTION_RUNS)
+                    self.connection.execute(_SELECTION_ITEMS)
+                    self.connection.execute("PRAGMA user_version=3")
+            elif version == 2:
+                if self.readonly:
+                    raise EditorialError("editorial_schema_migration_required")
+                with self.transaction():
+                    self.connection.execute(_SELECTION_ITEMS)
+                    self.connection.execute("PRAGMA user_version=3")
             if _schema(self.connection) != _expected_schema():
                 raise EditorialError("editorial_schema_invalid")
             if self.connection.execute("PRAGMA quick_check").fetchall()[0][0] != "ok":
@@ -311,6 +337,201 @@ class EditorialStore:
                     (delivery, key, candidate_row[1]),
                 )
 
+    def selection(self, delivery: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            "SELECT * FROM selection_runs WHERE delivery_id=?", (delivery,)
+        ).fetchone()
+        if row is None:
+            return None
+        return {key: row[key] for key in row.keys()}
+
+    def start_selection(
+        self,
+        delivery: str,
+        day: str,
+        shortlist: list[dict[str, str]],
+        rejected: dict[str, str],
+        clock: str,
+    ) -> dict[str, Any]:
+        with self.transaction():
+            row = self.connection.execute(
+                "SELECT * FROM selection_runs WHERE delivery_id=?", (delivery,)
+            ).fetchone()
+            if row is not None:
+                return {key: row[key] for key in row.keys()}
+            run = str(uuid.uuid4())
+            self.connection.execute(
+                "INSERT INTO selection_runs VALUES (?,?,?,?,?,'started',?,NULL,NULL)",
+                (run, delivery, day, io.encode(shortlist).decode(), None, clock),
+            )
+            for item in shortlist:
+                key = item["candidate_key"]
+                self.connection.execute(
+                    "INSERT INTO selection_items VALUES "
+                    "(?,?,?,'shortlisted',NULL,NULL,'not_exported')",
+                    (run, key, digest(item)),
+                )
+            for key, reason in rejected.items():
+                if key in {item["candidate_key"] for item in shortlist}:
+                    raise EditorialError("selection_state_invalid")
+                self.connection.execute(
+                    "INSERT INTO selection_items VALUES (?,?,?,'rejected',?,NULL,'not_exported')",
+                    (run, key, digest({"candidate_key": key}), reason),
+                )
+            return {
+                "run_id": run,
+                "delivery_id": delivery,
+                "shortlist": io.encode(shortlist).decode(),
+                "selected": None,
+                "status": "started",
+            }
+
+    def finish_selection(
+        self,
+        delivery: str,
+        selected: list[str],
+        clock: str,
+        error: str | None = None,
+        reason_code: str = "not_selected",
+    ) -> None:
+        if not reason_code or not isinstance(reason_code, str):
+            raise EditorialError("selection_state_invalid")
+        with self.transaction():
+            self.connection.execute(
+                "UPDATE selection_runs SET selected=?,status=?,finished_at=?,error_code=? "
+                "WHERE delivery_id=?",
+                (
+                    io.encode(selected).decode(),
+                    "failed" if error else "completed",
+                    clock,
+                    error,
+                    delivery,
+                ),
+            )
+            run = self.connection.execute(
+                "SELECT run_id FROM selection_runs WHERE delivery_id=?", (delivery,)
+            ).fetchone()
+            if run is None:
+                raise EditorialError("selection_state_invalid")
+            if error is not None:
+                # A Gateway failure is not an editorial rejection. Preserve a
+                # distinct durable state so operators can tell an empty valid
+                # selection from a call that never produced one.
+                self.connection.execute(
+                    "UPDATE selection_items SET status='selection_failed',reason_code=? "
+                    "WHERE run_id=? AND status='shortlisted'",
+                    (error, run[0]),
+                )
+                return
+            chosen = set(selected)
+            if chosen:
+                placeholders = ",".join("?" for _ in chosen)
+                self.connection.execute(
+                    "UPDATE selection_items SET status='selected',reason_code=NULL "
+                    f"WHERE run_id=? AND candidate_key IN ({placeholders})",
+                    (run[0], *sorted(chosen)),
+                )
+                self.connection.execute(
+                    "UPDATE selection_items SET status='not_selected',reason_code=? "
+                    "WHERE run_id=? AND status='shortlisted' "
+                    f"AND candidate_key NOT IN ({placeholders})",
+                    (reason_code, run[0], *sorted(chosen)),
+                )
+            else:
+                self.connection.execute(
+                    "UPDATE selection_items SET status='not_selected',reason_code=? "
+                    "WHERE run_id=? AND status='shortlisted'",
+                    (reason_code, run[0]),
+                )
+
+    def begin_selection_call(self, delivery: str) -> None:
+        """Durably claim one non-idempotent Gateway turn before invoking it.
+
+        A process death after the model receives a request leaves ``in_flight``.
+        That ambiguous outcome is deliberately operator-required: replaying a
+        creative selection call could create a different choice for the same
+        run, so automatic recovery must not invoke it again.
+        """
+
+        with self.transaction():
+            updated = self.connection.execute(
+                "UPDATE selection_runs SET status='in_flight' "
+                "WHERE delivery_id=? AND status='started'",
+                (delivery,),
+            ).rowcount
+            if updated != 1:
+                raise EditorialError("selection_state_invalid")
+
+    def reopen_failed_selection(self, delivery: str) -> None:
+        """Require an explicit operator action before retrying a known failure.
+
+        ``in_flight`` calls are intentionally excluded: their outcome is
+        ambiguous and must never be replayed from this store.
+        """
+
+        with self.transaction():
+            run = self.connection.execute(
+                "SELECT run_id,status FROM selection_runs WHERE delivery_id=?", (delivery,)
+            ).fetchone()
+            if run is None or run["status"] != "failed":
+                raise EditorialError("selection_retry_not_allowed")
+            if self.connection.execute(
+                "SELECT 1 FROM decisions d JOIN delivery_candidates c "
+                "ON c.candidate_key=d.candidate_key AND c.revision=d.revision "
+                "WHERE c.delivery_id=?",
+                (delivery,),
+            ).fetchone():
+                raise EditorialError("selection_retry_not_allowed")
+            self.connection.execute(
+                "UPDATE selection_runs SET selected=NULL,status='started',finished_at=NULL,"
+                "error_code=NULL WHERE delivery_id=?",
+                (delivery,),
+            )
+            self.connection.execute(
+                "UPDATE selection_items SET status='shortlisted',reason_code=NULL,"
+                "editorial_status=NULL,export_status='not_exported' "
+                "WHERE run_id=? AND status='selection_failed'",
+                (run["run_id"],),
+            )
+
+    def selected_today(self, day: str, *, excluding_delivery: str | None = None) -> int:
+        query = (
+            "SELECT COUNT(*) FROM selection_items i JOIN selection_runs r ON r.run_id=i.run_id "
+            "WHERE r.utc_day=? AND r.status='completed' AND i.status='selected'"
+        )
+        params: tuple[str, ...] = (day,)
+        if excluding_delivery is not None:
+            query += " AND r.delivery_id!=?"
+            params += (excluding_delivery,)
+        return int(self.connection.execute(query, params).fetchone()[0])
+
+    def mark_selection_editorial(
+        self,
+        delivery: str,
+        key: str,
+        status: str,
+        export_status: str = "not_exported",
+    ) -> None:
+        if status not in {"completed", "failed", "rejected"} or export_status != "not_exported":
+            raise EditorialError("selection_state_invalid")
+        with self.transaction():
+            self.connection.execute(
+                "UPDATE selection_items SET editorial_status=?,export_status=? "
+                "WHERE run_id=(SELECT run_id FROM selection_runs WHERE delivery_id=?) "
+                "AND candidate_key=? AND status='selected'",
+                (status, export_status, delivery, key),
+            )
+
+    def mark_selection_exported(self, key: str) -> None:
+        """Record a completed data-only export for the selected candidate."""
+
+        with self.transaction():
+            self.connection.execute(
+                "UPDATE selection_items SET export_status='exported' "
+                "WHERE candidate_key=? AND status='selected'",
+                (key,),
+            )
+
     def start_attempt(
         self, delivery: str | None, key: str | None, operation: str, clock: str
     ) -> str:
@@ -328,6 +549,19 @@ class EditorialStore:
                 "UPDATE attempts SET status=?,finished_at=?,error_code=? WHERE attempt_id=?",
                 ("failed" if error else "completed", clock, error, attempt),
             )
+
+    def finish_attempts(self, attempts: tuple[tuple[str, str | None], ...], clock: str) -> None:
+        """Atomically finish related attempts without inventing a partial outcome."""
+
+        with self.transaction():
+            for attempt, error in attempts:
+                updated = self.connection.execute(
+                    "UPDATE attempts SET status=?,finished_at=?,error_code=? "
+                    "WHERE attempt_id=? AND status='started'",
+                    ("failed" if error else "completed", clock, error, attempt),
+                ).rowcount
+                if updated != 1:
+                    raise EditorialError("editorial_attempt_state_invalid")
 
     def verification(self, key: str, revision: int) -> dict[str, Any] | None:
         row = self.connection.execute(

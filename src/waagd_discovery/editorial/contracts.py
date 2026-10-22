@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from typing import Any, Protocol
@@ -26,7 +27,7 @@ EDITORIAL_POLICY = (
 
 
 class EditorialError(ValueError):
-    """A fixed, safe diagnostic code, without source content or paths."""
+    """A safe diagnostic code; schema failures may name only schema paths and validators."""
 
 
 class Verifier(Protocol):
@@ -54,15 +55,69 @@ def digest(value: dict[str, Any]) -> str:
     return hashlib.sha256(encode(value)).hexdigest()
 
 
-def _validate(value: Any, filename: str) -> None:
+def _schema_diagnostics(value: Any, filename: str) -> str:
+    """Bounded schema-only diagnostics: never include model or source values."""
+
+    if not isinstance(value, dict):
+        return "$:type:object"
+    schema = json.loads(files("waagd_discovery").joinpath(filename).read_text())
+    errors = sorted(
+        Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(value),
+        key=lambda error: (tuple(str(part) for part in error.absolute_path), error.validator or ""),
+    )
+    details: list[str] = []
+    for error in errors[:5]:
+        path = "$" + "".join(
+            f"[{part}]" if isinstance(part, int) else f".{part}" for part in error.absolute_path
+        )
+        expected = error.validator_value
+        if error.validator == "required":
+            missing = re.match(r"'([^']+)' is a required property", error.message)
+            if missing:
+                path += f".{missing.group(1)}"
+                expected = missing.group(1)
+        if error.validator == "type":
+            expected = "/".join(expected) if isinstance(expected, list) else expected
+        elif error.validator not in {
+            "type",
+            "required",
+            "additionalProperties",
+            "enum",
+            "const",
+            "format",
+            "pattern",
+            "maxLength",
+            "maxItems",
+            "uniqueItems",
+        }:
+            expected = error.validator
+        details.append(f"{path}:{error.validator}:{expected}")
+    return ",".join(details) or "$:schema:invalid"
+
+
+def _validate(value: Any, filename: str, *, diagnose: bool = False) -> None:
     try:
-        if not isinstance(value, dict) or type(value.get("schema_version")) is not int:
+        if not isinstance(value, dict):
+            if diagnose:
+                raise EditorialError("editorial_schema_invalid:$:type:object")
+            raise EditorialError("editorial_schema_invalid")
+        if type(value.get("schema_version")) is not int:
+            if diagnose:
+                raise EditorialError("editorial_schema_invalid:$.schema_version:type:integer")
             raise EditorialError("editorial_schema_invalid")
         if len(encode(value)) > 128 * 1024:
             raise EditorialError("editorial_payload_too_large")
         schema = json.loads(files("waagd_discovery").joinpath(filename).read_text())
         Draft202012Validator(schema, format_checker=FormatChecker()).validate(value)
+    except EditorialError:
+        raise
     except (ValidationError, BridgeError, ValueError, TypeError, RecursionError, OverflowError):
+        if diagnose:
+            try:
+                detail = _schema_diagnostics(value, filename)
+            except (BridgeError, ValueError, TypeError, RecursionError, OverflowError):
+                detail = "$:schema:invalid"
+            raise EditorialError(f"editorial_schema_invalid:{detail}") from None
         raise EditorialError("editorial_schema_invalid") from None
 
 
@@ -136,6 +191,19 @@ def validate_verification(value: Any, candidate_key: str) -> None:
                 raise EditorialError("claim_without_independent_evidence")
     if value["evidence"] and value["canonical_url"] not in {e["url"] for e in value["evidence"]}:
         raise EditorialError("canonical_url_without_evidence")
+    if value["verification_status"] == "TRUSTED_PUBLISHER":
+        trust = value.get("publisher_trust")
+        if (
+            not isinstance(trust, dict)
+            or set(trust) != {"publisher_id", "rss_url"}
+            or not value["evidence"]
+            or value["claim_support"]
+            or value["errors"]
+            or any(item["source_kind"] != "article" for item in value["evidence"])
+        ):
+            raise EditorialError("trusted_publisher_provenance_invalid")
+    elif value.get("publisher_trust") is not None:
+        raise EditorialError("unexpected_publisher_trust")
     if value["verification_status"] == "FAILED" and not value["errors"]:
         raise EditorialError("failed_verification_without_reason")
     if value["verification_status"] == "PARTIAL" and not value["uncertainties"]:
@@ -172,9 +240,127 @@ def make_request(
     return result
 
 
+def trusted_decision(
+    request: dict[str, Any], *, creative: dict[str, str] | None = None, now: datetime | None = None
+) -> dict[str, Any]:
+    """Build provenance and policy fields without trusting an editor response.
+
+    PARTIAL and FAILED verification never reach a model.  VERIFIED requests may
+    supply only the already syntax-checked creative text fields; all identity,
+    evidence, dates and the publication-review gate remain host-derived.
+    """
+
+    validate_request(request)
+    candidate = request["candidate"]
+    verification = request["verification"]
+    status = verification["verification_status"]
+    base: dict[str, Any] = {
+        "schema_version": 1,
+        "candidate_key": candidate["candidate_key"],
+        "source": candidate["url"],
+        "date": verification["publication_date"] or verification["event_date"],
+        "created_at": utc(now).isoformat(),
+        "prompt_version": PROMPT_VERSION,
+    }
+    if status == "PARTIAL":
+        result = {
+            **base,
+            "decision": "NEEDS_VERIFICATION",
+            "factual_summary": "Independent verification remains incomplete.",
+            "satirical_angle": "",
+            "headline": "",
+            "summary": "",
+            "article": "",
+            "established_facts": [],
+            "unverified_claims": ["The supplied material has not been independently verified."],
+            "open_questions": [
+                "Which independently governed evidence corroborates the material claims?"
+            ],
+            # Feed URLs are merely candidate metadata.  They are deliberately
+            # absent; retrieved verification evidence is the only source input.
+            "checked_sources": sorted({item["url"] for item in verification["evidence"]}),
+            "verification_evidence": [item["id"] for item in verification["evidence"]],
+            "risks": ["Independent corroboration is incomplete."],
+            "rejection_reason": None,
+            "model_identifier": "trusted-policy-v1",
+        }
+    elif status == "FAILED":
+        result = {
+            **base,
+            "decision": "REJECTED",
+            "factual_summary": "Source verification failed; editorial processing is blocked.",
+            "satirical_angle": "",
+            "headline": "",
+            "summary": "",
+            "article": "",
+            "established_facts": [],
+            "unverified_claims": [],
+            "open_questions": [],
+            "checked_sources": [],
+            "verification_evidence": [],
+            "risks": ["Verification failed."],
+            "rejection_reason": "UNVERIFIABLE",
+            "model_identifier": "trusted-policy-v1",
+        }
+    elif status in {"VERIFIED", "TRUSTED_PUBLISHER"}:
+        allowed_creative = {"satirical_angle", "headline", "summary", "article"}
+        if (
+            not isinstance(creative, dict)
+            or set(creative) != allowed_creative
+            or not all(isinstance(value, str) for value in creative.values())
+        ):
+            raise EditorialError("trusted_creative_missing")
+        evidence = {item["id"]: item for item in verification["evidence"]}
+        evidence_ids = sorted(
+            {
+                identifier
+                for support in verification["claim_support"]
+                for identifier in support["evidence_ids"]
+            }
+        )
+        if status == "VERIFIED":
+            if not evidence_ids or not set(evidence_ids) <= set(evidence):
+                raise EditorialError("trusted_verification_invalid")
+            facts = list(
+                dict.fromkeys(support["claim"] for support in verification["claim_support"])
+            )
+            factual_summary = "The listed material claims have independent supporting evidence."
+            unverified_claims: list[str] = []
+            risks: list[str] = []
+        else:
+            evidence_ids = sorted(evidence)
+            facts = ["The configured publisher published the linked report."]
+            factual_summary = (
+                "Publisher identity is trusted; material claims were not independently verified."
+            )
+            unverified_claims = ["The report's material claims were not independently verified."]
+            risks = ["TRUSTED_PUBLISHER route: no independent factual verification."]
+        result = {
+            **base,
+            "decision": "READY_FOR_REVIEW",
+            "factual_summary": factual_summary,
+            "established_facts": facts,
+            "unverified_claims": unverified_claims,
+            "open_questions": [],
+            "checked_sources": sorted({evidence[item]["url"] for item in evidence_ids}),
+            "verification_evidence": evidence_ids,
+            "risks": risks,
+            "rejection_reason": None,
+            "model_identifier": "openclaw-gateway-editor",
+            "satirical_angle": creative["satirical_angle"],
+            "headline": creative["headline"],
+            "summary": creative["summary"],
+            "article": creative["article"],
+        }
+    else:  # Protected by the request schema; keep this boundary fail-closed.
+        raise EditorialError("trusted_verification_invalid")
+    validate_decision(result, request)
+    return result
+
+
 def validate_decision(value: Any, request: dict[str, Any]) -> None:
     validate_request(request)
-    _validate(value, "editorial-decision-v1.schema.json")
+    _validate(value, "editorial-decision-v1.schema.json", diagnose=True)
     candidate = request["candidate"]
     verification = request["verification"]
     if value["candidate_key"] != candidate["candidate_key"] or value["source"] != candidate["url"]:
@@ -196,8 +382,9 @@ def validate_decision(value: Any, request: dict[str, Any]) -> None:
             for support in verification["claim_support"]
             for identifier in support["evidence_ids"]
         }
+        trusted = verification["verification_status"] == "TRUSTED_PUBLISHER"
         if (
-            verification["verification_status"] != "VERIFIED"
+            verification["verification_status"] not in {"VERIFIED", "TRUSTED_PUBLISHER"}
             or not value["verification_evidence"]
             or not value["established_facts"]
             or not all(
@@ -205,9 +392,22 @@ def validate_decision(value: Any, request: dict[str, Any]) -> None:
                 for k in ("factual_summary", "satirical_angle", "headline", "summary", "article")
             )
             or not 80 <= len(value["article"].split()) <= 150
-            or value["unverified_claims"]
             or value["rejection_reason"] is not None
-            or not needed_evidence <= set(value["verification_evidence"])
+            or (
+                not trusted
+                and (
+                    value["unverified_claims"]
+                    or not needed_evidence <= set(value["verification_evidence"])
+                )
+            )
+            or (
+                trusted
+                and (
+                    not value["unverified_claims"]
+                    or not value["risks"]
+                    or set(value["verification_evidence"]) != ids
+                )
+            )
         ):
             raise EditorialError("ready_without_verified_material")
     elif value["decision"] == "NEEDS_VERIFICATION":

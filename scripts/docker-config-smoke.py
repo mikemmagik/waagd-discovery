@@ -12,7 +12,14 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIGS = ("sources.yaml", "filter.yaml", "backup.yaml", "scheduler.yaml", "handoff.yaml")
+CONFIGS = (
+    "sources.yaml",
+    "filter.yaml",
+    "backup.yaml",
+    "scheduler.yaml",
+    "handoff.yaml",
+    "trusted_publishers.yaml",
+)
 PROBE = r"""
 import errno
 import json
@@ -25,6 +32,7 @@ from waagd_discovery.config import load_sources
 from waagd_discovery.filtering import load_policy
 from waagd_discovery.handoff import load_handoff_policy
 from waagd_discovery.scheduler import load_scheduler_policy
+from waagd_discovery.editorial.trusted_publishers import load_trusted_publishers
 
 assert (os.getuid(), os.getgid()) == (10001, 10001)
 status = Path("/proc/self/status").read_text()
@@ -39,6 +47,7 @@ loaders = {
     "backup.yaml": load_retention_policy,
     "scheduler.yaml": load_scheduler_policy,
     "handoff.yaml": load_handoff_policy,
+    "trusted_publishers.yaml": load_trusted_publishers,
 }
 assert {path.name for path in directory.iterdir()} == set(loaders)
 files = {}

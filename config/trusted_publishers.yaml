@@ -1,0 +1,15 @@
+# Publisher identity policy; this does not independently verify reported facts.
+trusted_publishers:
+  publishers:
+    - id: guardian
+      name: The Guardian
+      source_ids: [guardian_world, guardian_technology]
+      rss_urls:
+        - https://www.theguardian.com/world/rss
+        - https://www.theguardian.com/technology/rss
+      article_hosts: [www.theguardian.com]
+    - id: ars_technica
+      name: Ars Technica
+      source_ids: [ars_technica]
+      rss_urls: [https://feeds.arstechnica.com/arstechnica/index]
+      article_hosts: [arstechnica.com]

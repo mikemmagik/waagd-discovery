@@ -21,6 +21,7 @@ from waagd_discovery.editorial.contracts import (
     validate_input,
     validate_verification,
 )
+from waagd_discovery.editorial.fidelity import require_source_fidelity
 from waagd_discovery.editorial.store import EditorialStore
 
 
@@ -75,6 +76,8 @@ class Controller:
         simulation: bool = True,
         allow_ack: bool = False,
         protected_roots: tuple[Path, ...] = (),
+        selector: Any | None = None,
+        fidelity_reviewer: Any | None = None,
     ):
         self.inbox = Path(inbox)
         self.store_path = Path(store_path)
@@ -86,7 +89,8 @@ class Controller:
             raise EditorialError("editorial_mode_invalid")
         if simulation and allow_ack:
             raise EditorialError("simulation_ack_forbidden")
-        self.bridge, self.verifier, self.editor = bridge, verifier, editor
+        self.bridge, self.verifier, self.editor, self.selector = bridge, verifier, editor, selector
+        self.fidelity_reviewer = fidelity_reviewer
         self.simulation, self.allow_ack = simulation, allow_ack
         self.protected_roots = (self.inbox.parent.parent, *protected_roots)
         # Validate overlaps before even reading an inbox or constructing a store.
@@ -167,6 +171,7 @@ class Controller:
         now: datetime | None,
         *,
         reconsider: bool = False,
+        verification_only: bool = False,
     ) -> str | None:
         key = candidate["candidate_key"]
         delivery = envelope["delivery_id"]
@@ -207,21 +212,199 @@ class Controller:
             store.save_verification(key, revision, verification, utc(now).isoformat())
             store.finish_attempt(attempt, utc(now).isoformat(), error_code)
         validate_verification(verification, key)
+        if verification_only:
+            return None
         self._fresh(envelope, now)
         request = make_request(candidate, verification, simulation=self.simulation)
-        attempt = store.start_attempt(delivery, key, "editorial", utc(now).isoformat())
+        operation = (
+            "editorial_gateway" if getattr(self.editor, "gateway_backed", False) else "editorial"
+        )
+        attempt = store.start_attempt(delivery, key, operation, utc(now).isoformat())
         try:
             result = self.editor.evaluate(request)
             validate_decision(result, request)
-        except (EditorialError, io.BridgeError, OSError, ValueError, TypeError):
-            store.finish_attempt(attempt, utc(now).isoformat(), "editorial_failed")
-            return "editorial_failed"
+            # Deterministic checks remain a cheap first boundary. They never
+            # replace the bounded model-assisted review below.
+            require_source_fidelity(request, result)
+        except (EditorialError, io.BridgeError, OSError, ValueError, TypeError) as error:
+            code = self._editorial_failure_code(error)
+            store.finish_attempt(attempt, utc(now).isoformat(), code)
+            store.mark_selection_editorial(delivery, key, "failed")
+            return code
+        fidelity_attempt: str | None = None
+        if result["decision"] == "READY_FOR_REVIEW" and self.fidelity_reviewer is not None:
+            fidelity_attempt = store.start_attempt(delivery, key, "fidelity", utc(now).isoformat())
+            try:
+                review = self.fidelity_reviewer.review(request, result)
+                if getattr(review, "code", None) is not None:
+                    raise EditorialError(review.code)
+            except (EditorialError, io.BridgeError, OSError, ValueError, TypeError) as error:
+                code = self._editorial_failure_code(error)
+                # Creative generation completed; fidelity is a separate policy
+                # gate. Finish both records together so the parent never
+                # remains falsely started after a terminal fidelity outcome.
+                store.finish_attempts(
+                    ((attempt, None), (fidelity_attempt, code)), utc(now).isoformat()
+                )
+                store.mark_selection_editorial(delivery, key, "failed")
+                return code
         self._fresh(envelope, now)
         store.save_decision(
             key, revision, request, result, None if reconsider else delivery, utc(now).isoformat()
         )
-        store.finish_attempt(attempt, utc(now).isoformat())
+        if not reconsider:
+            store.mark_selection_editorial(delivery, key, "completed")
+        if fidelity_attempt is not None:
+            store.finish_attempts(((attempt, None), (fidelity_attempt, None)), utc(now).isoformat())
+        else:
+            store.finish_attempt(attempt, utc(now).isoformat())
         return None
+
+    @staticmethod
+    def _editorial_failure_code(error: Exception) -> str:
+        """Map untrusted adapter failures to a compact, durable safe taxonomy."""
+
+        code = str(error)
+        if code.startswith("editorial_format_retry_exhausted:"):
+            kind = code.removeprefix("editorial_format_retry_exhausted:")
+            if kind in {"json", "schema", "length"}:
+                return code
+        if code in {
+            "editorial_format_json_invalid",
+            "editorial_format_schema_invalid",
+            "editorial_format_length_invalid",
+            "editorial_safety_rejected",
+            "editorial_transport_unavailable",
+            "editorial_outcome_unknown",
+            "editorial_gateway_child_exit_nonzero",
+            "editorial_gateway_timeout",
+            "editorial_gateway_response_too_large",
+            "editorial_gateway_stream_failure",
+            "editorial_gateway_attestation_invalid",
+        }:
+            return code
+        if code.startswith("gateway_format_retry_exhausted:"):
+            kind = code.removeprefix("gateway_format_retry_exhausted:")
+            if kind in {"json", "schema", "length"}:
+                return "editorial_format_retry_exhausted:" + kind
+            return "editorial_gateway_response_invalid"
+        if code in {"gateway_model_json_invalid", "gateway_empty_response"}:
+            return "editorial_format_json_invalid"
+        if code.startswith("gateway_creative_schema_invalid:"):
+            field = code.rsplit(":", 1)[1]
+            return (
+                "editorial_format_length_invalid"
+                if field in {"headline", "summary", "article", "article_words"}
+                else "editorial_format_schema_invalid"
+            )
+        if code in {
+            "gateway_creative_schema_invalid",
+            "editorial_schema_invalid",
+        } or code.startswith("editorial_schema_invalid:"):
+            return "editorial_format_schema_invalid"
+        if code == "gateway_creative_safety_invalid":
+            return "editorial_safety_rejected"
+        if code in {"gateway_unavailable", "gateway_child_launch_failed"}:
+            return "editorial_transport_unavailable"
+        if code == "gateway_child_exit_nonzero":
+            return "editorial_gateway_child_exit_nonzero"
+        if code == "gateway_timeout":
+            return "editorial_gateway_timeout"
+        if code == "gateway_response_too_large":
+            return "editorial_gateway_response_too_large"
+        if code == "gateway_stream_failure":
+            return "editorial_gateway_stream_failure"
+        if code == "gateway_outcome_unknown":
+            return "editorial_outcome_unknown"
+        if code in {
+            "editorial_fidelity_unsupported_attribution",
+            "editorial_fidelity_contradiction",
+            "editorial_fidelity_misleading_timing",
+            "editorial_fidelity_proposal_as_outcome",
+            "editorial_fidelity_scope_misrepresentation",
+            "editorial_fidelity_invented_event",
+            "editorial_fidelity_response_invalid",
+            "editorial_fidelity_transport_unavailable",
+            "editorial_fidelity_gateway_child_exit_nonzero",
+            "editorial_fidelity_gateway_timeout",
+            "editorial_fidelity_gateway_response_too_large",
+            "editorial_fidelity_gateway_stream_failure",
+            "editorial_fidelity_attestation_invalid",
+            "editorial_fidelity_outcome_unknown",
+        }:
+            return code
+        if code.startswith("editorial_fidelity_"):
+            return "editorial_gateway_response_invalid"
+        if code.startswith("gateway_tool_") or code in {
+            "gateway_envelope_invalid",
+            "gateway_cost_unverified",
+        }:
+            return "editorial_gateway_attestation_invalid"
+        return "editorial_execution_failed"
+
+    @staticmethod
+    def _requires_editorial_operator(code: str) -> bool:
+        return code != "editorial_execution_failed"
+
+    @classmethod
+    def _recovered_editorial_failure(cls, operation: str, status: str, error: Any) -> str:
+        """Return a bounded durable error without trusting historic text.
+
+        A crash can happen after an attempt transaction commits but before the
+        delivery transaction records ``operator_required``.  Never turn such a
+        record into another Gateway call.  Keep only a code that the current
+        mapper recognizes exactly; otherwise collapse it to an ambiguous,
+        fail-closed outcome.
+        """
+
+        fallback = (
+            "editorial_fidelity_outcome_unknown"
+            if operation == "fidelity"
+            else "editorial_outcome_unknown"
+        )
+        if status != "failed" or not isinstance(error, str):
+            return fallback
+        mapped = cls._editorial_failure_code(EditorialError(error))
+        return error if mapped == error else fallback
+
+    def _excluded(
+        self,
+        store: EditorialStore,
+        candidate: dict[str, Any],
+        revision: int,
+        delivery: str,
+        now: datetime | None,
+    ) -> None:
+        verification = store.verification(candidate["candidate_key"], revision)
+        if verification is None:
+            raise EditorialError("selection_state_invalid")
+        request = make_request(candidate, verification, simulation=self.simulation)
+        result = {
+            "schema_version": 1,
+            "candidate_key": candidate["candidate_key"],
+            "decision": "REJECTED",
+            "source": candidate["url"],
+            "date": None,
+            "factual_summary": "The candidate was not selected for editorial processing.",
+            "satirical_angle": "",
+            "headline": "",
+            "summary": "",
+            "article": "",
+            "established_facts": [],
+            "unverified_claims": [],
+            "open_questions": [],
+            "checked_sources": [],
+            "verification_evidence": [],
+            "risks": ["Editorial selection did not choose this candidate."],
+            "rejection_reason": "NO_SATIRICAL_ANGLE",
+            "created_at": utc(now).isoformat(),
+            "model_identifier": "trusted-selection-v1",
+            "prompt_version": "waagd-editorial-v1",
+        }
+        validate_decision(result, request)
+        store.save_decision(
+            candidate["candidate_key"], revision, request, result, delivery, utc(now).isoformat()
+        )
 
     def _checked_completion(self, store: EditorialStore, envelope: dict[str, Any]) -> None:
         """An outbox intent never replaces proof that every result still exists."""
@@ -451,14 +634,187 @@ class Controller:
         with self._store() as store:
             self._recover(store, now)
             store.register(envelope, utc(now).isoformat())
+            existing = store.connection.execute(
+                "SELECT status,error_code FROM deliveries WHERE delivery_id=?",
+                (envelope["delivery_id"],),
+            ).fetchone()
+            unresolved_editorial = store.connection.execute(
+                "SELECT a.operation,a.status,a.error_code FROM attempts a "
+                "JOIN delivery_candidates dc ON "
+                "dc.delivery_id=a.delivery_id AND dc.candidate_key=a.candidate_key "
+                "LEFT JOIN decisions d ON d.candidate_key=dc.candidate_key "
+                "AND d.revision=dc.revision WHERE a.delivery_id=? "
+                "AND a.operation IN ('editorial','editorial_gateway','fidelity') "
+                "AND a.status IN ('interrupted','failed') AND d.candidate_key IS NULL "
+                "ORDER BY CASE a.operation WHEN 'fidelity' THEN 0 ELSE 1 END, a.started_at DESC ",
+                (envelope["delivery_id"],),
+            ).fetchall()
+            for unresolved in unresolved_editorial:
+                code = self._recovered_editorial_failure(
+                    unresolved["operation"], unresolved["status"], unresolved["error_code"]
+                )
+                gateway_turn = unresolved["operation"] in {"editorial_gateway", "fidelity"}
+                known_terminal_failure = unresolved[
+                    "status"
+                ] == "failed" and self._requires_editorial_operator(code)
+                if gateway_turn or known_terminal_failure:
+                    store.mark_delivery(envelope["delivery_id"], "operator_required", code)
+                    return self._result(store, envelope["delivery_id"])
+            if (
+                existing is not None
+                and existing["status"] == "operator_required"
+                and isinstance(existing["error_code"], str)
+                and existing["error_code"].startswith("editorial_")
+            ):
+                # Selection has its own explicit recovery operation. Editorial
+                # failures must remain stopped until an operator resolves them.
+                return self._result(store, envelope["delivery_id"])
             if store.connection.execute(
                 "SELECT 1 FROM ack_outbox WHERE delivery_id=?", (envelope["delivery_id"],)
             ).fetchone():
                 # Never silently regenerate a result lost after an outbox commit.
                 self._checked_completion(store, envelope)
             candidates = {c["candidate_key"]: c for c in envelope["candidates"]}
+            required = store.required(envelope["delivery_id"])
             errors = []
-            for key, revision in store.required(envelope["delivery_id"]):
+            if self.selector is not None:
+                # Verify every candidate first. Only trusted-publisher candidates
+                # may enter selection.
+                for key, revision in required:
+                    self._candidate(
+                        store, envelope, candidates[key], revision, now, verification_only=True
+                    )
+                from waagd_discovery.editorial.selection import shortlist_batches
+
+                run = store.selection(envelope["delivery_id"])
+                if run is None:
+                    eligible = []
+                    canonical_urls: set[str] = set()
+                    for key, revision in required:
+                        if store.has_decision(key, revision):
+                            continue
+                        verification = store.verification(key, revision)
+                        if verification is None:
+                            raise EditorialError("selection_state_invalid")
+                        if verification["verification_status"] != "TRUSTED_PUBLISHER":
+                            continue
+                        value = dict(candidates[key])
+                        value["verification_status"] = verification["verification_status"]
+                        canonical = verification["canonical_url"]
+                        if canonical in canonical_urls:
+                            value["selection_exclusion"] = "duplicate_canonical_url"
+                        else:
+                            canonical_urls.add(canonical)
+                        eligible.append(value)
+                    batches = shortlist_batches(eligible)
+                    run = store.start_selection(
+                        envelope["delivery_id"],
+                        utc(now).date().isoformat(),
+                        [item for batch in batches for item in batch.shortlist],
+                        batches[0].rejected,
+                        utc(now).isoformat(),
+                    )
+                if run["status"] == "completed":
+                    selected = set(io.decode(run["selected"].encode()))
+                elif run["status"] == "in_flight":
+                    store.mark_delivery(
+                        envelope["delivery_id"], "operator_required", "selection_outcome_unknown"
+                    )
+                    return self._result(store, envelope["delivery_id"])
+                elif run["status"] == "started":
+                    from waagd_discovery.editorial.selection import SelectionResult
+
+                    saved = io.decode(run["shortlist"].encode())
+                    if not isinstance(saved, list) or not all(
+                        isinstance(item, dict) for item in saved
+                    ):
+                        raise EditorialError("selection_state_invalid")
+                    batches = [
+                        SelectionResult(saved[index : index + 25], [], {})
+                        for index in range(0, len(saved), 25)
+                    ]
+                    available = max(
+                        0,
+                        5
+                        - store.selected_today(
+                            utc(now).date().isoformat(),
+                            excluding_delivery=envelope["delivery_id"],
+                        ),
+                    )
+                    if not any(batch.shortlist for batch in batches) or not available:
+                        selected = set()
+                        store.finish_selection(
+                            envelope["delivery_id"],
+                            sorted(selected),
+                            utc(now).isoformat(),
+                            reason_code=(
+                                "daily_quota_exhausted"
+                                if not available
+                                else "no_eligible_candidates"
+                            ),
+                        )
+                    else:
+                        selection_attempt = None
+                        selection_received = False
+                        try:
+                            selection_attempt = store.start_attempt(
+                                envelope["delivery_id"], None, "selection", utc(now).isoformat()
+                            )
+                            store.begin_selection_call(envelope["delivery_id"])
+                            chosen: list[str] = []
+                            for batch in batches:
+                                if len(chosen) == available:
+                                    break
+                                choice = self.selector.select(batch)
+                                chosen.extend(choice.selected[: available - len(chosen)])
+                            selected = set(chosen)
+                            selection_received = True
+                            store.finish_selection(
+                                envelope["delivery_id"],
+                                sorted(selected),
+                                utc(now).isoformat(),
+                            )
+                            store.finish_attempt(selection_attempt, utc(now).isoformat())
+                        except EditorialError as error:
+                            code = str(error)
+                            if selection_received:
+                                code = "selection_persistence_failed"
+                            if selection_attempt is not None:
+                                store.finish_attempt(selection_attempt, utc(now).isoformat(), code)
+                            if code == "selection_outcome_unknown" or selection_received:
+                                # A subprocess failure can occur after Gateway
+                                # accepted a selection turn.  A SQLite failure
+                                # after a model response is equally ambiguous:
+                                # keep in_flight so restart never turns either
+                                # case into a new model choice.
+                                store.mark_delivery(
+                                    envelope["delivery_id"], "operator_required", code
+                                )
+                                return self._result(store, envelope["delivery_id"])
+                            store.finish_selection(
+                                envelope["delivery_id"],
+                                [],
+                                utc(now).isoformat(),
+                                code,
+                            )
+                            store.mark_delivery(envelope["delivery_id"], "operator_required", code)
+                            return self._result(store, envelope["delivery_id"])
+                else:
+                    return self._result(store, envelope["delivery_id"])
+                for key, revision in required:
+                    verification = store.verification(key, revision)
+                    if (
+                        verification is not None
+                        and verification["verification_status"] == "TRUSTED_PUBLISHER"
+                        and key not in selected
+                        and not store.has_decision(key, revision)
+                    ):
+                        self._excluded(
+                            store, candidates[key], revision, envelope["delivery_id"], now
+                        )
+            for key, revision in required:
+                if self.selector is not None and store.has_decision(key, revision):
+                    continue
                 try:
                     candidate_error = self._candidate(
                         store, envelope, candidates[key], revision, now
@@ -473,7 +829,20 @@ class Controller:
                         return self._result(store, envelope["delivery_id"])
                     raise
             if errors:
-                store.mark_delivery(envelope["delivery_id"], "retryable", "editorial_failed")
+                # Gateway/editorial failures are never replayed through the
+                # normal delivery loop: a completed turn may have been lost,
+                # and an exhausted format retry must not become an unbounded
+                # source of new model decisions. The per-candidate attempt
+                # rows retain the exact safe code for operator review.
+                operator_code = next(
+                    (code for code in errors if self._requires_editorial_operator(code)), None
+                )
+                if operator_code is not None:
+                    store.mark_delivery(envelope["delivery_id"], "operator_required", operator_code)
+                else:
+                    store.mark_delivery(
+                        envelope["delivery_id"], "retryable", "editorial_execution_failed"
+                    )
             else:
                 store.complete_reused(envelope["delivery_id"], utc(now).isoformat())
                 try:
@@ -489,6 +858,36 @@ class Controller:
             return {"status": "uninitialized", "schema_version": 1, "simulation": self.simulation}
         with self._store(readonly=True) as store:
             return store.status()
+
+    def retry_selection(self, delivery: str, now: datetime | None = None) -> dict[str, Any]:
+        """Explicitly retry one known Gateway selection failure.
+
+        This is intentionally unavailable for an ``in_flight`` selection:
+        a lost subprocess result may conceal a Gateway turn, which is never
+        safe to replay automatically or through this convenience operation.
+        """
+
+        envelope = self._read()
+        validate_input(envelope, utc(now))
+        if envelope["delivery_id"] != delivery:
+            raise EditorialError("selection_retry_delivery_mismatch")
+        self._authority(envelope, now, allow_acknowledged=False)
+        with self._store() as store:
+            store.recover_attempts(utc(now).isoformat())
+            run = store.selection(delivery)
+            if run is None:
+                raise EditorialError("selection_retry_not_allowed")
+            if run["status"] == "in_flight":
+                return {
+                    **self._result(store, delivery),
+                    "status": "operator_required",
+                    "error_code": "selection_outcome_unknown",
+                }
+            store.reopen_failed_selection(delivery)
+            # This is an explicit recovery only for a selection call proven
+            # not to be in flight. Let process resume that durable run.
+            store.mark_delivery(delivery, "processing", None)
+        return self.process(now)
 
     def reconsider(self, candidate_key: str, now: datetime | None = None) -> dict[str, Any]:
         if len(candidate_key) != 64 or any(c not in "0123456789abcdef" for c in candidate_key):

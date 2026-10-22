@@ -5,9 +5,11 @@ import hashlib
 import json
 import sqlite3
 import stat
+import sys
 import uuid
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -26,11 +28,18 @@ from waagd_discovery.editorial.contracts import (
     EditorialError,
     digest,
     make_request,
+    trusted_decision,
     validate_decision,
 )
 from waagd_discovery.editorial.controller import Controller
+from waagd_discovery.editorial.gateway_adapter import GatewayEditor
+from waagd_discovery.editorial.publication import export_file, exportable
+from waagd_discovery.editorial.publication_policy import PublicationPolicy
+from waagd_discovery.editorial.selection import accept_selection
+from waagd_discovery.editorial.selection_gateway import GatewaySelector
 from waagd_discovery.editorial.store import EditorialStore
-from waagd_discovery.editorial.verifier import SyntheticVerifier
+from waagd_discovery.editorial.trusted_publishers import load_trusted_publishers
+from waagd_discovery.editorial.verifier import FetchDocument, SourceVerifier, SyntheticVerifier
 
 NOW = datetime(2026, 10, 18, 12, tzinfo=UTC)
 
@@ -165,6 +174,452 @@ def rows(controller, table):
     with closing(sqlite3.connect(controller.store_path)) as connection:
         connection.row_factory = sqlite3.Row
         return [dict(row) for row in connection.execute(f"SELECT * FROM {table}")]
+
+
+class TrustedDocuments:
+    def fetch(self, value):
+        return FetchDocument(value, 200, b"<p>Fictional institutional reporting.</p>", "text/html")
+
+
+class CanonicalDocuments:
+    def fetch(self, value):
+        del value
+        return FetchDocument(
+            "https://www.theguardian.com/world/2026/oct/22/canonical-fixture",
+            200,
+            b"<p>Fictional institutional reporting.</p>",
+            "text/html",
+        )
+
+
+class CliTrustedVerifier:
+    def __init__(self, *args, **kwargs):
+        del args, kwargs
+
+    def verify(self, candidate, *, policy_id):
+        assert policy_id == "source-verification-v1"
+        return {
+            "schema_version": 1,
+            "candidate_key": candidate["candidate_key"],
+            "verification_status": "TRUSTED_PUBLISHER",
+            "canonical_url": candidate["url"],
+            "fetched_at": NOW.isoformat(),
+            "http_status": 200,
+            "publisher": "The Guardian",
+            "publication_date": None,
+            "event_date": None,
+            "evidence": [
+                {
+                    "id": "a" * 64,
+                    "url": candidate["url"],
+                    "retrieved_at": NOW.isoformat(),
+                    "sha256": "b" * 64,
+                    "excerpt": "Synthetic trusted publisher fixture.",
+                    "source_kind": "article",
+                }
+            ],
+            "uncertainties": [
+                "Publisher identity is trusted; facts are not independently verified."
+            ],
+            "errors": [],
+            "claim_support": [],
+            "publisher_trust": {
+                "publisher_id": "guardian",
+                "rss_url": "https://www.theguardian.com/world/rss",
+            },
+        }
+
+
+class TrustedEditor:
+    def __init__(self, *, fail_once=False):
+        self.calls = []
+        self.fail_once = fail_once
+
+    def evaluate(self, request):
+        self.calls.append(request["candidate"]["candidate_key"])
+        if self.fail_once:
+            self.fail_once = False
+            raise OSError("fictional editorial interruption")
+        return trusted_decision(
+            request,
+            creative={
+                "satirical_angle": "A fictional institution celebrates process.",
+                "headline": "A Fictional Institution Celebrates Process",
+                "summary": "The paperwork holds a meeting about another meeting.",
+                "article": " ".join(
+                    ["The fictional institution filed another meeting and called it progress."] * 12
+                ),
+            },
+            now=NOW,
+        )
+
+
+class PlannedSelector:
+    def __init__(self, count=0, *, fail=False):
+        self.count = count
+        self.fail = fail
+        self.calls = 0
+
+    def select(self, plan):
+        self.calls += 1
+        if self.fail:
+            raise EditorialError("selection_failed")
+        count = self.count if self.calls == 1 else 0
+        return accept_selection(
+            plan,
+            {
+                "schema_version": 1,
+                "selected_candidate_keys": [
+                    item["candidate_key"] for item in plan.shortlist[:count]
+                ],
+            },
+        )
+
+
+class InterruptSelector:
+    def __init__(self):
+        self.calls = 0
+
+    def select(self, plan):
+        del plan
+        self.calls += 1
+        raise KeyboardInterrupt
+
+
+def real_selector_executable(tmp_path):
+    path = tmp_path / "fake-openclaw"
+    path.write_text(
+        f"#!{sys.executable}\n"
+        "import json, pathlib, sys\n"
+        f"state=pathlib.Path({str(tmp_path / 'selector-calls')!r})\n"
+        "message=pathlib.Path(sys.argv[sys.argv.index('--message-file') + 1]).read_bytes()\n"
+        "if b'Shortlist JSON:' in message:\n"
+        "  count=int(state.read_text()) if state.exists() else 0\n"
+        "  state.write_text(str(count + 1))\n"
+        "  payload=json.loads(message.split(b'Shortlist JSON:\\n', 1)[1])\n"
+        "  keys=(\n"
+        "    [item['candidate_key'] for item in payload['candidates'][:4]]\n"
+        "    if count == 0 else []\n"
+        "  )\n"
+        "  text=json.dumps({'schema_version': 1, 'selected_candidate_keys': keys})\n"
+        "elif b'source-fidelity reviewer' in message:\n"
+        "  text=json.dumps({'schema_version':1,'verdict':'PASS','findings':[]})\n"
+        "else:\n"
+        "  text=json.dumps({'satirical_angle':'A fictional institution worships procedure.',"
+        "'headline':'A Fictional Institution Finds More Forms',"
+        "'summary':'The paperwork schedules a meeting about its next meeting.',"
+        "'article':' '.join([\n"
+        "  'The fictional institution filed another meeting and called it progress.'\n"
+        "] * 12)})\n"
+        "print(json.dumps({'status':'ok','result':{'payloads':[{'text':text}],"
+        "'meta':{'agentMeta':{'costUsd':0.0,'terminalReceipt':{'successfulToolNames':[]},"
+        "'codeModeEngaged':False},'systemPromptReport':{'tools':{'entries':[]}}}}}))\n"
+    )
+    path.chmod(0o700)
+    return path
+
+
+def trusted_candidate(index):
+    url = f"https://www.theguardian.com/world/2026/oct/22/fixture-{index:04x}"
+    return {
+        "candidate_key": hashlib.sha256(url.encode()).hexdigest(),
+        "id": index + 1,
+        "url": url,
+        "title": f"Council {index:04x} approves fictional procedure",
+        "description": "A synthetic report for isolated offline tests.",
+        "publisher": "The Guardian",
+        "published_at": NOW.isoformat(),
+        "sources": [
+            {
+                "id": "guardian_world",
+                "name": "The Guardian World",
+                "url": "https://www.theguardian.com/world/rss",
+            }
+        ],
+    }
+
+
+def trusted_setup(tmp_path, *, count=84, selected=4, fail_once=False, allow_ack=False):
+    root = tmp_path.resolve()
+    inbox_directory = root / "workspace" / "waagd-discovery"
+    inbox_directory.mkdir(parents=True, mode=0o700)
+    inbox = inbox_directory / "inbox.json"
+    value = envelope(
+        str(uuid.uuid4()),
+        [trusted_candidate(index) for index in range(count)],
+        NOW,
+        NOW + timedelta(hours=1),
+        schema_version=2,
+    )
+    inbox.write_bytes(io.encode(value))
+    inbox.chmod(0o600)
+    bridge = FakeBridge(value)
+    verifier = SourceVerifier(
+        TrustedDocuments(),
+        clock=lambda: NOW,
+        trusted_publishers=load_trusted_publishers(Path("config/trusted_publishers.yaml")),
+    )
+    editor, selector = TrustedEditor(fail_once=fail_once), PlannedSelector(selected)
+    controller = Controller(
+        inbox,
+        root / "private" / "editorial.sqlite3",
+        bridge,
+        verifier,
+        editor,
+        simulation=False,
+        allow_ack=allow_ack,
+        selector=selector,
+    )
+    return controller, bridge, editor, selector, value
+
+
+def test_controller_selects_only_gateway_choices_and_persists_selection_log(tmp_path):
+    # Bridge v2 deliberately admits at most 50 candidates per delivery. The 84-candidate
+    # shortlist rule is separately tested at its contract boundary below.
+    controller, _, editor, selector, value = trusted_setup(tmp_path, count=50, selected=4)
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "results_saved"
+    assert selector.calls == 2
+    assert len(editor.calls) == 4
+    selected = {
+        item["candidate_key"]
+        for item in rows(controller, "selection_items")
+        if item["status"] == "selected"
+    }
+    assert set(editor.calls) == selected
+    assert len(rows(controller, "decisions")) == 50
+    run = rows(controller, "selection_runs")[0]
+    assert run["status"] == "completed"
+    assert run["utc_day"] == "2026-10-18"
+    items = rows(controller, "selection_items")
+    assert len(items) == 50
+    assert sum(item["status"] == "selected" for item in items) == 4
+    assert sum(item["editorial_status"] == "completed" for item in items) == 4
+    assert {item["export_status"] for item in items} == {"not_exported"}
+
+
+def test_controller_processes_eighty_four_trusted_candidates_across_valid_bridge_batches(tmp_path):
+    # Bridge v2 intentionally caps each immutable delivery at 50 candidates.
+    # This covers the 84-item operational flow as two independently ACKed
+    # deliveries without weakening that boundary.
+    controller, bridge, editor, selector, _ = trusted_setup(
+        tmp_path, count=50, selected=4, allow_ack=True
+    )
+
+    assert controller.process(NOW)["status"] == "acknowledged"
+    second = envelope(
+        str(uuid.uuid4()),
+        [trusted_candidate(index) for index in range(50, 84)],
+        NOW,
+        NOW + timedelta(hours=1),
+        schema_version=2,
+    )
+    controller.inbox.write_bytes(io.encode(second))
+    controller.inbox.chmod(0o600)
+    bridge.value = second
+    bridge.acknowledged = False
+
+    assert controller.process(NOW)["status"] == "acknowledged"
+    assert selector.calls == 4
+    assert len(editor.calls) == 4
+    assert len(rows(controller, "decisions")) == 84
+    assert sum(item["status"] == "selected" for item in rows(controller, "selection_items")) == 4
+
+
+def test_controller_uses_real_gateway_selector_before_selected_only_editorial(tmp_path):
+    controller, _, _, _, _ = trusted_setup(tmp_path, count=50, selected=0)
+    editor = GatewayEditor(real_selector_executable(tmp_path))
+    controller.editor = editor
+    controller.selector = GatewaySelector(editor)
+
+    assert controller.process(NOW)["status"] == "results_saved"
+    assert (tmp_path / "selector-calls").read_text() == "2"
+    assert sum(item["status"] == "selected" for item in rows(controller, "selection_items")) == 4
+    assert (
+        sum(item["editorial_status"] == "completed" for item in rows(controller, "selection_items"))
+        == 4
+    )
+
+
+def test_controller_empty_selection_calls_no_editor_and_records_rejections(tmp_path):
+    controller, _, editor, selector, _ = trusted_setup(tmp_path, count=8, selected=0)
+
+    assert controller.process(NOW)["status"] == "results_saved"
+    assert selector.calls == 1
+    assert editor.calls == []
+    assert {json.loads(row["result"])["decision"] for row in rows(controller, "decisions")} == {
+        "REJECTED"
+    }
+    assert {item["reason_code"] for item in rows(controller, "selection_items")} == {"not_selected"}
+
+
+def test_controller_restarts_after_editorial_interruption_without_reselecting(tmp_path):
+    controller, bridge, editor, selector, _ = trusted_setup(
+        tmp_path, count=3, selected=1, fail_once=True
+    )
+
+    assert controller.process(NOW)["status"] == "retryable"
+    assert selector.calls == 1
+    restarted = Controller(
+        controller.inbox,
+        controller.store_path,
+        bridge,
+        controller.verifier,
+        editor,
+        simulation=False,
+        allow_ack=False,
+        selector=selector,
+    )
+    assert restarted.process(NOW)["status"] == "results_saved"
+    assert selector.calls == 1
+    assert len(editor.calls) == 2
+    assert len(rows(controller, "decisions")) == 3
+
+
+def test_restart_after_ambiguous_selection_never_replays_gateway_call(tmp_path):
+    controller, bridge, editor, _, _ = trusted_setup(tmp_path, count=3, selected=1)
+    interrupted = InterruptSelector()
+    controller.selector = interrupted
+
+    with pytest.raises(KeyboardInterrupt):
+        controller.process(NOW)
+    assert interrupted.calls == 1
+    restarted = Controller(
+        controller.inbox,
+        controller.store_path,
+        bridge,
+        controller.verifier,
+        editor,
+        simulation=False,
+        allow_ack=False,
+        selector=interrupted,
+    )
+    result = restarted.process(NOW)
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "selection_outcome_unknown"
+    assert interrupted.calls == 1
+    assert editor.calls == []
+
+
+def test_selection_persistence_failure_never_replays_received_choice(tmp_path, monkeypatch):
+    controller, bridge, editor, selector, _ = trusted_setup(tmp_path, count=3, selected=1)
+
+    def fail_persist(self, *args, **kwargs):
+        del self, args, kwargs
+        raise EditorialError("editorial_store_write_failed")
+
+    monkeypatch.setattr(EditorialStore, "finish_selection", fail_persist)
+    result = controller.process(NOW)
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "selection_persistence_failed"
+    assert selector.calls == 1
+    assert editor.calls == []
+    assert rows(controller, "selection_runs")[0]["status"] == "in_flight"
+
+    restarted = Controller(
+        controller.inbox,
+        controller.store_path,
+        bridge,
+        controller.verifier,
+        editor,
+        simulation=False,
+        allow_ack=False,
+        selector=selector,
+    )
+    assert restarted.process(NOW)["error_code"] == "selection_outcome_unknown"
+    assert selector.calls == 1
+
+
+def test_controller_blocks_invalid_selection_before_any_editorial_call(tmp_path):
+    controller, _, editor, selector, _ = trusted_setup(tmp_path, count=3, selected=1)
+    selector.fail = True
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "selection_failed"
+    assert editor.calls == []
+    assert rows(controller, "decisions") == []
+    items = rows(controller, "selection_items")
+    assert {item["status"] for item in items} == {"selection_failed"}
+    assert {item["reason_code"] for item in items} == {"selection_failed"}
+
+
+def test_operator_can_retry_known_selection_failure_but_not_ambiguous_call(tmp_path):
+    controller, _, editor, selector, value = trusted_setup(tmp_path, count=3, selected=1)
+    selector.fail = True
+
+    assert controller.process(NOW)["status"] == "operator_required"
+    selector.fail = False
+    selector.calls = 0
+    result = controller.retry_selection(value["delivery_id"], NOW)
+
+    assert result["status"] == "results_saved"
+    assert len(editor.calls) == 1
+    attempts = rows(controller, "attempts")
+    assert [row["operation"] for row in attempts] == [
+        "verification",
+        "verification",
+        "verification",
+        "selection",
+        "selection",
+        "editorial",
+    ]
+    assert attempts[3]["error_code"] == "selection_failed"
+    assert attempts[4]["status"] == "completed"
+
+    ambiguous, _, _, _, ambiguous_value = trusted_setup(tmp_path / "ambiguous", count=1, selected=1)
+    ambiguous.selector = InterruptSelector()
+    with pytest.raises(KeyboardInterrupt):
+        ambiguous.process(NOW)
+    result = ambiguous.retry_selection(ambiguous_value["delivery_id"], NOW)
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "selection_outcome_unknown"
+
+
+def test_controller_canonical_url_duplicate_never_reaches_editor_twice(tmp_path):
+    controller, _, editor, selector, value = trusted_setup(tmp_path, count=2, selected=1)
+    controller.verifier = SourceVerifier(
+        CanonicalDocuments(),
+        clock=lambda: NOW,
+        trusted_publishers=load_trusted_publishers(Path("config/trusted_publishers.yaml")),
+    )
+
+    assert controller.process(NOW)["status"] == "results_saved"
+    assert selector.calls == 1
+    assert len(editor.calls) == 1
+    items = rows(controller, "selection_items")
+    assert {item["reason_code"] for item in items} >= {"duplicate_canonical_url"}
+    assert len(rows(controller, "decisions")) == len(value["candidates"])
+
+
+def test_selected_trusted_candidates_alone_reach_idempotent_v2_export(tmp_path):
+    controller, _, _, _, _ = trusted_setup(tmp_path, count=8, selected=3)
+
+    assert controller.process(NOW)["status"] == "results_saved"
+    with EditorialStore(controller.store_path, simulation=False, readonly=True) as store:
+        first = exportable(store, policy=PublicationPolicy(automatic_enabled=True))
+        second = exportable(store, policy=PublicationPolicy(automatic_enabled=True))
+        limited = exportable(store, limit=1, policy=PublicationPolicy(automatic_enabled=True))
+
+    assert len(first) == len(second) == 3
+    assert [item["intent_id"] for item in first] == [item["intent_id"] for item in second]
+    assert [item["content_hash"] for item in first] == [item["content_hash"] for item in second]
+    assert {item["version"] for item in first} == {2}
+    assert {item["editorial"]["review_route"] for item in first} == {"trusted_publisher"}
+    assert len(limited) == 1
+    output = tmp_path / "publication" / "publication-intent.json"
+    assert (
+        export_file(
+            controller.store_path,
+            output,
+            policy=PublicationPolicy(automatic_enabled=True),
+        )["status"]
+        == "exported"
+    )
+    assert {item["export_status"] for item in rows(controller, "selection_items")} >= {"exported"}
 
 
 def test_results_persist_before_ack_and_no_repeat_generation(tmp_path):
@@ -465,7 +920,24 @@ def test_store_never_mixes_simulation_and_real_results(tmp_path):
             pass
 
 
-@pytest.mark.parametrize("version", [-1, 2, 99])
+def test_store_migrates_v1_selection_state_transactionally(tmp_path):
+    path = tmp_path.resolve() / "private" / "editorial.sqlite3"
+    with EditorialStore(path, simulation=True):
+        pass
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("DROP TABLE selection_items")
+        connection.execute("DROP TABLE selection_runs")
+        connection.execute("PRAGMA user_version=1")
+        connection.commit()
+
+    with EditorialStore(path, simulation=True) as store:
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert store.connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='selection_items'"
+        ).fetchone()
+
+
+@pytest.mark.parametrize("version", [-1, 4, 99])
 def test_store_rejects_newer_schema_without_reset(tmp_path, version):
     path = tmp_path.resolve() / "private" / "editorial.sqlite3"
     with EditorialStore(path, simulation=True):
@@ -589,20 +1061,15 @@ def test_private_corroboration_policy_is_strict_and_constructs_verifier_rules(tm
         load_corroboration_policies(path)
 
 
-def test_private_dynamic_corroboration_policy_needs_no_candidate_key(tmp_path):
+def test_private_dynamic_corroboration_policy_is_rejected(tmp_path):
     directory = tmp_path.resolve() / "policy"
     directory.mkdir(mode=0o700)
     directory.chmod(0o700)
     path = directory / "corroboration.yaml"
-    path.write_text(
-        "corroboration:\n"
-        "  automatic:\n"
-        "    endpoint_template: https://verify.example/check?candidate_url={candidate_url}\n"
-    )
+    path.write_text("corroboration:\n  automatic: {}\n")
     path.chmod(0o600)
-    rules, automatic = load_corroboration_rules(path)
-    assert rules == {}
-    assert automatic is not None
+    with pytest.raises(EditorialError, match="corroboration_policy_invalid"):
+        load_corroboration_rules(path)
 
 
 def test_gateway_candidate_limit_rejects_batch_before_editor_invocation(tmp_path):
@@ -632,6 +1099,54 @@ def test_gateway_requires_explicit_runtime_and_all_three_config_switches(tmp_pat
     assert main([*arguments, "--config", str(config), "gateway-process"]) == 1
     assert "gateway_processing_not_authorized" in capsys.readouterr().out
     assert not (root / "private").exists()
+
+
+def test_gateway_cli_wires_real_selector_into_controller(tmp_path, capsys, monkeypatch):
+    bridge, _ = real_bridge(tmp_path)
+    root = tmp_path.resolve()
+    config = root / "gateway.yaml"
+    config.write_text(
+        "editorial: {enabled: true}\nnetwork: {enabled: true}\nllm: {enabled: true}\n"
+    )
+    policy_directory = root / "policy"
+    policy_directory.mkdir(mode=0o700)
+    policy_directory.chmod(0o700)
+    policy = policy_directory / "trusted.yaml"
+    policy.write_text(Path("config/trusted_publishers.yaml").read_text())
+    policy.chmod(0o600)
+    monkeypatch.setattr("waagd_discovery.editorial.verifier.SourceVerifier", CliTrustedVerifier)
+
+    assert (
+        main(
+            [
+                "--config",
+                str(config),
+                "--inbox",
+                str(bridge.inbox_dir / "inbox.json"),
+                "--store",
+                str(root / "private" / "editorial.sqlite3"),
+                "--export",
+                str(root / "exports" / "candidates.json"),
+                "--workspace-root",
+                str(root / "workspace"),
+                "--state-dir",
+                str(root / "bridge-state"),
+                "--no-simulation",
+                "--allow-gateway",
+                "--gateway-executable",
+                str(real_selector_executable(tmp_path)),
+                "--gateway-max-candidates",
+                "2",
+                "--gateway-max-cost-usd",
+                "0.10",
+                "--trusted-publishers",
+                str(policy),
+                "gateway-process",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["status"] == "results_saved"
 
 
 def test_mock_worker_is_separate_bounded_data_only(tmp_path, monkeypatch):
@@ -800,3 +1315,486 @@ def test_cli_disabled_dry_run_and_enabled_mock_processing(tmp_path, capsys):
     assert before == {
         p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in bridge.state_dir.iterdir()
     }
+
+
+class GatewayFailureEditor:
+    def __init__(self, code: str):
+        self.code = code
+        self.calls = 0
+
+    def evaluate(self, request):
+        del request
+        self.calls += 1
+        raise EditorialError(self.code)
+
+
+@pytest.mark.parametrize(
+    ("gateway_code", "stored_code"),
+    [
+        ("gateway_model_json_invalid", "editorial_format_json_invalid"),
+        ("gateway_creative_schema_invalid:summary", "editorial_format_length_invalid"),
+        ("gateway_format_retry_exhausted:length", "editorial_format_retry_exhausted:length"),
+        ("gateway_creative_safety_invalid", "editorial_safety_rejected"),
+        ("gateway_unavailable", "editorial_transport_unavailable"),
+        ("gateway_outcome_unknown", "editorial_outcome_unknown"),
+        (
+            "editorial_fidelity_unsupported_attribution",
+            "editorial_fidelity_unsupported_attribution",
+        ),
+    ],
+)
+def test_controller_persists_safe_editorial_failure_taxonomy_without_replay(
+    tmp_path, gateway_code, stored_code
+):
+    controller, _, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    editor = GatewayFailureEditor(gateway_code)
+    controller.editor = editor
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == stored_code
+    attempts = rows(controller, "attempts")
+    assert attempts[-1]["operation"] == "editorial"
+    assert attempts[-1]["status"] == "failed"
+    assert attempts[-1]["error_code"] == stored_code
+    assert rows(controller, "decisions") == []
+    assert controller.process(NOW)["status"] == "operator_required"
+    assert editor.calls == 1
+    assert value["delivery_id"] == result["delivery_id"]
+
+
+class UnsupportedAttributionEditor:
+    def __init__(self):
+        self.calls = 0
+
+    def evaluate(self, request):
+        self.calls += 1
+        return trusted_decision(
+            request,
+            creative={
+                "satirical_angle": "A fictional company mistakes planning for action.",
+                "headline": "Acme Plans Another Procedure",
+                "summary": "A fictional office receives a policy it never announced.",
+                "article": " ".join(
+                    ["Acme plans a policy change while the fictional office files another form."]
+                    * 12
+                ),
+            },
+            now=NOW,
+        )
+
+
+def test_source_fidelity_rejection_is_durable_and_prevents_ready_for_review(tmp_path):
+    controller, _, _, _, _ = setup(tmp_path, count=1, allow_ack=False)
+    editor = UnsupportedAttributionEditor()
+    controller.editor = editor
+    controller.verifier = CliTrustedVerifier()
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "editorial_fidelity_unsupported_attribution"
+    assert rows(controller, "decisions") == []
+    attempt = rows(controller, "attempts")[-1]
+    assert attempt["operation"] == "editorial"
+    assert attempt["error_code"] == "editorial_fidelity_unsupported_attribution"
+    assert editor.calls == 1
+    assert controller.process(NOW)["status"] == "operator_required"
+    assert editor.calls == 1
+
+
+@pytest.mark.parametrize(
+    "gateway_code",
+    [
+        "gateway_format_retry_exhausted:length:raw-model-response",
+        "editorial_fidelity_unsupported_attribution:raw-prompt",
+    ],
+)
+def test_controller_never_persists_untrusted_editorial_error_suffix(tmp_path, gateway_code):
+    controller, _, _, _, _ = setup(tmp_path, count=1, allow_ack=False)
+    controller.editor = GatewayFailureEditor(gateway_code)
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "editorial_gateway_response_invalid"
+    stored = rows(controller, "attempts")[-1]["error_code"]
+    assert stored == "editorial_gateway_response_invalid"
+    assert "raw-" not in stored
+
+
+class GroundedTrustedVerifier:
+    def verify(self, candidate, *, policy_id):
+        assert policy_id == "source-verification-v1"
+        return {
+            "schema_version": 1,
+            "candidate_key": candidate["candidate_key"],
+            "verification_status": "TRUSTED_PUBLISHER",
+            "canonical_url": candidate["url"],
+            "fetched_at": NOW.isoformat(),
+            "http_status": 200,
+            "publisher": candidate["publisher"],
+            "publication_date": None,
+            "event_date": None,
+            "evidence": [
+                {
+                    "id": "a" * 64,
+                    "url": candidate["url"],
+                    "retrieved_at": NOW.isoformat(),
+                    "sha256": "b" * 64,
+                    "excerpt": candidate["description"],
+                    "source_kind": "article",
+                }
+            ],
+            "uncertainties": [
+                "Publisher identity is trusted; facts are not independently verified."
+            ],
+            "errors": [],
+            "claim_support": [],
+            "publisher_trust": {
+                "publisher_id": "guardian",
+                "rss_url": "https://www.theguardian.com/world/rss",
+            },
+        }
+
+
+class DraftEditor:
+    def __init__(self, headline, summary):
+        self.headline, self.summary, self.calls = headline, summary, 0
+
+    def evaluate(self, request):
+        self.calls += 1
+        return trusted_decision(
+            request,
+            creative={
+                "satirical_angle": "A bureaucracy mistakes paperwork for public policy.",
+                "headline": self.headline,
+                "summary": self.summary,
+                "article": " ".join(
+                    ["The fictional office filed another form and called the queue a strategy."]
+                    * 12
+                ),
+            },
+            now=NOW,
+        )
+
+
+def fidelity_executable(tmp_path, review, *, exit_code=0):
+    path = tmp_path / "fidelity-openclaw"
+    response = json.dumps(
+        {
+            "status": "ok",
+            "result": {
+                "payloads": [{"text": json.dumps(review)}],
+                "meta": {"toolSummary": {"calls": 0}, "agentMeta": {"costUsd": 0.0}},
+            },
+        }
+    )
+    path.write_text(
+        f"#!{sys.executable}\nimport sys\n"
+        f"sys.stdout.write({response!r})\nraise SystemExit({exit_code})\n"
+    )
+    path.chmod(0o700)
+    return path
+
+
+@pytest.mark.parametrize(
+    ("source", "headline", "summary", "reason"),
+    [
+        (
+            "Airbnb says hosts may not require chores. Hosts may still charge a cleaning fee "
+            "disclosed before booking.",
+            "Airbnb Bans Guest Chores But Still Makes Them Reasonable",
+            "Guests may still charge cleaning fees, now hidden from guests",
+            "scope_misrepresentation",
+        ),
+        (
+            "Tesla and SpaceX are exploring a possible merger. The discussions remain preliminary.",
+            "Tesla-SpaceX merger talks stall on a mountain of unanswered questions",
+            "Preliminary discussions acquire a ceremonial dead end.",
+            "proposal_as_outcome",
+        ),
+        (
+            "A poll reports an approval percentage without explaining voter motivations.",
+            "Trump Approval Shows Voters Have Formally Endorsed Chaos",
+            "A poll result becomes an unsupported theory about voters.",
+            "unsupported_attribution",
+        ),
+    ],
+)
+def test_controller_rejects_operator_canary_paraphrases_via_attested_fidelity_gateway(
+    tmp_path, source, headline, summary, reason
+):
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    controller, _, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    value["candidates"][0]["description"] = source
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    editor = DraftEditor(headline, summary)
+    controller.editor = editor
+    reviewer = {
+        "schema_version": 1,
+        "verdict": "REJECT",
+        "findings": [
+            {
+                "field": "headline",
+                "reason_code": reason,
+                "evidence_refs": ["candidate_description", "a" * 64],
+            }
+        ],
+    }
+    controller.fidelity_reviewer = GatewayFidelityReviewer(
+        GatewayEditor(fidelity_executable(tmp_path, reviewer))
+    )
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == f"editorial_fidelity_{reason}"
+    assert rows(controller, "decisions") == []
+    assert rows(controller, "attempts")[-1]["operation"] == "fidelity"
+
+
+def test_controller_allows_grounded_satire_after_attested_fidelity_pass(tmp_path):
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    controller, _, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    value["candidates"][0]["description"] = "A council published a routine filing about a new form."
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    controller.editor = DraftEditor(
+        "Council Finds Another Form", "A filing acquires a committee and a ceremonial queue."
+    )
+    controller.fidelity_reviewer = GatewayFidelityReviewer(
+        GatewayEditor(
+            fidelity_executable(tmp_path, {"schema_version": 1, "verdict": "PASS", "findings": []})
+        )
+    )
+
+    assert controller.process(NOW)["status"] == "results_saved"
+    assert rows(controller, "decisions")[0]["decision"] == "READY_FOR_REVIEW"
+
+
+def test_interrupted_fidelity_turn_is_not_replayed_automatically(tmp_path):
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    controller, _, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    value["candidates"][0]["description"] = "A council published a routine filing."
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    editor = DraftEditor("Council Finds Another Form", "A filing acquires a committee and a queue.")
+    controller.editor = editor
+    controller.fidelity_reviewer = GatewayFidelityReviewer(
+        GatewayEditor(
+            fidelity_executable(
+                tmp_path, {"schema_version": 1, "verdict": "PASS", "findings": []}, exit_code=1
+            )
+        )
+    )
+
+    assert controller.process(NOW)["error_code"] == "editorial_fidelity_gateway_child_exit_nonzero"
+    assert controller.process(NOW)["status"] == "operator_required"
+    assert editor.calls == 1
+
+
+class FidelityGatewayFailure:
+    """Inject a bounded pre-parsed Gateway failure without retaining output."""
+
+    def __init__(self, code):
+        self.code, self.calls = code, 0
+
+    def review_fidelity(self, payload):
+        del payload
+        self.calls += 1
+        raise EditorialError(self.code)
+
+
+@pytest.mark.parametrize(
+    ("gateway_code", "stored_code"),
+    [
+        ("gateway_timeout", "editorial_fidelity_gateway_timeout"),
+        ("gateway_child_exit_nonzero", "editorial_fidelity_gateway_child_exit_nonzero"),
+        ("gateway_response_too_large", "editorial_fidelity_gateway_response_too_large"),
+        ("gateway_envelope_invalid", "editorial_fidelity_attestation_invalid"),
+        ("gateway_child_launch_failed", "editorial_fidelity_transport_unavailable"),
+    ],
+)
+def test_fidelity_gateway_failures_finish_creative_attempt_without_replay(
+    tmp_path, gateway_code, stored_code
+):
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    controller, bridge, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    value["candidates"][0]["description"] = "A council published a routine filing."
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    editor = DraftEditor("Council Finds Another Form", "A filing acquires a committee and a queue.")
+    gateway = FidelityGatewayFailure(gateway_code)
+    controller.editor = editor
+    controller.fidelity_reviewer = GatewayFidelityReviewer(gateway)
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == stored_code
+    attempts = rows(controller, "attempts")
+    editorial = next(item for item in attempts if item["operation"] == "editorial")
+    fidelity = next(item for item in attempts if item["operation"] == "fidelity")
+    assert (editorial["status"], editorial["error_code"]) == ("completed", None)
+    assert (fidelity["status"], fidelity["error_code"]) == ("failed", stored_code)
+    assert rows(controller, "decisions") == []
+    assert rows(controller, "selection_items") == []
+    assert bridge.acks == 0
+    assert controller.process(NOW)["status"] == "operator_required"
+    assert editor.calls == gateway.calls == 1
+
+
+def test_fidelity_safety_rejection_finishes_creative_attempt_and_never_acks(tmp_path):
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    controller, bridge, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    value["candidates"][0]["description"] = "A council published a routine filing."
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    controller.editor = DraftEditor(
+        "Council Finds Another Form", "A filing acquires a committee and a queue."
+    )
+    controller.fidelity_reviewer = GatewayFidelityReviewer(
+        type(
+            "SafetyGateway",
+            (),
+            {
+                "review_fidelity": lambda self, payload: {
+                    "schema_version": 1,
+                    "verdict": "REJECT",
+                    "findings": [
+                        {
+                            "field": "headline",
+                            "reason_code": "unsupported_attribution",
+                            "evidence_refs": ["candidate_description"],
+                        }
+                    ],
+                }
+            },
+        )()
+    )
+
+    assert controller.process(NOW)["error_code"] == "editorial_fidelity_unsupported_attribution"
+    attempts = rows(controller, "attempts")
+    assert (
+        next(item for item in attempts if item["operation"] == "editorial")["status"] == "completed"
+    )
+    assert next(item for item in attempts if item["operation"] == "fidelity")["status"] == "failed"
+    assert bridge.acks == 0
+
+
+def test_attempt_pair_finish_is_atomic_in_schema_v3_store(tmp_path):
+    controller, _, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    controller.process(NOW)
+    with EditorialStore(controller.store_path, simulation=False) as store:
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        editorial = store.start_attempt(
+            value["delivery_id"],
+            value["candidates"][0]["candidate_key"],
+            "editorial",
+            NOW.isoformat(),
+        )
+        fidelity = store.start_attempt(
+            value["delivery_id"],
+            value["candidates"][0]["candidate_key"],
+            "fidelity",
+            NOW.isoformat(),
+        )
+        with pytest.raises(EditorialError, match="editorial_attempt_state_invalid"):
+            store.finish_attempts(
+                ((editorial, None), ("missing", "editorial_fidelity_gateway_timeout")),
+                NOW.isoformat(),
+            )
+    attempts = rows(controller, "attempts")
+    assert next(item for item in attempts if item["attempt_id"] == editorial)["status"] == "started"
+    assert next(item for item in attempts if item["attempt_id"] == fidelity)["status"] == "started"
+
+
+def test_restart_after_committed_failed_fidelity_never_replays_or_acks(tmp_path, monkeypatch):
+    """Exercise the crash window after pair commit but before delivery status."""
+
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    controller, bridge, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    value["candidates"][0]["description"] = "A council published a routine filing."
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    editor = DraftEditor("Council Finds Another Form", "A filing acquires a committee and a queue.")
+    gateway = FidelityGatewayFailure("gateway_child_exit_nonzero")
+    controller.editor = editor
+    controller.fidelity_reviewer = GatewayFidelityReviewer(gateway)
+
+    def crash_after_pair(self, delivery, key, status, export_status="not_exported"):
+        del self, delivery, key, status, export_status
+        raise SystemExit("simulated crash after fidelity attempt commit")
+
+    original = EditorialStore.mark_selection_editorial
+    monkeypatch.setattr(EditorialStore, "mark_selection_editorial", crash_after_pair)
+    with pytest.raises(SystemExit, match="simulated crash"):
+        controller.process(NOW)
+    monkeypatch.setattr(EditorialStore, "mark_selection_editorial", original)
+
+    attempts = rows(controller, "attempts")
+    assert (
+        next(item for item in attempts if item["operation"] == "editorial")["status"] == "completed"
+    )
+    assert next(item for item in attempts if item["operation"] == "fidelity")["status"] == "failed"
+    assert rows(controller, "decisions") == []
+
+    recovered = controller.process(NOW)
+
+    assert recovered["status"] == "operator_required"
+    assert recovered["error_code"] == "editorial_fidelity_gateway_child_exit_nonzero"
+    assert editor.calls == gateway.calls == 1
+    assert bridge.acks == 0
+
+
+def test_restart_never_replays_interrupted_gateway_creative_turn(tmp_path):
+    controller, bridge, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+
+    class NeverGateway:
+        gateway_backed = True
+
+        def __init__(self):
+            self.calls = 0
+
+        def evaluate(self, request):
+            del request
+            self.calls += 1
+            raise AssertionError("interrupted Gateway turn must not be repeated")
+
+    gateway = NeverGateway()
+    controller.editor = gateway
+    with controller._store() as store:
+        store.register(value, NOW.isoformat())
+        store.start_attempt(
+            value["delivery_id"],
+            value["candidates"][0]["candidate_key"],
+            "editorial_gateway",
+            NOW.isoformat(),
+        )
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "editorial_outcome_unknown"
+    assert gateway.calls == bridge.acks == 0

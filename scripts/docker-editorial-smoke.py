@@ -233,7 +233,10 @@ def reconcile():
                allow_ack=True).process(now=datetime.now(UTC) + timedelta(hours=3))
     with closing(sqlite3.connect(store_path('real'))) as db:
         assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
-        assert db.execute('PRAGMA user_version').fetchone()[0] == 1
+        # Selection audit state is an additive, forward-only Editorial Store
+        # migration. Recovery must preserve the current schema, not assume the
+        # pre-selection v1 layout.
+        assert db.execute('PRAGMA user_version').fetchone()[0] == 3
         assert db.execute('SELECT ack_status FROM deliveries WHERE delivery_id=?',
                           (expected['delivery'],)).fetchone()[0] == 'acknowledged'
         assert db.execute("SELECT status FROM ack_outbox").fetchone()[0] == 'acknowledged'

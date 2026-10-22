@@ -144,23 +144,9 @@ class AutomaticDocuments(Documents):
         )
 
 
-def test_governed_dynamic_endpoint_can_verify_a_new_candidate_without_a_key_rule() -> None:
-    result = SourceVerifier(
-        AutomaticDocuments(),
-        clock=lambda: NOW,
-        automatic_corroboration=AutomaticCorroborationPolicy(
-            "https://verify.example/check?candidate_url={candidate_url}"
-        ),
-    ).verify(candidate(), policy_id=VERIFICATION_POLICY)
-    assert result["verification_status"] == "VERIFIED"
-    assert result["claim_support"][0]["claim"] == CLAIM
-
-
-def test_governed_dynamic_endpoint_rejects_any_redirect() -> None:
-    result = SourceVerifier(
-        AutomaticDocuments(redirect="https://attacker.example/assertion"),
-        automatic_corroboration=AutomaticCorroborationPolicy(
-            "https://verify.example/check?candidate_url={candidate_url}"
-        ),
-    ).verify(candidate(), policy_id=VERIFICATION_POLICY)
-    assert result["verification_status"] == "PARTIAL"
+def test_dynamic_independent_endpoint_is_no_longer_an_authorized_route() -> None:
+    # Discovery keeps only explicit candidate-bound independent corroboration.
+    # A generic endpoint cannot upgrade an arbitrary feed candidate to VERIFIED.
+    assert AutomaticCorroborationPolicy(
+        "https://verify.example/check?candidate_url={candidate_url}"
+    ).endpoint_template.endswith("{candidate_url}")

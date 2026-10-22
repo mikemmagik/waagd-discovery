@@ -14,6 +14,7 @@ from waagd_discovery.editorial.contracts import (
     EditorialError,
     digest,
     make_request,
+    trusted_decision,
     validate_decision,
     validate_input,
     validate_request,
@@ -149,6 +150,51 @@ def test_agent_decision_cannot_add_capabilities(field: str) -> None:
         validate_decision(output, make_request(candidate(), verification()))
 
 
+def test_decision_schema_diagnostic_names_only_path_validator_and_expected_type() -> None:
+    output = decision()
+    output["model_identifier"] = 7
+    with pytest.raises(EditorialError) as raised:
+        validate_decision(output, make_request(candidate(), verification()))
+    assert str(raised.value) == "editorial_schema_invalid:$.model_identifier:type:string"
+    assert ATTACK not in str(raised.value)
+    assert "7" not in str(raised.value)
+
+
+def test_decision_schema_diagnostic_identifies_noninteger_schema_version() -> None:
+    output = decision()
+    output["schema_version"] = "1"
+    with pytest.raises(EditorialError) as raised:
+        validate_decision(output, make_request(candidate(), verification()))
+    assert str(raised.value) == "editorial_schema_invalid:$.schema_version:type:integer"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("headline", "h" * 81, "editorial_schema_invalid:$.headline:maxLength:80"),
+        ("summary", "s" * 161, "editorial_schema_invalid:$.summary:maxLength:160"),
+        ("article", "a" * 2001, "editorial_schema_invalid:$.article:maxLength:2000"),
+    ],
+)
+def test_decision_schema_rejects_overlong_editorial_text(
+    field: str, value: str, expected: str
+) -> None:
+    output = decision()
+    output[field] = value
+    with pytest.raises(EditorialError) as raised:
+        validate_decision(output, make_request(candidate(), verification()))
+    assert str(raised.value) == expected
+
+
+def test_decision_schema_diagnostic_names_missing_required_field_without_output_text() -> None:
+    output = decision()
+    output.pop("headline")
+    with pytest.raises(EditorialError) as raised:
+        validate_decision(output, make_request(candidate(), verification()))
+    assert str(raised.value) == "editorial_schema_invalid:$.headline:required:headline"
+    assert ATTACK not in str(raised.value)
+
+
 @pytest.mark.parametrize("status", ["PARTIAL", "FAILED"])
 def test_http_success_and_failed_lookup_cannot_become_ready(status: str) -> None:
     output = decision("READY_FOR_REVIEW")
@@ -161,6 +207,63 @@ def test_verified_fixture_can_support_human_review_without_publication() -> None
     request = make_request(candidate(), verification("VERIFIED"))
     validate_decision(decision("READY_FOR_REVIEW"), request)
     assert "publication" in request["policy"]
+
+
+def test_trusted_partial_builder_abstains_without_feed_provenance() -> None:
+    item = candidate()
+    item["sources"].append(
+        {"id": "unverified-feed", "name": "Unverified feed", "url": "https://feed.example.test/x"}
+    )
+    request = make_request(item, verification())
+    result = trusted_decision(request, now=NOW)
+    assert result["decision"] == "NEEDS_VERIFICATION"
+    assert result["model_identifier"] == "trusted-policy-v1"
+    assert "https://feed.example.test/x" not in result["checked_sources"]
+    assert result["verification_evidence"] == ["a" * 64]
+    validate_decision(result, request)
+
+
+def test_trusted_failed_builder_blocks_review_and_publication() -> None:
+    request = make_request(candidate(), verification("FAILED"))
+    result = trusted_decision(request, now=NOW)
+    assert result["decision"] == "REJECTED"
+    assert result["rejection_reason"] == "UNVERIFIABLE"
+    assert result["verification_evidence"] == []
+    validate_decision(result, request)
+
+
+def test_trusted_verified_builder_owns_identity_evidence_and_dates() -> None:
+    request = make_request(candidate(), verification("VERIFIED"))
+    creative = {
+        "satirical_angle": "Institutions audit their own oversight.",
+        "headline": "Fixture headline",
+        "summary": "Synthetic test summary.",
+        "article": " ".join(["synthetic"] * 90),
+    }
+    result = trusted_decision(request, creative=creative, now=NOW)
+    assert result["candidate_key"] == KEY
+    assert result["source"] == URL
+    assert result["checked_sources"] == [URL, "https://independent.example.test/attestation"]
+    assert result["verification_evidence"] == ["a" * 64, "b" * 64]
+    assert result["created_at"] == NOW.isoformat()
+    validate_decision(result, request)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["candidate_key", "source", "created_at", "model_identifier", "factual_summary"],
+)
+def test_trusted_verified_builder_rejects_extra_untrusted_provenance(field: str) -> None:
+    request = make_request(candidate(), verification("VERIFIED"))
+    creative: dict[str, str] = {
+        "satirical_angle": "Institutions audit their own oversight.",
+        "headline": "Fixture headline",
+        "summary": "Synthetic test summary.",
+        "article": " ".join(["synthetic"] * 90),
+    }
+    creative[field] = "untrusted override"
+    with pytest.raises(EditorialError, match="trusted_creative_missing"):
+        trusted_decision(request, creative=creative, now=NOW)
 
 
 @pytest.mark.parametrize(

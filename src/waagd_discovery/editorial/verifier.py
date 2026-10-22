@@ -23,6 +23,7 @@ from waagd_discovery.editorial.corroboration import (
     contains_exact_claim,
 )
 from waagd_discovery.editorial.transport import FetchDocument, PinnedTransport
+from waagd_discovery.editorial.trusted_publishers import TrustedPublisherPolicy, sensitive_risks
 
 _HIDDEN = {"head", "script", "style", "svg", "math", "template", "iframe", "object", "noscript"}
 
@@ -110,7 +111,7 @@ class SourceVerifier:
         allow_http: bool = False,
         clock: Callable[[], datetime] | None = None,
         corroboration_policies: Mapping[str, CorroborationPolicy] | None = None,
-        automatic_corroboration: AutomaticCorroborationPolicy | None = None,
+        trusted_publishers: TrustedPublisherPolicy | None = None,
     ) -> None:
         self.transport = transport or PinnedTransport(allow_http=allow_http)
         self.clock = clock
@@ -120,11 +121,11 @@ class SourceVerifier:
             for key, policy in self.corroboration_policies.items()
         ):
             raise EditorialError("corroboration_policy_invalid")
-        if automatic_corroboration is not None and not isinstance(
-            automatic_corroboration, AutomaticCorroborationPolicy
+        if trusted_publishers is not None and not isinstance(
+            trusted_publishers, TrustedPublisherPolicy
         ):
-            raise EditorialError("corroboration_policy_invalid")
-        self.automatic_corroboration = automatic_corroboration
+            raise EditorialError("trusted_publishers_policy_invalid")
+        self.trusted_publishers = trusted_publishers
 
     def _automatic_corroborate(
         self,
@@ -287,10 +288,34 @@ class SourceVerifier:
                 policy = self.corroboration_policies.get(result["candidate_key"])
                 if policy is not None:
                     self._corroborate(result, extracted[:8000], policy)
-                elif self.automatic_corroboration is not None:
-                    self._automatic_corroborate(
-                        result, extracted[:8000], self.automatic_corroboration
+                elif self.trusted_publishers is not None:
+                    match = self.trusted_publishers.match(candidate, document.url)
+                    risks = sensitive_risks(
+                        candidate.get("title"), candidate.get("description"), extracted[:8000]
                     )
+                    if match is not None and not risks:
+                        publisher = match.publisher
+                        # This is publisher-identity evidence only.  It deliberately
+                        # makes no claim that the article's material facts are true.
+                        result.update(
+                            {
+                                "verification_status": "TRUSTED_PUBLISHER",
+                                "publisher": publisher.name,
+                                "publisher_trust": {
+                                    "publisher_id": publisher.id,
+                                    "rss_url": match.rss_url,
+                                },
+                                "uncertainties": [
+                                    "Publisher identity is trusted; material claims were not "
+                                    "independently verified."
+                                ],
+                            }
+                        )
+                    elif match is not None:
+                        result["uncertainties"].append(
+                            "Trusted publisher report requires sensitive-story review: "
+                            + ",".join(risks)
+                        )
             except EditorialError as error:
                 # Only errors emitted by our transport/extractor are permitted into the schema.
                 code = str(error)

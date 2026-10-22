@@ -29,6 +29,7 @@
     "verification_status": {
       "enum": [
         "VERIFIED",
+        "TRUSTED_PUBLISHER",
         "PARTIAL",
         "FAILED"
       ]
@@ -167,6 +168,29 @@
           "independently_confirmed": {
             "type": "boolean"
           }
+        }
+      }
+    },
+    "publisher_trust": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "publisher_id",
+        "rss_url"
+      ],
+      "properties": {
+        "publisher_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{1,63}$"
+        },
+        "rss_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "maxLength": 2048
         }
       }
     }

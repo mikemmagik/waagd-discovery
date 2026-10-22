@@ -19,11 +19,8 @@ from waagd_discovery.editorial.contracts import (
     validate_input,
 )
 from waagd_discovery.editorial.controller import Controller
-from waagd_discovery.editorial.corroboration import (
-    AutomaticCorroborationPolicy,
-    CorroborationClaim,
-    CorroborationPolicy,
-)
+from waagd_discovery.editorial.corroboration import CorroborationClaim, CorroborationPolicy
+from waagd_discovery.editorial.trusted_publishers import load_trusted_publishers
 
 
 @dataclass(frozen=True)
@@ -91,9 +88,7 @@ def load_config(path: Path | None = None) -> EditorialConfig:
         raise EditorialError("editorial_config_unreadable") from None
 
 
-def load_corroboration_rules(
-    path: Path,
-) -> tuple[dict[str, CorroborationPolicy], AutomaticCorroborationPolicy | None]:
+def load_corroboration_rules(path: Path) -> dict[str, CorroborationPolicy]:
     """Read a private, independently-maintained allowlist; never derive it from news."""
     try:
         directory = io.open_directory(path.parent, private=True)
@@ -107,7 +102,7 @@ def load_corroboration_rules(
         if not isinstance(data, dict) or set(data) != {"corroboration"}:
             raise EditorialError("corroboration_policy_invalid")
         body = data["corroboration"]
-        if not isinstance(body, dict) or not {"policies", "automatic"} >= set(body) or not body:
+        if not isinstance(body, dict) or set(body) != {"policies"}:
             raise EditorialError("corroboration_policy_invalid")
         entries = body.get("policies", [])
         if not isinstance(entries, list) or len(entries) > 50:
@@ -148,21 +143,16 @@ def load_corroboration_rules(
                 trusted_independent_hosts=frozenset(hosts),
                 claims=tuple(parsed_claims),
             )
-        automatic = body.get("automatic")
-        if automatic is not None:
-            if not isinstance(automatic, dict) or set(automatic) != {"endpoint_template"}:
-                raise EditorialError("corroboration_policy_invalid")
-            automatic = AutomaticCorroborationPolicy(automatic["endpoint_template"])
-        if not policies and automatic is None:
+        if not policies:
             raise EditorialError("corroboration_policy_invalid")
-        return policies, automatic
+        return policies
     except (OSError, io.BridgeError, UnicodeError, yaml.YAMLError, RecursionError):
         raise EditorialError("corroboration_policy_unreadable") from None
 
 
 def load_corroboration_policies(path: Path) -> dict[str, CorroborationPolicy]:
     """Compatibility helper for focused policy validation callers."""
-    return load_corroboration_rules(path)[0]
+    return load_corroboration_rules(path)
 
 
 def _check_gateway_batch(inbox: Path, maximum: int) -> None:
@@ -200,17 +190,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gateway-max-candidates", type=int, default=1)
     parser.add_argument("--gateway-max-cost-usd", type=float)
     parser.add_argument("--corroboration-policy", type=Path)
+    parser.add_argument("--trusted-publishers", type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("dry-run")
     commands.add_parser("process")
     commands.add_parser("gateway-process")
+    retry_selection = commands.add_parser("retry-selection")
+    retry_selection.add_argument("--delivery-id", required=True)
+    retry_selection.add_argument("--operator-confirm", action="store_true")
     commands.add_parser("status")
     reconsider = commands.add_parser("reconsider")
     reconsider.add_argument("--candidate-key", required=True)
     args = parser.parse_args(argv)
     try:
         config = load_config(args.config)
-        gateway = args.command == "gateway-process"
+        gateway = args.command in {"gateway-process", "retry-selection"}
         if (args.allow_ack and not gateway) or (
             not args.simulation and args.command != "status" and not gateway
         ):
@@ -219,16 +213,19 @@ def main(argv: list[str] | None = None) -> int:
             args.simulation
             or not args.allow_gateway
             or args.gateway_executable is None
-            or args.corroboration_policy is None
+            or (args.corroboration_policy is None and args.trusted_publishers is None)
             or args.gateway_max_cost_usd is None
             or not config.enabled
             or not config.network_enabled
             or not config.llm_enabled
         ):
             raise EditorialError("gateway_processing_not_authorized")
+        if args.command == "retry-selection" and not args.operator_confirm:
+            raise EditorialError("selection_retry_confirmation_required")
+        maximum_gateway_candidates = 50 if args.trusted_publishers else 10
         if gateway and (
             isinstance(args.gateway_max_candidates, bool)
-            or not 1 <= args.gateway_max_candidates <= 10
+            or not 1 <= args.gateway_max_candidates <= maximum_gateway_candidates
         ):
             raise EditorialError("gateway_candidate_limit")
         if gateway and not 0 < args.gateway_max_cost_usd <= 1:
@@ -243,17 +240,27 @@ def main(argv: list[str] | None = None) -> int:
 
             verifier: Verifier
             editor: EditorAdapter
+            selector = None
+            fidelity_reviewer = None
             if gateway:
+                from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
                 from waagd_discovery.editorial.gateway_adapter import (
                     GatewayBudgetPolicy,
                     GatewayEditor,
                 )
                 from waagd_discovery.editorial.verifier import SourceVerifier
 
-                rules, automatic = load_corroboration_rules(args.corroboration_policy)
-                verifier = SourceVerifier(
-                    corroboration_policies=rules, automatic_corroboration=automatic
+                rules = (
+                    load_corroboration_rules(args.corroboration_policy)
+                    if args.corroboration_policy
+                    else {}
                 )
+                trusted = (
+                    load_trusted_publishers(args.trusted_publishers)
+                    if args.trusted_publishers
+                    else None
+                )
+                verifier = SourceVerifier(corroboration_policies=rules, trusted_publishers=trusted)
                 editor = GatewayEditor(
                     args.gateway_executable,
                     agent_id=args.gateway_agent,
@@ -261,6 +268,11 @@ def main(argv: list[str] | None = None) -> int:
                         max_reported_cost_usd=args.gateway_max_cost_usd
                     ),
                 )
+                fidelity_reviewer = GatewayFidelityReviewer(editor)
+                if args.trusted_publishers:
+                    from waagd_discovery.editorial.selection_gateway import GatewaySelector
+
+                    selector = GatewaySelector(editor)
             else:
                 verifier = SyntheticVerifier()
                 editor = MockEditor()
@@ -273,6 +285,8 @@ def main(argv: list[str] | None = None) -> int:
                 simulation=args.simulation,
                 allow_ack=args.allow_ack and gateway,
                 protected_roots=protected,
+                selector=selector,
+                fidelity_reviewer=fidelity_reviewer,
             )
 
         if args.command == "dry-run":
@@ -293,6 +307,9 @@ def main(argv: list[str] | None = None) -> int:
                 result = instance.status()
             elif args.command == "reconsider":
                 result = instance.reconsider(args.candidate_key)
+            elif args.command == "retry-selection":
+                _check_gateway_batch(args.inbox, args.gateway_max_candidates)
+                result = instance.retry_selection(args.delivery_id)
             else:
                 if gateway:
                     _check_gateway_batch(args.inbox, args.gateway_max_candidates)
