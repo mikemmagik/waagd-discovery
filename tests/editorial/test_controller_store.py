@@ -619,7 +619,16 @@ def test_selected_trusted_candidates_alone_reach_idempotent_v2_export(tmp_path):
         )["status"]
         == "exported"
     )
-    assert {item["export_status"] for item in rows(controller, "selection_items")} >= {"exported"}
+    # The Site receipt, not an atomic local file write, establishes delivery.
+    # Export therefore leaves the selection un-delivered while it creates the
+    # durable immutable submission job needed for restart reconciliation.
+    assert {item["export_status"] for item in rows(controller, "selection_items")} == {
+        "not_exported"
+    }
+    with EditorialStore(controller.store_path, simulation=False, readonly=True) as store:
+        pending = store.publication_job()
+    assert pending is not None
+    assert pending["status"] == "pending"
 
 
 def test_results_persist_before_ack_and_no_repeat_generation(tmp_path):
