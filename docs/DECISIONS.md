@@ -156,3 +156,10 @@
     operator-required and cannot automatically replay, ACK or publish. This
     release does not authorize deployment, scheduler activation or automatic
     publication.
+39. Sprint 8, separately owner-authorized, adds a user-owned durable daily
+    coordinator and a separate credential-scoped Site import process. It leaves
+    the existing collector and Discovery schema untouched. The Editorial Store's
+    additive schema 4 publication journal binds one immutable intent to each
+    candidate revision; ambiguous Site outcomes require reconciliation and never
+    cause a replacement identity or automatic resend. The Site contract is pinned
+    to `ffa34ce097fbdb34161bdd3b9782f798d1dc7936` pending its reviewed merge.
