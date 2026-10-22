@@ -179,8 +179,9 @@ creative response is complete but fidelity rejects it or reaches a terminal
 Gateway outcome, the editorial attempt is completed and the fidelity attempt
 fails with its own bounded code.  This prevents a failed fidelity gate from
 leaving a misleading `editorial` attempt in `started` state.  A SQLite failure
-while recording the pair leaves both attempts recoverable; recovery marks an
-interrupted fidelity call operator-required and never replays it.
+while recording the pair leaves both attempts recoverable. Recovery marks an
+interrupted or terminal failed editorial/fidelity attempt without a saved
+decision operator-required and never replays it.
 
 Safe diagnostics distinguish child launch failure, child nonzero exit, timeout,
 oversized response, stream failure, envelope or tool attestation failure, and

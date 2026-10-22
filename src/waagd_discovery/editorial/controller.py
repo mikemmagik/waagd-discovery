@@ -216,7 +216,10 @@ class Controller:
             return None
         self._fresh(envelope, now)
         request = make_request(candidate, verification, simulation=self.simulation)
-        attempt = store.start_attempt(delivery, key, "editorial", utc(now).isoformat())
+        operation = (
+            "editorial_gateway" if getattr(self.editor, "gateway_backed", False) else "editorial"
+        )
+        attempt = store.start_attempt(delivery, key, operation, utc(now).isoformat())
         try:
             result = self.editor.evaluate(request)
             validate_decision(result, request)
@@ -262,6 +265,24 @@ class Controller:
         """Map untrusted adapter failures to a compact, durable safe taxonomy."""
 
         code = str(error)
+        if code.startswith("editorial_format_retry_exhausted:"):
+            kind = code.removeprefix("editorial_format_retry_exhausted:")
+            if kind in {"json", "schema", "length"}:
+                return code
+        if code in {
+            "editorial_format_json_invalid",
+            "editorial_format_schema_invalid",
+            "editorial_format_length_invalid",
+            "editorial_safety_rejected",
+            "editorial_transport_unavailable",
+            "editorial_outcome_unknown",
+            "editorial_gateway_child_exit_nonzero",
+            "editorial_gateway_timeout",
+            "editorial_gateway_response_too_large",
+            "editorial_gateway_stream_failure",
+            "editorial_gateway_attestation_invalid",
+        }:
+            return code
         if code.startswith("gateway_format_retry_exhausted:"):
             kind = code.removeprefix("gateway_format_retry_exhausted:")
             if kind in {"json", "schema", "length"}:
@@ -324,6 +345,27 @@ class Controller:
     @staticmethod
     def _requires_editorial_operator(code: str) -> bool:
         return code != "editorial_execution_failed"
+
+    @classmethod
+    def _recovered_editorial_failure(cls, operation: str, status: str, error: Any) -> str:
+        """Return a bounded durable error without trusting historic text.
+
+        A crash can happen after an attempt transaction commits but before the
+        delivery transaction records ``operator_required``.  Never turn such a
+        record into another Gateway call.  Keep only a code that the current
+        mapper recognizes exactly; otherwise collapse it to an ambiguous,
+        fail-closed outcome.
+        """
+
+        fallback = (
+            "editorial_fidelity_outcome_unknown"
+            if operation == "fidelity"
+            else "editorial_outcome_unknown"
+        )
+        if status != "failed" or not isinstance(error, str):
+            return fallback
+        mapped = cls._editorial_failure_code(EditorialError(error))
+        return error if mapped == error else fallback
 
     def _excluded(
         self,
@@ -596,21 +638,28 @@ class Controller:
                 "SELECT status,error_code FROM deliveries WHERE delivery_id=?",
                 (envelope["delivery_id"],),
             ).fetchone()
-            interrupted_fidelity = store.connection.execute(
-                "SELECT 1 FROM attempts a JOIN delivery_candidates dc ON "
+            unresolved_editorial = store.connection.execute(
+                "SELECT a.operation,a.status,a.error_code FROM attempts a "
+                "JOIN delivery_candidates dc ON "
                 "dc.delivery_id=a.delivery_id AND dc.candidate_key=a.candidate_key "
                 "LEFT JOIN decisions d ON d.candidate_key=dc.candidate_key "
-                "AND d.revision=dc.revision WHERE a.delivery_id=? AND a.operation='fidelity' "
-                "AND a.status='interrupted' AND d.candidate_key IS NULL",
+                "AND d.revision=dc.revision WHERE a.delivery_id=? "
+                "AND a.operation IN ('editorial','editorial_gateway','fidelity') "
+                "AND a.status IN ('interrupted','failed') AND d.candidate_key IS NULL "
+                "ORDER BY CASE a.operation WHEN 'fidelity' THEN 0 ELSE 1 END, a.started_at DESC ",
                 (envelope["delivery_id"],),
-            ).fetchone()
-            if interrupted_fidelity is not None:
-                store.mark_delivery(
-                    envelope["delivery_id"],
-                    "operator_required",
-                    "editorial_fidelity_outcome_unknown",
+            ).fetchall()
+            for unresolved in unresolved_editorial:
+                code = self._recovered_editorial_failure(
+                    unresolved["operation"], unresolved["status"], unresolved["error_code"]
                 )
-                return self._result(store, envelope["delivery_id"])
+                gateway_turn = unresolved["operation"] in {"editorial_gateway", "fidelity"}
+                known_terminal_failure = unresolved[
+                    "status"
+                ] == "failed" and self._requires_editorial_operator(code)
+                if gateway_turn or known_terminal_failure:
+                    store.mark_delivery(envelope["delivery_id"], "operator_required", code)
+                    return self._result(store, envelope["delivery_id"])
             if (
                 existing is not None
                 and existing["status"] == "operator_required"

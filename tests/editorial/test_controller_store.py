@@ -1725,3 +1725,76 @@ def test_attempt_pair_finish_is_atomic_in_schema_v3_store(tmp_path):
     attempts = rows(controller, "attempts")
     assert next(item for item in attempts if item["attempt_id"] == editorial)["status"] == "started"
     assert next(item for item in attempts if item["attempt_id"] == fidelity)["status"] == "started"
+
+
+def test_restart_after_committed_failed_fidelity_never_replays_or_acks(tmp_path, monkeypatch):
+    """Exercise the crash window after pair commit but before delivery status."""
+
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    controller, bridge, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    value["candidates"][0]["description"] = "A council published a routine filing."
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    editor = DraftEditor("Council Finds Another Form", "A filing acquires a committee and a queue.")
+    gateway = FidelityGatewayFailure("gateway_child_exit_nonzero")
+    controller.editor = editor
+    controller.fidelity_reviewer = GatewayFidelityReviewer(gateway)
+
+    def crash_after_pair(self, delivery, key, status, export_status="not_exported"):
+        del self, delivery, key, status, export_status
+        raise SystemExit("simulated crash after fidelity attempt commit")
+
+    original = EditorialStore.mark_selection_editorial
+    monkeypatch.setattr(EditorialStore, "mark_selection_editorial", crash_after_pair)
+    with pytest.raises(SystemExit, match="simulated crash"):
+        controller.process(NOW)
+    monkeypatch.setattr(EditorialStore, "mark_selection_editorial", original)
+
+    attempts = rows(controller, "attempts")
+    assert (
+        next(item for item in attempts if item["operation"] == "editorial")["status"] == "completed"
+    )
+    assert next(item for item in attempts if item["operation"] == "fidelity")["status"] == "failed"
+    assert rows(controller, "decisions") == []
+
+    recovered = controller.process(NOW)
+
+    assert recovered["status"] == "operator_required"
+    assert recovered["error_code"] == "editorial_fidelity_gateway_child_exit_nonzero"
+    assert editor.calls == gateway.calls == 1
+    assert bridge.acks == 0
+
+
+def test_restart_never_replays_interrupted_gateway_creative_turn(tmp_path):
+    controller, bridge, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+
+    class NeverGateway:
+        gateway_backed = True
+
+        def __init__(self):
+            self.calls = 0
+
+        def evaluate(self, request):
+            del request
+            self.calls += 1
+            raise AssertionError("interrupted Gateway turn must not be repeated")
+
+    gateway = NeverGateway()
+    controller.editor = gateway
+    with controller._store() as store:
+        store.register(value, NOW.isoformat())
+        store.start_attempt(
+            value["delivery_id"],
+            value["candidates"][0]["candidate_key"],
+            "editorial_gateway",
+            NOW.isoformat(),
+        )
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "editorial_outcome_unknown"
+    assert gateway.calls == bridge.acks == 0

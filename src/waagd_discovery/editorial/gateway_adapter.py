@@ -120,6 +120,10 @@ class GatewayBudgetPolicy:
 class GatewayEditor:
     """A bounded editorial turn with one format-only correction attempt."""
 
+    # Lets the Controller durably distinguish an interrupted Gateway turn from
+    # an injected/local editor failure, without inspecting adapter internals.
+    gateway_backed = True
+
     def __init__(
         self,
         executable: Path,
