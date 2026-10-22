@@ -302,6 +302,8 @@ def real_selector_executable(tmp_path):
         "    if count == 0 else []\n"
         "  )\n"
         "  text=json.dumps({'schema_version': 1, 'selected_candidate_keys': keys})\n"
+        "elif b'source-fidelity reviewer' in message:\n"
+        "  text=json.dumps({'schema_version':1,'verdict':'PASS','findings':[]})\n"
         "else:\n"
         "  text=json.dumps({'satirical_angle':'A fictional institution worships procedure.',"
         "'headline':'A Fictional Institution Finds More Forms',"
@@ -1420,3 +1422,184 @@ def test_controller_never_persists_untrusted_editorial_error_suffix(tmp_path, ga
     stored = rows(controller, "attempts")[-1]["error_code"]
     assert stored == "editorial_gateway_response_invalid"
     assert "raw-" not in stored
+
+
+class GroundedTrustedVerifier:
+    def verify(self, candidate, *, policy_id):
+        assert policy_id == "source-verification-v1"
+        return {
+            "schema_version": 1,
+            "candidate_key": candidate["candidate_key"],
+            "verification_status": "TRUSTED_PUBLISHER",
+            "canonical_url": candidate["url"],
+            "fetched_at": NOW.isoformat(),
+            "http_status": 200,
+            "publisher": candidate["publisher"],
+            "publication_date": None,
+            "event_date": None,
+            "evidence": [
+                {
+                    "id": "a" * 64,
+                    "url": candidate["url"],
+                    "retrieved_at": NOW.isoformat(),
+                    "sha256": "b" * 64,
+                    "excerpt": candidate["description"],
+                    "source_kind": "article",
+                }
+            ],
+            "uncertainties": [
+                "Publisher identity is trusted; facts are not independently verified."
+            ],
+            "errors": [],
+            "claim_support": [],
+            "publisher_trust": {
+                "publisher_id": "guardian",
+                "rss_url": "https://www.theguardian.com/world/rss",
+            },
+        }
+
+
+class DraftEditor:
+    def __init__(self, headline, summary):
+        self.headline, self.summary, self.calls = headline, summary, 0
+
+    def evaluate(self, request):
+        self.calls += 1
+        return trusted_decision(
+            request,
+            creative={
+                "satirical_angle": "A bureaucracy mistakes paperwork for public policy.",
+                "headline": self.headline,
+                "summary": self.summary,
+                "article": " ".join(
+                    ["The fictional office filed another form and called the queue a strategy."]
+                    * 12
+                ),
+            },
+            now=NOW,
+        )
+
+
+def fidelity_executable(tmp_path, review, *, exit_code=0):
+    path = tmp_path / "fidelity-openclaw"
+    response = json.dumps(
+        {
+            "status": "ok",
+            "result": {
+                "payloads": [{"text": json.dumps(review)}],
+                "meta": {"toolSummary": {"calls": 0}, "agentMeta": {"costUsd": 0.0}},
+            },
+        }
+    )
+    path.write_text(
+        f"#!{sys.executable}\nimport sys\n"
+        f"sys.stdout.write({response!r})\nraise SystemExit({exit_code})\n"
+    )
+    path.chmod(0o700)
+    return path
+
+
+@pytest.mark.parametrize(
+    ("source", "headline", "summary", "reason"),
+    [
+        (
+            "Airbnb says hosts may not require chores. Hosts may still charge a cleaning fee "
+            "disclosed before booking.",
+            "Airbnb Bans Guest Chores But Still Makes Them Reasonable",
+            "Guests may still charge cleaning fees, now hidden from guests",
+            "scope_misrepresentation",
+        ),
+        (
+            "Tesla and SpaceX are exploring a possible merger. The discussions remain preliminary.",
+            "Tesla-SpaceX merger talks stall on a mountain of unanswered questions",
+            "Preliminary discussions acquire a ceremonial dead end.",
+            "proposal_as_outcome",
+        ),
+        (
+            "A poll reports an approval percentage without explaining voter motivations.",
+            "Trump Approval Shows Voters Have Formally Endorsed Chaos",
+            "A poll result becomes an unsupported theory about voters.",
+            "unsupported_attribution",
+        ),
+    ],
+)
+def test_controller_rejects_operator_canary_paraphrases_via_attested_fidelity_gateway(
+    tmp_path, source, headline, summary, reason
+):
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    controller, _, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    value["candidates"][0]["description"] = source
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    editor = DraftEditor(headline, summary)
+    controller.editor = editor
+    reviewer = {
+        "schema_version": 1,
+        "verdict": "REJECT",
+        "findings": [
+            {
+                "field": "headline",
+                "reason_code": reason,
+                "evidence_refs": ["candidate_description", "a" * 64],
+            }
+        ],
+    }
+    controller.fidelity_reviewer = GatewayFidelityReviewer(
+        GatewayEditor(fidelity_executable(tmp_path, reviewer))
+    )
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == f"editorial_fidelity_{reason}"
+    assert rows(controller, "decisions") == []
+    assert rows(controller, "attempts")[-1]["operation"] == "fidelity"
+
+
+def test_controller_allows_grounded_satire_after_attested_fidelity_pass(tmp_path):
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    controller, _, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    value["candidates"][0]["description"] = "A council published a routine filing about a new form."
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    controller.editor = DraftEditor(
+        "Council Finds Another Form", "A filing acquires a committee and a ceremonial queue."
+    )
+    controller.fidelity_reviewer = GatewayFidelityReviewer(
+        GatewayEditor(
+            fidelity_executable(tmp_path, {"schema_version": 1, "verdict": "PASS", "findings": []})
+        )
+    )
+
+    assert controller.process(NOW)["status"] == "results_saved"
+    assert rows(controller, "decisions")[0]["decision"] == "READY_FOR_REVIEW"
+
+
+def test_interrupted_fidelity_turn_is_not_replayed_automatically(tmp_path):
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    controller, _, _, _, value = setup(tmp_path, count=1, allow_ack=False)
+    value["candidates"][0]["description"] = "A council published a routine filing."
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    editor = DraftEditor("Council Finds Another Form", "A filing acquires a committee and a queue.")
+    controller.editor = editor
+    controller.fidelity_reviewer = GatewayFidelityReviewer(
+        GatewayEditor(
+            fidelity_executable(
+                tmp_path, {"schema_version": 1, "verdict": "PASS", "findings": []}, exit_code=1
+            )
+        )
+    )
+
+    assert controller.process(NOW)["error_code"] == "editorial_fidelity_outcome_unknown"
+    assert controller.process(NOW)["status"] == "operator_required"
+    assert editor.calls == 1

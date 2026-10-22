@@ -153,3 +153,23 @@ attempt row and preserve the delivery and Bridge state. An ambiguous outcome
 (`editorial_outcome_unknown`) must be reconciled outside automated retry;
 create a separately approved recovery plan rather than rerunning the delivery.
 Known Selection failures keep their existing explicit selection-retry path.
+
+## Model-assisted source-fidelity review
+
+For every Gateway-created `READY_FOR_REVIEW` decision, the Controller now makes
+one additional, tool-free Gateway call using the configured OpenRouter free
+route. It receives only the candidate description, bounded fetched excerpts,
+provenance dates, and the headline, summary, and article to review. Its strict
+JSON verdict is `PASS`, `REVISE`, or `REJECT`; non-PASS verdicts must cite only
+allowed candidate/evidence references and a bounded reason code. The trusted
+Controller accepts only an attested `PASS` with no findings.
+
+This advisory review cannot publish, change provenance, select a model, or
+replace the deterministic safety checks. Invalid JSON, tools, failed
+attestation, transport failure, timeout, missing evidence references, and an
+ambiguous result all fail closed. The fidelity attempt is durable. A restart
+never repeats an interrupted fidelity Gateway call; it marks the delivery
+`operator_required` with `editorial_fidelity_outcome_unknown`.
+
+The review helps detect contradictions and unsupported characterisations. It
+cannot prove complete factual correctness or certify that satire is humorous.

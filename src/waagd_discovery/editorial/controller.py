@@ -77,6 +77,7 @@ class Controller:
         allow_ack: bool = False,
         protected_roots: tuple[Path, ...] = (),
         selector: Any | None = None,
+        fidelity_reviewer: Any | None = None,
     ):
         self.inbox = Path(inbox)
         self.store_path = Path(store_path)
@@ -89,6 +90,7 @@ class Controller:
         if simulation and allow_ack:
             raise EditorialError("simulation_ack_forbidden")
         self.bridge, self.verifier, self.editor, self.selector = bridge, verifier, editor, selector
+        self.fidelity_reviewer = fidelity_reviewer
         self.simulation, self.allow_ack = simulation, allow_ack
         self.protected_roots = (self.inbox.parent.parent, *protected_roots)
         # Validate overlaps before even reading an inbox or constructing a store.
@@ -218,12 +220,26 @@ class Controller:
         try:
             result = self.editor.evaluate(request)
             validate_decision(result, request)
+            # Deterministic checks remain a cheap first boundary. They never
+            # replace the bounded model-assisted review below.
             require_source_fidelity(request, result)
         except (EditorialError, io.BridgeError, OSError, ValueError, TypeError) as error:
             code = self._editorial_failure_code(error)
             store.finish_attempt(attempt, utc(now).isoformat(), code)
             store.mark_selection_editorial(delivery, key, "failed")
             return code
+        fidelity_attempt: str | None = None
+        if result["decision"] == "READY_FOR_REVIEW" and self.fidelity_reviewer is not None:
+            fidelity_attempt = store.start_attempt(delivery, key, "fidelity", utc(now).isoformat())
+            try:
+                review = self.fidelity_reviewer.review(request, result)
+                if getattr(review, "code", None) is not None:
+                    raise EditorialError(review.code)
+            except (EditorialError, io.BridgeError, OSError, ValueError, TypeError) as error:
+                code = self._editorial_failure_code(error)
+                store.finish_attempt(fidelity_attempt, utc(now).isoformat(), code)
+                store.mark_selection_editorial(delivery, key, "failed")
+                return code
         self._fresh(envelope, now)
         store.save_decision(
             key, revision, request, result, None if reconsider else delivery, utc(now).isoformat()
@@ -231,6 +247,8 @@ class Controller:
         if not reconsider:
             store.mark_selection_editorial(delivery, key, "completed")
         store.finish_attempt(attempt, utc(now).isoformat())
+        if fidelity_attempt is not None:
+            store.finish_attempt(fidelity_attempt, utc(now).isoformat())
         return None
 
     @staticmethod
@@ -267,6 +285,12 @@ class Controller:
             "editorial_fidelity_unsupported_attribution",
             "editorial_fidelity_contradiction",
             "editorial_fidelity_misleading_timing",
+            "editorial_fidelity_proposal_as_outcome",
+            "editorial_fidelity_scope_misrepresentation",
+            "editorial_fidelity_invented_event",
+            "editorial_fidelity_response_invalid",
+            "editorial_fidelity_transport_unavailable",
+            "editorial_fidelity_outcome_unknown",
         }:
             return code
         if code.startswith("editorial_fidelity_"):
@@ -553,6 +577,21 @@ class Controller:
                 "SELECT status,error_code FROM deliveries WHERE delivery_id=?",
                 (envelope["delivery_id"],),
             ).fetchone()
+            interrupted_fidelity = store.connection.execute(
+                "SELECT 1 FROM attempts a JOIN delivery_candidates dc ON "
+                "dc.delivery_id=a.delivery_id AND dc.candidate_key=a.candidate_key "
+                "LEFT JOIN decisions d ON d.candidate_key=dc.candidate_key "
+                "AND d.revision=dc.revision WHERE a.delivery_id=? AND a.operation='fidelity' "
+                "AND a.status='interrupted' AND d.candidate_key IS NULL",
+                (envelope["delivery_id"],),
+            ).fetchone()
+            if interrupted_fidelity is not None:
+                store.mark_delivery(
+                    envelope["delivery_id"],
+                    "operator_required",
+                    "editorial_fidelity_outcome_unknown",
+                )
+                return self._result(store, envelope["delivery_id"])
             if (
                 existing is not None
                 and existing["status"] == "operator_required"

@@ -241,7 +241,9 @@ def main(argv: list[str] | None = None) -> int:
             verifier: Verifier
             editor: EditorAdapter
             selector = None
+            fidelity_reviewer = None
             if gateway:
+                from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
                 from waagd_discovery.editorial.gateway_adapter import (
                     GatewayBudgetPolicy,
                     GatewayEditor,
@@ -266,6 +268,7 @@ def main(argv: list[str] | None = None) -> int:
                         max_reported_cost_usd=args.gateway_max_cost_usd
                     ),
                 )
+                fidelity_reviewer = GatewayFidelityReviewer(editor)
                 if args.trusted_publishers:
                     from waagd_discovery.editorial.selection_gateway import GatewaySelector
 
@@ -283,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
                 allow_ack=args.allow_ack and gateway,
                 protected_roots=protected,
                 selector=selector,
+                fidelity_reviewer=fidelity_reviewer,
             )
 
         if args.command == "dry-run":

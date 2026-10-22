@@ -128,3 +128,117 @@ def require_source_fidelity(request: dict[str, Any], decision: dict[str, Any]) -
     result = SourceFidelityReviewer().review(request, decision)
     if result.code is not None:
         raise EditorialError(result.code)
+
+
+_FIDELITY_FIELDS = frozenset({"headline", "summary", "article"})
+_FIDELITY_REASONS = frozenset(
+    {
+        "contradiction",
+        "unsupported_attribution",
+        "proposal_as_outcome",
+        "misleading_timing",
+        "scope_misrepresentation",
+        "invented_event",
+    }
+)
+
+
+class GatewayFidelityReviewer:
+    """One bounded, attested advisory review through the existing Gateway.
+
+    Its verdict cannot authorize publication. A valid PASS merely allows trusted
+    policy code to continue; every malformed, incomplete, tool-enabled or
+    uncertain result is represented as a safe fail-closed code.
+    """
+
+    def __init__(self, editor: Any) -> None:
+        if not callable(getattr(editor, "review_fidelity", None)):
+            raise EditorialError("editorial_fidelity_reviewer_invalid")
+        self.editor = editor
+
+    def review(self, request: dict[str, Any], decision: dict[str, Any]) -> SourceFidelityReview:
+        validate_request(request)
+        if decision.get("decision") != "READY_FOR_REVIEW":
+            return SourceFidelityReview()
+        try:
+            value = self.editor.review_fidelity(self._payload(request, decision))
+        except EditorialError as error:
+            return SourceFidelityReview(self._gateway_code(str(error)))
+        except (OSError, ValueError, TypeError):
+            return SourceFidelityReview("editorial_fidelity_transport_unavailable")
+        try:
+            return self._validate(value, request)
+        except (KeyError, TypeError, ValueError):
+            return SourceFidelityReview("editorial_fidelity_response_invalid")
+
+    @staticmethod
+    def _payload(request: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
+        candidate = request["candidate"]
+        verification = request["verification"]
+        return {
+            "schema_version": 1,
+            "candidate": {
+                "title": candidate["title"],
+                "description": candidate["description"],
+                "published_at": candidate["published_at"],
+                "publisher": candidate["publisher"],
+            },
+            "provenance": {
+                "verification_status": verification["verification_status"],
+                "canonical_url": verification["canonical_url"],
+                "publication_date": verification["publication_date"],
+                "event_date": verification["event_date"],
+            },
+            "evidence": [
+                {"id": item["id"], "excerpt": item["excerpt"], "source_kind": item["source_kind"]}
+                for item in verification["evidence"]
+            ],
+            "draft": {field: decision[field] for field in _FIDELITY_FIELDS},
+        }
+
+    @staticmethod
+    def _validate(value: Any, request: dict[str, Any]) -> SourceFidelityReview:
+        if not isinstance(value, dict) or set(value) != {"schema_version", "verdict", "findings"}:
+            raise ValueError
+        if value["schema_version"] != 1 or value["verdict"] not in {"PASS", "REVISE", "REJECT"}:
+            raise ValueError
+        findings = value["findings"]
+        if not isinstance(findings, list) or len(findings) > 5:
+            raise ValueError
+        references = {
+            "candidate_title",
+            "candidate_description",
+            *(item["id"] for item in request["verification"]["evidence"]),
+        }
+        reasons: list[str] = []
+        for finding in findings:
+            if (
+                not isinstance(finding, dict)
+                or set(finding) != {"field", "reason_code", "evidence_refs"}
+                or finding["field"] not in _FIDELITY_FIELDS
+                or finding["reason_code"] not in _FIDELITY_REASONS
+                or not isinstance(finding["evidence_refs"], list)
+                or not 1 <= len(finding["evidence_refs"]) <= 8
+                or not all(
+                    isinstance(ref, str) and ref in references for ref in finding["evidence_refs"]
+                )
+            ):
+                raise ValueError
+            reasons.append(finding["reason_code"])
+        if value["verdict"] == "PASS":
+            if findings:
+                raise ValueError
+            return SourceFidelityReview()
+        if not reasons:
+            raise ValueError
+        # A non-PASS verdict is advisory model evidence, but trusted code turns
+        # its bounded reason into a fail-closed editorial policy result.
+        return SourceFidelityReview("editorial_fidelity_" + reasons[0])
+
+    @staticmethod
+    def _gateway_code(code: str) -> str:
+        if code == "gateway_outcome_unknown":
+            return "editorial_fidelity_outcome_unknown"
+        if code == "gateway_unavailable":
+            return "editorial_fidelity_transport_unavailable"
+        return "editorial_fidelity_response_invalid"
