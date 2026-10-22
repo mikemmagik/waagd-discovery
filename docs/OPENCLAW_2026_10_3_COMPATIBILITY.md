@@ -60,7 +60,7 @@ adapter or change the shared OpenClaw installation.
 ## Upgrade
 
 From an isolated Discovery checkout, preserve the existing SQLite and private
-Bridge state, then replace only the application checkout/image with `v0.6.3`.
+Bridge state, then replace only the application checkout/image with `v0.7.0`.
 Do not ACK, dismiss, reset, or migrate the protected pending delivery
 `dbf6d7a2-395e-40c6-8e91-7866aab89e53`. Keep publication disabled for the
 preflight. Roll back by stopping the new container and restoring the prior
