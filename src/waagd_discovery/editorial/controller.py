@@ -582,7 +582,12 @@ class Controller:
                             ),
                         )
                     else:
+                        selection_attempt = None
+                        selection_received = False
                         try:
+                            selection_attempt = store.start_attempt(
+                                envelope["delivery_id"], None, "selection", utc(now).isoformat()
+                            )
                             store.begin_selection_call(envelope["delivery_id"])
                             chosen: list[str] = []
                             for batch in batches:
@@ -591,21 +596,36 @@ class Controller:
                                 choice = self.selector.select(batch)
                                 chosen.extend(choice.selected[: available - len(chosen)])
                             selected = set(chosen)
+                            selection_received = True
                             store.finish_selection(
                                 envelope["delivery_id"],
                                 sorted(selected),
                                 utc(now).isoformat(),
                             )
-                        except EditorialError:
+                            store.finish_attempt(selection_attempt, utc(now).isoformat())
+                        except EditorialError as error:
+                            code = str(error)
+                            if selection_received:
+                                code = "selection_persistence_failed"
+                            if selection_attempt is not None:
+                                store.finish_attempt(selection_attempt, utc(now).isoformat(), code)
+                            if code == "selection_outcome_unknown" or selection_received:
+                                # A subprocess failure can occur after Gateway
+                                # accepted a selection turn.  A SQLite failure
+                                # after a model response is equally ambiguous:
+                                # keep in_flight so restart never turns either
+                                # case into a new model choice.
+                                store.mark_delivery(
+                                    envelope["delivery_id"], "operator_required", code
+                                )
+                                return self._result(store, envelope["delivery_id"])
                             store.finish_selection(
                                 envelope["delivery_id"],
                                 [],
                                 utc(now).isoformat(),
-                                "selection_failed",
+                                code,
                             )
-                            store.mark_delivery(
-                                envelope["delivery_id"], "retryable", "selection_failed"
-                            )
+                            store.mark_delivery(envelope["delivery_id"], "operator_required", code)
                             return self._result(store, envelope["delivery_id"])
                 else:
                     return self._result(store, envelope["delivery_id"])
@@ -653,6 +673,33 @@ class Controller:
             return {"status": "uninitialized", "schema_version": 1, "simulation": self.simulation}
         with self._store(readonly=True) as store:
             return store.status()
+
+    def retry_selection(self, delivery: str, now: datetime | None = None) -> dict[str, Any]:
+        """Explicitly retry one known Gateway selection failure.
+
+        This is intentionally unavailable for an ``in_flight`` selection:
+        a lost subprocess result may conceal a Gateway turn, which is never
+        safe to replay automatically or through this convenience operation.
+        """
+
+        envelope = self._read()
+        validate_input(envelope, utc(now))
+        if envelope["delivery_id"] != delivery:
+            raise EditorialError("selection_retry_delivery_mismatch")
+        self._authority(envelope, now, allow_acknowledged=False)
+        with self._store() as store:
+            store.recover_attempts(utc(now).isoformat())
+            run = store.selection(delivery)
+            if run is None:
+                raise EditorialError("selection_retry_not_allowed")
+            if run["status"] == "in_flight":
+                return {
+                    **self._result(store, delivery),
+                    "status": "operator_required",
+                    "error_code": "selection_outcome_unknown",
+                }
+            store.reopen_failed_selection(delivery)
+        return self.process(now)
 
     def reconsider(self, candidate_key: str, now: datetime | None = None) -> dict[str, Any]:
         if len(candidate_key) != 64 or any(c not in "0123456789abcdef" for c in candidate_key):

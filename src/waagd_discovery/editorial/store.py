@@ -413,6 +413,16 @@ class EditorialStore:
             ).fetchone()
             if run is None:
                 raise EditorialError("selection_state_invalid")
+            if error is not None:
+                # A Gateway failure is not an editorial rejection. Preserve a
+                # distinct durable state so operators can tell an empty valid
+                # selection from a call that never produced one.
+                self.connection.execute(
+                    "UPDATE selection_items SET status='selection_failed',reason_code=? "
+                    "WHERE run_id=? AND status='shortlisted'",
+                    (error, run[0]),
+                )
+                return
             chosen = set(selected)
             if chosen:
                 placeholders = ",".join("?" for _ in chosen)
@@ -451,6 +461,38 @@ class EditorialStore:
             ).rowcount
             if updated != 1:
                 raise EditorialError("selection_state_invalid")
+
+    def reopen_failed_selection(self, delivery: str) -> None:
+        """Require an explicit operator action before retrying a known failure.
+
+        ``in_flight`` calls are intentionally excluded: their outcome is
+        ambiguous and must never be replayed from this store.
+        """
+
+        with self.transaction():
+            run = self.connection.execute(
+                "SELECT run_id,status FROM selection_runs WHERE delivery_id=?", (delivery,)
+            ).fetchone()
+            if run is None or run["status"] != "failed":
+                raise EditorialError("selection_retry_not_allowed")
+            if self.connection.execute(
+                "SELECT 1 FROM decisions d JOIN delivery_candidates c "
+                "ON c.candidate_key=d.candidate_key AND c.revision=d.revision "
+                "WHERE c.delivery_id=?",
+                (delivery,),
+            ).fetchone():
+                raise EditorialError("selection_retry_not_allowed")
+            self.connection.execute(
+                "UPDATE selection_runs SET selected=NULL,status='started',finished_at=NULL,"
+                "error_code=NULL WHERE delivery_id=?",
+                (delivery,),
+            )
+            self.connection.execute(
+                "UPDATE selection_items SET status='shortlisted',reason_code=NULL,"
+                "editorial_status=NULL,export_status='not_exported' "
+                "WHERE run_id=? AND status='selection_failed'",
+                (run["run_id"],),
+            )
 
     def selected_today(self, day: str, *, excluding_delivery: str | None = None) -> int:
         query = (

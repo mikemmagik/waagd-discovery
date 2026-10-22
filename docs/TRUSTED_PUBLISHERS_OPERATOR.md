@@ -23,6 +23,14 @@ For `TRUSTED_PUBLISHER`, the free Gateway receives the bounded original report a
 
 The selector accepts only compact candidate identity, headline, summary and publisher fields. It may choose zero through five candidates; malformed or ineligible IDs fail closed. Candidates are deterministically de-duplicated and split into bounded 25-item model turns. The private Editorial Store records the run ID, UTC day, shortlist hashes, selected and rejected status, reason code, editorial completion and export state; it never stores the model reply or prompt. A completed selection is reused after restart. The local five-item limit is a safety ceiling; the Site remains authoritative for its atomic daily quota.
 
+## Selection failure recovery
+
+An empty, attested selection is a completed run with `selected=[]`. A Gateway, envelope, attestation, budget or selection-schema failure is instead recorded as `operator_required` with a bounded `selection_*` error code; shortlisted entries become `selection_failed` and no editorial decision is fabricated.
+
+Do not ACK, reset or alter the delivery to clear such an error. For a completed Gateway response with a known parsing or schema failure, an operator may make one explicitly authorized retry using the normal isolated Gateway configuration and `waagd-editorial retry-selection --delivery-id <delivery-id> --operator-confirm`. The command accepts only a durable `failed` selection with no decisions or ACK, preserves its attempt history and starts a fresh recorded attempt.
+
+`selection_outcome_unknown` is different: the prior Gateway call may have completed after the local process lost its result. It remains `in_flight`; `retry-selection` refuses it. Preserve the delivery and obtain a separate operator reconciliation plan before any new delivery is created.
+
 ## Site dependency before automatic publication
 
 The Trusted Publisher route produces **PublicationIntent v2** with the explicit `editorial.review_route=trusted_publisher` and structured publisher provenance. The existing independently `VERIFIED` route remains PublicationIntent v1. The local producer is contract-tested against the Site v2 fixtures at `10717e490309c4c742097095456200ea4ba24dff`.

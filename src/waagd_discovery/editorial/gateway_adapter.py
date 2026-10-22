@@ -480,7 +480,17 @@ class GatewayEditor:
                 completion["terminal_disposition"] = receipt["terminalDisposition"]
         self._last_completion = completion
 
-    def _parse(self, raw: bytes, request: dict[str, Any]) -> dict[str, Any]:
+    def _parse_envelope_text(
+        self, raw: bytes
+    ) -> tuple[dict[str, Any], dict[str, Any], str, tuple[dict[str, Any], ...]]:
+        """Validate the common ``openclaw agent --json`` envelope.
+
+        The editorial writer and bounded selector share the exact same
+        tool-attestation and payload-envelope rules.  In particular, OpenClaw
+        may attach harmless empty payload metadata; requiring an item to have
+        exactly one ``text`` key would reject an otherwise valid, attested run.
+        """
+
         try:
             envelope = io.decode(raw)
         except (io.BridgeError, UnicodeError):
@@ -506,6 +516,10 @@ class GatewayEditor:
             raise EditorialError("gateway_envelope_invalid")
         containers = self._validate_tool_attestation(envelope, result)
         self._record_completion(envelope, result)
+        return envelope, result, item["text"], containers
+
+    def _parse(self, raw: bytes, request: dict[str, Any]) -> dict[str, Any]:
+        _, _, text, containers = self._parse_envelope_text(raw)
         if self.budget_policy.max_reported_cost_usd is not None:
             cost = self._reported_cost(containers)
             if (
@@ -516,10 +530,10 @@ class GatewayEditor:
                 or cost > self.budget_policy.max_reported_cost_usd
             ):
                 raise EditorialError("gateway_cost_unverified")
-        if not item["text"].strip():
+        if not text.strip():
             raise EditorialError("gateway_empty_response")
         try:
-            creative = io.decode(item["text"].encode("utf-8"))
+            creative = io.decode(text.encode("utf-8"))
         except (io.BridgeError, UnicodeError):
             raise EditorialError("gateway_model_json_invalid") from None
         self._validate_creative(creative)

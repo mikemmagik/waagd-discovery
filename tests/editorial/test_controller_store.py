@@ -501,16 +501,80 @@ def test_restart_after_ambiguous_selection_never_replays_gateway_call(tmp_path):
     assert editor.calls == []
 
 
+def test_selection_persistence_failure_never_replays_received_choice(tmp_path, monkeypatch):
+    controller, bridge, editor, selector, _ = trusted_setup(tmp_path, count=3, selected=1)
+
+    def fail_persist(self, *args, **kwargs):
+        del self, args, kwargs
+        raise EditorialError("editorial_store_write_failed")
+
+    monkeypatch.setattr(EditorialStore, "finish_selection", fail_persist)
+    result = controller.process(NOW)
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "selection_persistence_failed"
+    assert selector.calls == 1
+    assert editor.calls == []
+    assert rows(controller, "selection_runs")[0]["status"] == "in_flight"
+
+    restarted = Controller(
+        controller.inbox,
+        controller.store_path,
+        bridge,
+        controller.verifier,
+        editor,
+        simulation=False,
+        allow_ack=False,
+        selector=selector,
+    )
+    assert restarted.process(NOW)["error_code"] == "selection_outcome_unknown"
+    assert selector.calls == 1
+
+
 def test_controller_blocks_invalid_selection_before_any_editorial_call(tmp_path):
     controller, _, editor, selector, _ = trusted_setup(tmp_path, count=3, selected=1)
     selector.fail = True
 
     result = controller.process(NOW)
 
-    assert result["status"] == "retryable"
+    assert result["status"] == "operator_required"
     assert result["error_code"] == "selection_failed"
     assert editor.calls == []
     assert rows(controller, "decisions") == []
+    items = rows(controller, "selection_items")
+    assert {item["status"] for item in items} == {"selection_failed"}
+    assert {item["reason_code"] for item in items} == {"selection_failed"}
+
+
+def test_operator_can_retry_known_selection_failure_but_not_ambiguous_call(tmp_path):
+    controller, _, editor, selector, value = trusted_setup(tmp_path, count=3, selected=1)
+    selector.fail = True
+
+    assert controller.process(NOW)["status"] == "operator_required"
+    selector.fail = False
+    selector.calls = 0
+    result = controller.retry_selection(value["delivery_id"], NOW)
+
+    assert result["status"] == "results_saved"
+    assert len(editor.calls) == 1
+    attempts = rows(controller, "attempts")
+    assert [row["operation"] for row in attempts] == [
+        "verification",
+        "verification",
+        "verification",
+        "selection",
+        "selection",
+        "editorial",
+    ]
+    assert attempts[3]["error_code"] == "selection_failed"
+    assert attempts[4]["status"] == "completed"
+
+    ambiguous, _, _, _, ambiguous_value = trusted_setup(tmp_path / "ambiguous", count=1, selected=1)
+    ambiguous.selector = InterruptSelector()
+    with pytest.raises(KeyboardInterrupt):
+        ambiguous.process(NOW)
+    result = ambiguous.retry_selection(ambiguous_value["delivery_id"], NOW)
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "selection_outcome_unknown"
 
 
 def test_controller_canonical_url_duplicate_never_reaches_editor_twice(tmp_path):

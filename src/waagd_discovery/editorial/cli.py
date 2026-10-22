@@ -195,13 +195,16 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("dry-run")
     commands.add_parser("process")
     commands.add_parser("gateway-process")
+    retry_selection = commands.add_parser("retry-selection")
+    retry_selection.add_argument("--delivery-id", required=True)
+    retry_selection.add_argument("--operator-confirm", action="store_true")
     commands.add_parser("status")
     reconsider = commands.add_parser("reconsider")
     reconsider.add_argument("--candidate-key", required=True)
     args = parser.parse_args(argv)
     try:
         config = load_config(args.config)
-        gateway = args.command == "gateway-process"
+        gateway = args.command in {"gateway-process", "retry-selection"}
         if (args.allow_ack and not gateway) or (
             not args.simulation and args.command != "status" and not gateway
         ):
@@ -217,6 +220,8 @@ def main(argv: list[str] | None = None) -> int:
             or not config.llm_enabled
         ):
             raise EditorialError("gateway_processing_not_authorized")
+        if args.command == "retry-selection" and not args.operator_confirm:
+            raise EditorialError("selection_retry_confirmation_required")
         maximum_gateway_candidates = 50 if args.trusted_publishers else 10
         if gateway and (
             isinstance(args.gateway_max_candidates, bool)
@@ -298,6 +303,9 @@ def main(argv: list[str] | None = None) -> int:
                 result = instance.status()
             elif args.command == "reconsider":
                 result = instance.reconsider(args.candidate_key)
+            elif args.command == "retry-selection":
+                _check_gateway_batch(args.inbox, args.gateway_max_candidates)
+                result = instance.retry_selection(args.delivery_id)
             else:
                 if gateway:
                     _check_gateway_batch(args.inbox, args.gateway_max_candidates)
