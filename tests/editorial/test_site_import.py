@@ -33,50 +33,13 @@ def _private(path: Path, content: bytes = b"token") -> Path:
 
 
 def _intent(path: Path) -> Path:
-    from waagd_discovery.editorial.publication import _content_hash
-
-    value = {
-        "version": 2,
-        "intent_id": "auto-fixture-r1",
-        "origin": "auto",
-        "authorization": {"kind": "discovery", "approved": True},
-        "editorial": {
-            "decision_id": "decision-fixture-r1",
-            "source_event_id": "fixture-event",
-            "source_attribution": "Fixture News",
-            "approved_at": "2026-10-23T00:00:00.000Z",
-            "publication_policy": {"version": "publication-policy-v1", "outcome": "approved"},
-            "review_route": "trusted_publisher_auto",
-            "trusted_publisher": {
-                "publisher_id": "fixture",
-                "publisher_name": "Fixture News",
-                "trusted_rss_url": "https://fixture.example.test/rss",
-                "article_url": "https://fixture.example.test/story",
-                "article_host": "fixture.example.test",
-                "verified_at": "2026-10-23T00:00:00.000Z",
-                "safety_gates": {
-                    "publisher_identity": True,
-                    "safe_retrieval": True,
-                    "sensitive_content": "clear",
-                },
-            },
-        },
-        "post": {
-            "type": "news",
-            "origin": "auto",
-            "url": "https://fixture.example.test/story",
-            "canonical_url": "https://fixture.example.test/story",
-            "source_item_id": "waagd:fixture",
-            "title": "Fixture title",
-            "source": "WAAGD",
-            "preview": None,
-            "embed": None,
-            "body": "Fixture body",
-            "references": [{"url": "https://fixture.example.test/story", "title": "Fixture"}],
-        },
-    }
-    value["content_hash"] = _content_hash(value)
-    return _private(path, json.dumps(value, separators=(",", ":")).encode())
+    fixture = (
+        Path(__file__).parent
+        / "fixtures"
+        / "site-v2"
+        / "publication-intent-v2-trusted-publisher.json"
+    )
+    return _private(path, fixture.read_bytes())
 
 
 def _fake(path: Path) -> Path:
