@@ -76,10 +76,33 @@ launchctl bootstrap gui/"$(id -u)" /absolute/Library/LaunchAgents/com.waagd.auto
 /absolute/venv/bin/waagd-autonomous --state-dir /absolute/autonomous enable
 ```
 
-`/absolute/bin/run-waagd-autonomous-cycle` is a service-user-owned `0700` wrapper
-which executes the fixed cycle command above and prints only its bounded JSON.
-It must not source an interactive profile or add Site credentials to the
-editorial environment.
+Create `/absolute/bin/run-waagd-autonomous-cycle` as a service-user-owned `0700`
+wrapper which executes the fixed cycle command above and prints only its bounded
+JSON. It must not source an interactive profile or add Site credentials to the
+editorial environment. Then create this user-owned LaunchAgent at
+`/absolute/Library/LaunchAgents/com.waagd.autonomous.plist`, replacing each
+`/absolute/...` value before loading it:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.waagd.autonomous</string>
+  <key>ProgramArguments</key><array>
+    <string>/absolute/venv/bin/waagd-autonomous</string>
+    <string>--state-dir</string><string>/absolute/autonomous</string>
+    <string>--timezone</string><string>Asia/Bangkok</string>
+    <string>--daily-time</string><string>08:00</string>
+    <string>--cycle-command</string><string>/absolute/bin/run-waagd-autonomous-cycle</string>
+    <string>run-due</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>300</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/absolute/autonomous/launchd.out.log</string>
+  <key>StandardErrorPath</key><string>/absolute/autonomous/launchd.err.log</string>
+</dict></plist>
+```
 
 Use a user LaunchAgent with `RunAtLoad`, `StartInterval` 300, and absolute
 `ProgramArguments` invoking `waagd-autonomous ... run-due`. The periodic wake is
@@ -112,3 +135,9 @@ Rollback pauses the Discovery journal and Site auto policy, unloads the
 LaunchAgent, preserves the Editorial/auto/Site state directories, and returns to
 the backed-up independent staging checkout. Never reset an SQLite journal or
 replay an uncertain intent.
+
+```sh
+/absolute/venv/bin/waagd-autonomous --state-dir /absolute/autonomous pause
+launchctl bootout gui/"$(id -u)" /absolute/Library/LaunchAgents/com.waagd.autonomous.plist
+# Keep all SQLite journals and immutable intent files for receipt reconciliation.
+```

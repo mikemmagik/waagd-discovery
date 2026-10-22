@@ -48,6 +48,19 @@ def test_one_local_day_runs_once_even_with_duplicate_timer(tmp_path: Path) -> No
     assert len(calls) == 1
 
 
+def test_two_simulated_daily_cycles_have_distinct_local_dates(tmp_path: Path) -> None:
+    calls: list[tuple[str, str]] = []
+    instance = coordinator(tmp_path / "private", calls)
+    instance.install()
+    instance.enable()
+
+    first = instance.run_due(at("2026-10-23T01:05:00+00:00"))
+    second = instance.run_due(at("2026-10-24T01:05:00+00:00"))
+
+    assert first["status"] == second["status"] == "completed"
+    assert [date for _, date in calls] == ["2026-10-23", "2026-10-24"]
+
+
 def test_pre_slot_wake_catches_only_yesterday_once(tmp_path: Path) -> None:
     calls: list[tuple[str, str]] = []
     instance = coordinator(tmp_path / "private", calls)

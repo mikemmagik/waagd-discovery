@@ -966,7 +966,7 @@ def test_store_rejects_hybrid_prepublication_schema_without_reset(tmp_path):
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize("version", [-1, 4, 99])
+@pytest.mark.parametrize("version", [-1, 5, 99])
 def test_store_rejects_newer_schema_without_reset(tmp_path, version):
     path = tmp_path.resolve() / "private" / "editorial.sqlite3"
     with EditorialStore(path, simulation=True):
@@ -1729,11 +1729,11 @@ def test_fidelity_safety_rejection_finishes_creative_attempt_and_never_acks(tmp_
     assert bridge.acks == 0
 
 
-def test_attempt_pair_finish_is_atomic_in_schema_v3_store(tmp_path):
+def test_attempt_pair_finish_is_atomic_in_schema_v4_store(tmp_path):
     controller, _, _, _, value = setup(tmp_path, count=1, allow_ack=False)
     controller.process(NOW)
     with EditorialStore(controller.store_path, simulation=False) as store:
-        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 4
         editorial = store.start_attempt(
             value["delivery_id"],
             value["candidates"][0]["candidate_key"],
