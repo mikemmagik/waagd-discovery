@@ -81,6 +81,56 @@ class PublishImportOutcomeParser:
             return SiteImportOutcome("uncertain")
 
 
+class StagingReceiptOutcomeParser:
+    """Require the pinned Site's receipt to attest staging routing and identity.
+
+    This stricter parser is selected only by the unattended staging package.
+    The older generic parser remains available to its frozen, separately tested
+    Site protocol callers.
+    """
+
+    _codes = {"created": 0, "duplicate": 0, "held": 2, "uncertain": 3, "failed": 1}
+
+    def __init__(self, staging_origin: str, state_id: str) -> None:
+        if (
+            not isinstance(staging_origin, str)
+            or staging_origin != "https://waagd-staging.waagd.workers.dev"
+        ):
+            raise EditorialError("site_staging_origin_invalid")
+        if not isinstance(state_id, str) or _SAFE_RECEIPT.fullmatch(state_id) is None:
+            raise EditorialError("site_staging_state_invalid")
+        self.staging_origin = staging_origin
+        self.state_id = state_id
+
+    def parse_for_intent(
+        self, returncode: int, output: bytes, intent: dict[str, object]
+    ) -> SiteImportOutcome:
+        try:
+            value = json.loads(output.decode("utf-8"))
+            if not isinstance(value, dict) or set(value) != {"outcome", "receipt"}:
+                raise ValueError
+            outcome, receipt = value["outcome"], value["receipt"]
+            if (
+                not isinstance(outcome, str)
+                or self._codes.get(outcome) != returncode
+                or not isinstance(receipt, dict)
+                or set(receipt) != {"intent_id", "origin", "state_id", "receipt_id"}
+                or receipt["intent_id"] != intent.get("intent_id")
+                or receipt["origin"] != self.staging_origin
+                or receipt["state_id"] != self.state_id
+                or not _SAFE_RECEIPT.fullmatch(receipt["receipt_id"])
+            ):
+                raise ValueError
+            return SiteImportOutcome(cast(SiteOutcomeStatus, outcome), receipt["receipt_id"])
+        except (UnicodeDecodeError, TypeError, ValueError):
+            return SiteImportOutcome("uncertain")
+
+    def parse(self, returncode: int, output: bytes) -> SiteImportOutcome:
+        """Context-free receipt parsing is deliberately never authoritative."""
+        del returncode, output
+        return SiteImportOutcome("uncertain")
+
+
 def _private_file(path: Path, *, code: str) -> Path:
     try:
         resolved = path.resolve(strict=True)
@@ -226,7 +276,15 @@ class CommandSiteImporter:
         if len(completed.stdout) > _MAXIMUM_OUTPUT:
             return SiteImportOutcome("uncertain")
         try:
-            outcome = self.parser.parse(completed.returncode, completed.stdout)
+            decoded = io.decode(_intent_bytes(path))
+            if not isinstance(decoded, dict):
+                raise ValueError
+            contextual = getattr(self.parser, "parse_for_intent", None)
+            outcome = (
+                contextual(completed.returncode, completed.stdout, decoded)
+                if callable(contextual)
+                else self.parser.parse(completed.returncode, completed.stdout)
+            )
             if not isinstance(outcome, SiteImportOutcome):
                 raise ValueError
             return outcome

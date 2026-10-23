@@ -51,6 +51,27 @@ def test_one_local_day_runs_once_even_with_duplicate_timer(tmp_path: Path) -> No
     assert len(calls) == 1
 
 
+def test_five_publications_cannot_be_followed_by_another_daily_cycle(tmp_path: Path) -> None:
+    """The durable local-date journal preserves the delivery cap after restart."""
+
+    calls: list[tuple[str, str]] = []
+
+    def five_items(cycle_id: str, date: str) -> dict[str, object]:
+        calls.append((cycle_id, date))
+        return {"status": "completed", "delivered": 5}
+
+    root = tmp_path / "private"
+    first = DailyCoordinator(root, DailyPolicy(), five_items)
+    first.install()
+    first.enable()
+    now = at("2026-10-23T01:00:00+00:00")
+    assert first.run_due(now)["status"] == "completed"
+    # Reopening mimics launchd restart or another wake on the same Bangkok day.
+    second = DailyCoordinator(root, DailyPolicy(), five_items)
+    assert second.run_due(now) == {"status": "not_due"}
+    assert len(calls) == 1
+
+
 def test_two_simulated_daily_cycles_have_distinct_local_dates(tmp_path: Path) -> None:
     calls: list[tuple[str, str]] = []
     instance = coordinator(tmp_path / "private", calls)

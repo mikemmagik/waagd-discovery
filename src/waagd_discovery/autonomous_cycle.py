@@ -95,7 +95,10 @@ class TrustedStageCommand:
             return "operator_required"
         if status == "retryable":
             return "retryable"
-        return "completed"
+        # A syntactically valid object is not evidence of completed work.
+        # Every stage wrapper must positively attest its one permitted success
+        # value before a later stage, especially Site delivery, can run.
+        return "completed" if value == {"status": "completed"} else "operator_required"
 
 
 class AutonomousCycle:

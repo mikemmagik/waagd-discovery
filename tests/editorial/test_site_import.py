@@ -13,6 +13,7 @@ from waagd_discovery.editorial.site_import import (
     PublishImportOutcomeParser,
     SiteImportCommand,
     SiteImportOutcome,
+    StagingReceiptOutcomeParser,
 )
 
 
@@ -98,6 +99,29 @@ def test_finalized_site_outcome_protocol_is_strict(outcome: str, code: int) -> N
     unexpected_code = 1 if code == 0 else 0
     assert parser.parse(unexpected_code, output) == SiteImportOutcome("uncertain")
     assert parser.parse(code, b'{"outcome":"created","extra":true}') == SiteImportOutcome(
+        "uncertain"
+    )
+
+
+def test_staging_receipt_binds_the_origin_intent_and_state(tmp_path: Path) -> None:
+    intent = json.loads(_intent(tmp_path.resolve() / "publication-intent.json").read_bytes())
+    parser = StagingReceiptOutcomeParser(
+        "https://waagd-staging.waagd.workers.dev", "staging-state-1"
+    )
+    valid = {
+        "outcome": "created",
+        "receipt": {
+            "intent_id": intent["intent_id"],
+            "origin": "https://waagd-staging.waagd.workers.dev",
+            "state_id": "staging-state-1",
+            "receipt_id": "receipt-1",
+        },
+    }
+    assert parser.parse_for_intent(0, json.dumps(valid).encode(), intent) == SiteImportOutcome(
+        "created", "receipt-1"
+    )
+    valid["receipt"]["origin"] = "https://waagd.workers.dev"
+    assert parser.parse_for_intent(0, json.dumps(valid).encode(), intent) == SiteImportOutcome(
         "uncertain"
     )
 

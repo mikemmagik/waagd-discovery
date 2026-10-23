@@ -6,6 +6,7 @@ import argparse
 import json
 import shlex
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from waagd_discovery.autonomous_cycle import AutonomousCycle, TrustedStageCommand
@@ -15,6 +16,7 @@ from waagd_discovery.editorial.site_import import (
     CommandSiteImporter,
     PublishImportOutcomeParser,
     SiteImportCommand,
+    StagingReceiptOutcomeParser,
 )
 from waagd_discovery.models import DiscoveryError
 
@@ -35,6 +37,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--editorial-store", type=Path, required=True)
     parser.add_argument("--publication-output", type=Path, required=True)
     parser.add_argument("--publication-policy", type=Path, required=True)
+    parser.add_argument("--site-paused", action="store_true")
+    parser.add_argument("--staging-origin")
+    parser.add_argument("--staging-state-id")
     parser.add_argument("--site-executable", type=Path, required=True)
     parser.add_argument("--site-argument", action="append", default=[])
     parser.add_argument("--site-working-directory", type=Path, required=True)
@@ -48,12 +53,19 @@ def main(argv: list[str] | None = None) -> int:
                 working_directory=args.site_working_directory,
             ),
             args.ingress_token_file,
-            parser=PublishImportOutcomeParser(),
+            parser=(
+                StagingReceiptOutcomeParser(args.staging_origin, args.staging_state_id)
+                if args.staging_origin
+                else PublishImportOutcomeParser()
+            ),
         )
+        policy = load_publication_policy(args.publication_policy)
+        if args.site_paused:
+            policy = replace(policy, automatic_enabled=False)
         delivery = PublicationDelivery(
             args.editorial_store,
             args.publication_output,
-            load_publication_policy(args.publication_policy),
+            policy,
             importer,
         )
         timeouts = args.stage_timeout_seconds or [10_800] * len(args.stage_command)

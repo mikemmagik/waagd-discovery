@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "staging_origin": "https://waagd-staging.waagd.workers.dev",
+  "paths": {
+    "active_export": "/absolute/private/scheduler-export/candidates.json",
+    "snapshot_dir": "/absolute/private/waagd-staging/snapshots",
+    "bridge": "/absolute/venv/bin/waagd-bridge",
+    "bridge_workspace": "/absolute/private/waagd-staging/bridge-workspace",
+    "bridge_state": "/absolute/private/waagd-staging/bridge-state",
+    "editorial": "/absolute/venv/bin/waagd-editorial",
+    "editorial_config": "/absolute/private/waagd-staging/editorial.yaml",
+    "editorial_store": "/absolute/private/waagd-staging/editorial.sqlite3",
+    "gateway": "/absolute/openclaw-gateway/bin/openclaw",
+    "gateway_config": "/absolute/private/openclaw-waagd/config.json",
+    "gateway_state": "/absolute/private/openclaw-waagd/state",
+    "gateway_home": "/absolute/private/openclaw-waagd/home",
+    "trusted_publishers": "/absolute/private/waagd-staging/trusted_publishers.yaml",
+    "publication_policy": "/absolute/private/waagd-staging/publication.yaml",
+    "publication_output": "/absolute/private/waagd-staging/publication/publication-intent.json",
+    "autonomous_cycle": "/absolute/venv/bin/waagd-autonomous-cycle",
+    "staging": "/absolute/venv/bin/waagd-staging",
+    "site_node": "/absolute/node/bin/node",
+    "site_command": "/absolute/site-staging/automation/cli.ts",
+    "site_environment_file": "/absolute/private/waagd-staging/site.env",
+    "site_working_directory": "/absolute/site-staging",
+    "ingress_token_file": "/absolute/private/waagd-staging/discovery-ingress.token",
+    "site_state_dir": "/absolute/private/waagd-staging/site-state",
+    "site_state_id": "waagd-staging-daily-v1",
+    "runtime_state_dir": "/absolute/private/waagd-staging/runtime-state"
+  },
+  "limits": {"gateway_max_candidates": 5, "gateway_max_cost_usd": 0.10},
+  "timeouts": {"bridge_seconds": 900, "editorial_seconds": 10800, "cycle_seconds": 15600}
+}

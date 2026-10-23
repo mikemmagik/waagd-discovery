@@ -42,7 +42,7 @@ def _delivery(root: Path) -> PublicationDelivery:
 
 def test_cycle_runs_sanitized_upstream_then_delivers(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("SITE_TEST_SECRET", "never-forwarded")
-    cycle = AutonomousCycle((_stage(tmp_path, "synced"),), _delivery(tmp_path))
+    cycle = AutonomousCycle((_stage(tmp_path, "completed"),), _delivery(tmp_path))
     assert cycle.run() == {"status": "completed", "code": None, "delivered": 2, "held": 0}
 
 
@@ -59,7 +59,7 @@ def test_cycle_does_not_deliver_after_upstream_operator_hold(tmp_path: Path) -> 
 def test_side_effecting_stage_timeout_or_exit_requires_operator(
     tmp_path: Path, monkeypatch
 ) -> None:
-    stage = _stage(tmp_path, "synced")
+    stage = _stage(tmp_path, "completed")
 
     def timeout(*_args, **_kwargs):
         raise subprocess.TimeoutExpired("synthetic", 1)
@@ -73,14 +73,20 @@ def test_side_effecting_stage_timeout_or_exit_requires_operator(
 
 
 def test_stage_timeout_budget_supports_five_story_gateway_batch(tmp_path: Path) -> None:
-    stage = _stage(tmp_path, "synced")
+    stage = _stage(tmp_path, "completed")
     editorial = TrustedStageCommand(stage.executable, stage.arguments, timeout_seconds=10_800)
     cycle = AutonomousCycle((editorial,), _delivery(tmp_path), timeout_seconds=14_400)
     assert cycle.timeout_seconds == 14_400
 
 
 def test_explicit_cycle_budget_includes_required_overhead(tmp_path: Path) -> None:
-    stage = _stage(tmp_path, "synced")
+    stage = _stage(tmp_path, "completed")
     editorial = TrustedStageCommand(stage.executable, stage.arguments, timeout_seconds=10_800)
     with pytest.raises(DiscoveryError, match="autonomous_cycle_timeout_invalid"):
         AutonomousCycle((editorial,), _delivery(tmp_path), timeout_seconds=13_800)
+
+
+@pytest.mark.parametrize("result", ["synced", "error", "{}"])
+def test_stage_rejects_any_non_attested_success(tmp_path: Path, result: str) -> None:
+    stage = _stage(tmp_path, result)
+    assert stage.run() == "operator_required"
