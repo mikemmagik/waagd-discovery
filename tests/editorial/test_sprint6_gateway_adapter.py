@@ -193,6 +193,45 @@ def envelope(*, calls: int = 0, text: str | None = None) -> bytes:
     return json.dumps(value).encode()
 
 
+def fidelity_cli(
+    tmp_path: Path,
+    text: str,
+    *,
+    calls: int = 0,
+    exit_code: int = 0,
+    delay: int = 0,
+    invocation_log: Path | None = None,
+) -> Path:
+    """A tool-free synthetic Fidelity response; it records no prompt or model text."""
+
+    path = tmp_path / "fidelity-openclaw"
+    record = ""
+    if invocation_log is not None:
+        record = f"pathlib.Path({str(invocation_log)!r}).open('a').write('1')\n"
+    path.write_text(
+        f"#!{sys.executable}\n"
+        "import pathlib, sys, time\n"
+        f"{record}"
+        f"time.sleep({delay})\n"
+        f"sys.stdout.buffer.write({envelope(calls=calls, text=text)!r})\n"
+        f"raise SystemExit({exit_code})\n"
+    )
+    path.chmod(0o700)
+    return path
+
+
+def fidelity_value(
+    verdict: str = "PASS", findings: list[dict[str, object]] | None = None, **extra: object
+) -> str:
+    return json.dumps(
+        {"schema_version": 1, "verdict": verdict, "findings": findings or [], **extra}
+    )
+
+
+def fenced(value: str, language: str = "json") -> str:
+    return f"```{language}\n{value}\n```"
+
+
 def openclaw_2026_10_3(*, text: str | None = None) -> dict[str, Any]:
     """De-identified shape captured from `openclaw agent --json` 2026.10.3."""
 
@@ -232,6 +271,140 @@ def test_gateway_default_and_configured_timeout_propagate_to_child(tmp_path: Pat
     )
 
     assert timeouts.read_text().splitlines() == ["118", "358"]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (fidelity_value(), None),
+        (fenced(fidelity_value()), None),
+        (fenced(fidelity_value(), ""), None),
+        (
+            fenced(
+                fidelity_value(
+                    "REVISE",
+                    [
+                        {
+                            "field": "headline",
+                            "reason_code": "contradiction",
+                            "evidence_refs": ["a" * 64],
+                        }
+                    ],
+                )
+            ),
+            "editorial_fidelity_contradiction",
+        ),
+        (
+            fenced(
+                fidelity_value(
+                    "REJECT",
+                    [
+                        {
+                            "field": "article",
+                            "reason_code": "invented_event",
+                            "evidence_refs": ["b" * 64],
+                        }
+                    ],
+                )
+            ),
+            "editorial_fidelity_invented_event",
+        ),
+    ],
+)
+def test_fidelity_accepts_only_raw_or_complete_json_fence(
+    tmp_path: Path, text: str, expected: str | None
+) -> None:
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    review = GatewayFidelityReviewer(GatewayEditor(fidelity_cli(tmp_path, text))).review(
+        request(),
+        {"decision": "READY_FOR_REVIEW", "headline": "h", "summary": "s", "article": "a"},
+    )
+
+    assert review.code == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        fenced("{not-json}"),
+        fenced('{"schema_version":1,"schema_version":1,"verdict":"PASS","findings":[]}'),
+        fenced('{"schema_version":1,"verdict":"PASS","findings":[],"extra":NaN}'),
+        "Explanation\n" + fenced(fidelity_value()),
+        fenced(fidelity_value()) + "\n" + fenced(fidelity_value()),
+        "```json\n" + fidelity_value(),
+    ],
+)
+def test_fidelity_rejects_malformed_or_nonexclusive_fence(tmp_path: Path, text: str) -> None:
+    with pytest.raises(EditorialError, match="^gateway_model_json_invalid$"):
+        GatewayEditor(fidelity_cli(tmp_path, text)).review_fidelity({})
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        fenced(fidelity_value(extra_field=True)),
+        fenced(
+            fidelity_value(
+                "REVISE",
+                [
+                    {
+                        "field": "headline",
+                        "reason_code": "contradiction",
+                        "evidence_refs": ["unknown"],
+                    }
+                ],
+            )
+        ),
+        fenced(fidelity_value("REJECT", [{"field": "article", "reason_code": "invented_event"}])),
+    ],
+)
+def test_fidelity_fence_preserves_strict_downstream_contract(tmp_path: Path, text: str) -> None:
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    review = GatewayFidelityReviewer(GatewayEditor(fidelity_cli(tmp_path, text))).review(
+        request(),
+        {"decision": "READY_FOR_REVIEW", "headline": "h", "summary": "s", "article": "a"},
+    )
+    assert review.code == "editorial_fidelity_response_invalid"
+
+
+@pytest.mark.parametrize(
+    ("calls", "budget", "expected"),
+    [
+        (1, None, "gateway_tools_used"),
+        (0, GatewayBudgetPolicy(max_reported_cost_usd=0.001), "gateway_cost_unverified"),
+    ],
+)
+def test_fidelity_fence_cannot_bypass_attestation_or_cost(
+    tmp_path: Path, calls: int, budget: GatewayBudgetPolicy | None, expected: str
+) -> None:
+    with pytest.raises(EditorialError, match=f"^{expected}$"):
+        GatewayEditor(
+            fidelity_cli(tmp_path, fenced(fidelity_value()), calls=calls), budget_policy=budget
+        ).review_fidelity({})
+
+
+def test_fidelity_fence_never_normalizes_nonzero_child_output(tmp_path: Path) -> None:
+    with pytest.raises(EditorialError, match="^gateway_child_exit_nonzero$"):
+        GatewayEditor(
+            fidelity_cli(tmp_path, fenced(fidelity_value()), exit_code=1)
+        ).review_fidelity({})
+
+
+def test_fidelity_fence_never_normalizes_or_retries_timeout(tmp_path: Path) -> None:
+    invocations = tmp_path / "invocations"
+    with pytest.raises(EditorialError, match="^gateway_timeout$"):
+        GatewayEditor(
+            fidelity_cli(
+                tmp_path,
+                fenced(fidelity_value()),
+                delay=30,
+                invocation_log=invocations,
+            ),
+            timeout=5,
+        ).review_fidelity({})
+    assert invocations.read_text() == "1"
 
 
 def test_fidelity_review_uses_configured_editor_timeout(tmp_path: Path) -> None:

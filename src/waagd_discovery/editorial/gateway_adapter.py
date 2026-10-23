@@ -68,6 +68,7 @@ _CREATIVE_LIMITS = {
     "summary": 160,
     "article": 2000,
 }
+_FIDELITY_JSON_FENCE = re.compile(r"\A```(?:json)?\r?\n(?P<content>.*?)\r?\n```\Z", re.DOTALL)
 _CREATIVE_UNSAFE = re.compile(
     r"https?://|\bwww\.|[\"“”]|\b(?:19|20)\d{2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
     re.IGNORECASE,
@@ -358,11 +359,23 @@ class GatewayEditor:
         if not text.strip():
             raise EditorialError("gateway_empty_response")
         try:
-            value = io.decode(text.encode("utf-8"))
+            value = io.decode(self._normalize_fidelity_json(text).encode("utf-8"))
         except (io.BridgeError, UnicodeError):
             raise EditorialError("gateway_model_json_invalid") from None
         self._last_metrics = {"path": "gateway_fidelity", "outcome": "received"}
         return value
+
+    @staticmethod
+    def _normalize_fidelity_json(text: str) -> str:
+        """Accept only raw JSON or one complete, otherwise empty JSON fence."""
+
+        normalized = text.strip()
+        if not normalized.startswith("```"):
+            return normalized
+        match = _FIDELITY_JSON_FENCE.fullmatch(normalized)
+        if match is None:
+            raise EditorialError("gateway_model_json_invalid")
+        return match["content"]
 
     def _run_gateway_turn(
         self,
