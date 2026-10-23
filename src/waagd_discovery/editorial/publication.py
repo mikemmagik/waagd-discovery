@@ -263,6 +263,79 @@ def _payload(
     return intent
 
 
+def _delivery_decisions_are_valid(store: EditorialStore, delivery: str) -> bool:
+    """Confirm every decision bound to an acknowledged delivery is usable.
+
+    The SQL eligibility query proves durable presence and identity.  This
+    second boundary proves the private JSON still satisfies the host contracts,
+    so an acknowledged ACK never turns a corrupt partial batch into a Site
+    intent.
+    """
+
+    rows = store.connection.execute(
+        "SELECT dc.candidate_key,dc.revision,v.result verification_result,"
+        "d.request,d.result decision_result FROM delivery_candidates dc "
+        "LEFT JOIN verifications v ON v.candidate_key=dc.candidate_key "
+        "AND v.revision=dc.revision "
+        "LEFT JOIN decisions d ON d.candidate_key=dc.candidate_key "
+        "AND d.revision=dc.revision WHERE dc.delivery_id=? ORDER BY dc.candidate_key",
+        (delivery,),
+    ).fetchall()
+    if not rows:
+        return False
+    try:
+        for row in rows:
+            if (
+                row["verification_result"] is None
+                or row["request"] is None
+                or row["decision_result"] is None
+            ):
+                return False
+            verification = io.decode(row["verification_result"].encode())
+            request = io.decode(row["request"].encode())
+            decision = io.decode(row["decision_result"].encode())
+            key = row["candidate_key"]
+            validate_verification(verification, key)
+            if (
+                request["candidate"]["candidate_key"] != key
+                or request["verification"] != verification
+                or decision["candidate_key"] != key
+            ):
+                return False
+            validate_decision(decision, request)
+    except (EditorialError, io.BridgeError, KeyError, TypeError, ValueError):
+        raise EditorialError("publication_store_invalid") from None
+    return True
+
+
+def _revision_is_publication_eligible(store: EditorialStore, key: str, revision: int) -> bool:
+    """Check the exact delivery associated with an existing immutable job."""
+
+    row = store.connection.execute(
+        "SELECT dc.delivery_id FROM candidates c "
+        "JOIN decisions d ON d.candidate_key=c.candidate_key AND d.revision=c.current_revision "
+        "JOIN delivery_candidates dc ON dc.candidate_key=c.candidate_key "
+        "AND dc.revision=c.current_revision "
+        "JOIN deliveries delivery ON delivery.delivery_id=dc.delivery_id "
+        "JOIN ack_outbox ack ON ack.delivery_id=delivery.delivery_id "
+        "WHERE c.candidate_key=? AND c.current_revision=? "
+        "AND d.decision='READY_FOR_REVIEW' AND delivery.status='acknowledged' "
+        "AND delivery.ack_status='acknowledged' AND ack.status='acknowledged' "
+        "AND ack.payload_digest=delivery.payload_digest "
+        "AND EXISTS (SELECT 1 FROM attempts fidelity WHERE fidelity.delivery_id=dc.delivery_id "
+        "AND fidelity.candidate_key=c.candidate_key AND fidelity.operation='fidelity' "
+        "AND fidelity.status='completed') "
+        "AND NOT EXISTS (SELECT 1 FROM delivery_candidates required "
+        "LEFT JOIN decisions required_decision ON "
+        "required_decision.candidate_key=required.candidate_key "
+        "AND required_decision.revision=required.revision "
+        "WHERE required.delivery_id=dc.delivery_id "
+        "AND required_decision.candidate_key IS NULL) LIMIT 1",
+        (key, revision),
+    ).fetchone()
+    return row is not None and _delivery_decisions_are_valid(store, row["delivery_id"])
+
+
 def exportable(
     store: EditorialStore, limit: int = _LIMIT, *, policy: PublicationPolicy | None = None
 ) -> list[dict[str, Any]]:
@@ -276,18 +349,35 @@ def exportable(
         "v.result verification_result,dc.delivery_id FROM candidates c "
         "JOIN decisions d ON d.candidate_key=c.candidate_key AND d.revision=c.current_revision "
         "JOIN verifications v ON v.candidate_key=c.candidate_key AND v.revision=c.current_revision "
-        "JOIN (SELECT candidate_key,revision,MIN(delivery_id) delivery_id "
-        "FROM delivery_candidates GROUP BY candidate_key,revision) dc "
-        "ON dc.candidate_key=c.candidate_key AND dc.revision=c.current_revision "
+        "JOIN delivery_candidates dc ON dc.candidate_key=c.candidate_key "
+        "AND dc.revision=c.current_revision "
+        "JOIN deliveries delivery ON delivery.delivery_id=dc.delivery_id "
+        "JOIN ack_outbox ack ON ack.delivery_id=delivery.delivery_id "
         "LEFT JOIN publication_jobs p ON p.candidate_key=c.candidate_key "
         "AND p.revision=c.current_revision "
         "WHERE c.current_revision>0 AND d.decision='READY_FOR_REVIEW' "
-        "AND p.intent_id IS NULL "
-        "ORDER BY c.candidate_key LIMIT ?"
+        "AND p.intent_id IS NULL AND delivery.status='acknowledged' "
+        "AND delivery.ack_status='acknowledged' AND ack.status='acknowledged' "
+        "AND ack.payload_digest=delivery.payload_digest "
+        "AND EXISTS (SELECT 1 FROM attempts fidelity WHERE fidelity.delivery_id=dc.delivery_id "
+        "AND fidelity.candidate_key=c.candidate_key AND fidelity.operation='fidelity' "
+        "AND fidelity.status='completed') "
+        "AND NOT EXISTS (SELECT 1 FROM delivery_candidates required "
+        "LEFT JOIN decisions required_decision ON "
+        "required_decision.candidate_key=required.candidate_key "
+        "AND required_decision.revision=required.revision "
+        "WHERE required.delivery_id=dc.delivery_id "
+        "AND required_decision.candidate_key IS NULL) ORDER BY c.candidate_key,dc.delivery_id"
     )
-    rows = store.connection.execute(query, (limit,)).fetchall()
+    rows = store.connection.execute(query).fetchall()
     result = []
+    validated_deliveries: dict[str, bool] = {}
     for row in rows:
+        delivery = row["delivery_id"]
+        if delivery not in validated_deliveries:
+            validated_deliveries[delivery] = _delivery_decisions_are_valid(store, delivery)
+        if not validated_deliveries[delivery]:
+            continue
         try:
             request = io.decode(row["request"].encode())
             decision = io.decode(row["decision_result"].encode())
@@ -311,6 +401,8 @@ def exportable(
             raise EditorialError("publication_store_invalid") from None
         except (io.BridgeError, KeyError, TypeError, ValueError):
             raise EditorialError("publication_store_invalid") from None
+        if len(result) == limit:
+            break
     return result
 
 
@@ -342,6 +434,13 @@ def prepare_next_publication(
     now = _timestamp(clock or datetime.now(UTC).isoformat())
     pending = store.publication_job()
     if pending is not None:
+        needs_gate = pending["status"] in {"pending", "held", "failed"}
+        if needs_gate and not _revision_is_publication_eligible(
+            store, pending["candidate_key"], pending["revision"]
+        ):
+            # Preserve the immutable historical job, but do not expose it to
+            # Site until its exact source delivery satisfies the shared gate.
+            return None
         return {"status": pending["status"], "intent": _job_intent(pending)}
     intents = exportable(store, 1, policy=policy)
     if not intents:

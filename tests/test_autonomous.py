@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from waagd_discovery.autonomous import DailyCoordinator, DailyPolicy
+import pytest
+
+from waagd_discovery.autonomous import DailyCoordinator, DailyPolicy, subprocess_runner
 
 
 def at(value: str) -> datetime:
@@ -106,3 +109,47 @@ def test_pause_persists_for_a_new_coordinator(tmp_path: Path) -> None:
     assert first.pause()["paused"] is True
     second = coordinator(root, calls)
     assert second.run_due(at("2026-10-23T01:00:00+00:00")) == {"status": "paused"}
+
+
+def test_runner_timeout_and_crash_are_operator_required_without_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    command = (str(Path("/bin/true")),)
+    runner = subprocess_runner(command)
+
+    def timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired("synthetic", 1)
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    assert runner("cycle", "2026-10-23") == {
+        "status": "operator_required",
+        "code": "cycle_runner_timeout",
+    }
+
+    def crashed(_cycle_id: str, _date: str) -> dict[str, object]:
+        raise RuntimeError("synthetic")
+
+    instance = DailyCoordinator(tmp_path / "private", DailyPolicy(), crashed)
+    instance.install()
+    instance.enable()
+    now = at("2026-10-23T01:00:00+00:00")
+    assert instance.run_due(now)["status"] == "operator_required"
+    assert instance.run_due(now) == {"status": "not_due"}
+
+
+def test_restart_never_replays_a_cycle_interrupted_after_dispatch(tmp_path: Path) -> None:
+    root = tmp_path / "private"
+
+    def interrupted(_cycle_id: str, _date: str) -> dict[str, object]:
+        raise KeyboardInterrupt
+
+    first = DailyCoordinator(root, DailyPolicy(), interrupted)
+    first.install()
+    first.enable()
+    now = at("2026-10-23T01:00:00+00:00")
+    with pytest.raises(KeyboardInterrupt):
+        first.run_due(now)
+
+    second = coordinator(root, [])
+    assert second.run_due(now) == {"status": "not_due"}
+    assert second.status()["latest_cycle"]["status"] == "operator_required"

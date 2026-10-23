@@ -40,6 +40,38 @@ intent file is exposed. `created` and `duplicate` are terminal delivery receipts
 intent for a later Site resume; it does not bypass a quota or pause. `failed` is
 also held for classification rather than retried automatically.
 
+An automatic publication is eligible only after its exact source delivery is
+durably acknowledged by both the delivery row and matching ACK outbox row. Every
+candidate in that delivery must have a validated durable decision, and the READY
+candidate must have a completed Fidelity attempt. This is enforced at the shared
+publication-export boundary, so direct exports, prepared jobs, Site delivery,
+and restart recovery cannot bypass a partially processed or `operator_required`
+delivery.
+
+## Bounded timeout budget
+
+`--stage-timeout-seconds` may be supplied once for each `--stage-command`; it is
+bounded to 14,400 seconds. The default is 10,800 seconds. For a five-story
+editorial stage, 10,800 is the documented upper budget: five generation turns
+with one permitted 600-second correction each (6,000), five 600-second Fidelity
+turns (3,000), one 600-second selection, up to 600 seconds of verification, and
+600 seconds of host overhead. Gateway turns themselves remain bounded at 600
+seconds.
+
+`--cycle-timeout-seconds` is the inner cycle budget. It must cover all configured
+stage budgets plus five bounded Site submissions (3,000 seconds) and 600 seconds
+of overhead; it is capped at 32,400 seconds. The outer `waagd-autonomous`
+`--cycle-timeout-seconds` must exceed its paired
+`--inner-cycle-timeout-seconds` by at least 300 seconds. The defaults (25,200
+inner and 28,800 outer) cover two default stages; configure the exact smaller
+budget below when the first Bridge stage is known to be bounded.
+
+Timeout, nonzero exit, malformed result, or crash from a side-effecting stage is
+`operator_required`. A known pre-execution spawn failure, or an explicitly
+declared read-only stage, may be retryable. The daily journal also turns a
+previously running cycle into `operator_required` on restart; it never replays a
+cycle whose Gateway or Site outcome may be unknown.
+
 ## One-time staging installation
 
 These commands are a template for an isolated staging user. Substitute only
@@ -61,7 +93,10 @@ file below `0600`; none belongs in a Git checkout.
 ```sh
 /absolute/venv/bin/waagd-autonomous-cycle \
   --stage-command '/absolute/venv/bin/waagd-bridge --export /absolute/export/candidates.json --workspace-root /absolute/bridge-workspace --state-dir /absolute/bridge-state sync' \
+  --stage-timeout-seconds 900 \
   --stage-command '/absolute/venv/bin/waagd-editorial --config /absolute/private/editorial.yaml --inbox /absolute/bridge-workspace/waagd-discovery/inbox.json --store /absolute/editorial/editorial.sqlite3 --export /absolute/export/candidates.json --workspace-root /absolute/bridge-workspace --state-dir /absolute/bridge-state --no-simulation --allow-ack --allow-gateway --gateway-executable /absolute/openclaw --gateway-timeout-seconds 360 --gateway-max-candidates 5 --gateway-max-cost-usd 0.10 --trusted-publishers /absolute/private/trusted_publishers.yaml gateway-process' \
+  --stage-timeout-seconds 10800 \
+  --cycle-timeout-seconds 15600 \
   --editorial-store /absolute/editorial/editorial.sqlite3 \
   --publication-output /absolute/publication-export/publication-intent.json \
   --publication-policy /absolute/private/publication.yaml \
@@ -78,6 +113,7 @@ file below `0600`; none belongs in a Git checkout.
 ```sh
 /absolute/venv/bin/waagd-autonomous --state-dir /absolute/autonomous \
   --timezone Asia/Bangkok --daily-time 08:00 \
+  --cycle-timeout-seconds 15900 --inner-cycle-timeout-seconds 15600 \
   --cycle-command '/absolute/bin/run-waagd-autonomous-cycle' install
 
 launchctl bootstrap gui/"$(id -u)" /absolute/Library/LaunchAgents/com.waagd.autonomous.plist
@@ -101,6 +137,8 @@ editorial environment. Then create this user-owned LaunchAgent at
     <string>--state-dir</string><string>/absolute/autonomous</string>
     <string>--timezone</string><string>Asia/Bangkok</string>
     <string>--daily-time</string><string>08:00</string>
+    <string>--cycle-timeout-seconds</string><string>15900</string>
+    <string>--inner-cycle-timeout-seconds</string><string>15600</string>
     <string>--cycle-command</string><string>/absolute/bin/run-waagd-autonomous-cycle</string>
     <string>run-due</string>
   </array>

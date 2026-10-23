@@ -20,6 +20,12 @@ from waagd_discovery.editorial.delivery import PublicationDelivery
 from waagd_discovery.models import DiscoveryError
 
 _MAX_STAGE_OUTPUT = 64 * 1024
+_DEFAULT_STAGE_TIMEOUT_SECONDS = 10_800
+_MAX_STAGE_TIMEOUT_SECONDS = 14_400
+# A Site cycle may submit at most five separately bounded 600-second commands.
+_SITE_DELIVERY_BUDGET_SECONDS = 3_000
+_CYCLE_OVERHEAD_SECONDS = 600
+_MAX_CYCLE_TIMEOUT_SECONDS = 32_400
 CycleStatus = Literal["completed", "retryable", "operator_required"]
 
 
@@ -29,7 +35,8 @@ class TrustedStageCommand:
 
     executable: Path
     arguments: tuple[str, ...] = ()
-    timeout_seconds: int = 900
+    timeout_seconds: int = _DEFAULT_STAGE_TIMEOUT_SECONDS
+    side_effecting: bool = True
 
     def __post_init__(self) -> None:
         try:
@@ -51,7 +58,8 @@ class TrustedStageCommand:
             )
             or isinstance(self.timeout_seconds, bool)
             or not isinstance(self.timeout_seconds, int)
-            or not 1 <= self.timeout_seconds <= 3600
+            or not 1 <= self.timeout_seconds <= _MAX_STAGE_TIMEOUT_SECONDS
+            or not isinstance(self.side_effecting, bool)
         ):
             raise DiscoveryError("autonomous_stage_invalid")
 
@@ -66,10 +74,14 @@ class TrustedStageCommand:
                 env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
                 timeout=self.timeout_seconds,
             )
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError:
+            # subprocess failed before a child could be observed; this is a
+            # provably pre-execution setup failure.
             return "retryable"
+        except subprocess.TimeoutExpired:
+            return "operator_required" if self.side_effecting else "retryable"
         if result.returncode != 0:
-            return "retryable"
+            return "operator_required" if self.side_effecting else "retryable"
         if len(result.stdout) > _MAX_STAGE_OUTPUT:
             return "operator_required"
         try:
@@ -90,12 +102,25 @@ class AutonomousCycle:
     """Run the configured upstream chain then deliver approved intents."""
 
     def __init__(
-        self, stages: tuple[TrustedStageCommand, ...], delivery: PublicationDelivery
+        self,
+        stages: tuple[TrustedStageCommand, ...],
+        delivery: PublicationDelivery,
+        *,
+        timeout_seconds: int | None = None,
     ) -> None:
         if not stages:
             raise DiscoveryError("autonomous_stages_missing")
+        minimum = sum(stage.timeout_seconds for stage in stages) + _SITE_DELIVERY_BUDGET_SECONDS
+        budget = minimum + _CYCLE_OVERHEAD_SECONDS if timeout_seconds is None else timeout_seconds
+        if (
+            isinstance(budget, bool)
+            or not isinstance(budget, int)
+            or not minimum <= budget <= _MAX_CYCLE_TIMEOUT_SECONDS
+        ):
+            raise DiscoveryError("autonomous_cycle_timeout_invalid")
         self.stages = stages
         self.delivery = delivery
+        self.timeout_seconds = budget
 
     def run(self) -> dict[str, object]:
         for stage in self.stages:

@@ -26,6 +26,10 @@ from waagd_discovery.models import DiscoveryError
 
 _SCHEMA_VERSION = 1
 _MAX_OUTPUT = 16 * 1024
+_DEFAULT_CYCLE_TIMEOUT_SECONDS = 28_800
+_DEFAULT_INNER_CYCLE_SECONDS = 25_200
+_MAX_CYCLE_TIMEOUT_SECONDS = 32_400
+_OUTER_OVERHEAD_SECONDS = 300
 
 
 def _utc(now: datetime | None = None) -> datetime:
@@ -270,7 +274,7 @@ class DailyCoordinator:
 
     def _recover_interrupted(self, connection: sqlite3.Connection, stamp: str) -> None:
         connection.execute(
-            "UPDATE cycles SET status='interrupted', finished_at=?, "
+            "UPDATE cycles SET status='operator_required', finished_at=?, "
             "result_code='process_interrupted' "
             "WHERE status='running'",
             (stamp,),
@@ -336,7 +340,10 @@ class DailyCoordinator:
                     raw_code = result.get("code")
                     code = raw_code if isinstance(raw_code, str) else None
             except Exception:
-                status, code = "retryable", "cycle_runner_failed"
+                # The runner may have passed work to Gateway or Site before an
+                # exception reached this coordinator.  Its outcome is unknown
+                # and must never consume an automatic retry.
+                status, code = "operator_required", "cycle_runner_interrupted"
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 "UPDATE cycles SET status=?, finished_at=?, result_code=? WHERE cycle_id=?",
@@ -351,9 +358,23 @@ class DailyCoordinator:
             connection.close()
 
 
-def subprocess_runner(command: tuple[str, ...], timeout_seconds: int = 900) -> CycleRunner:
+def subprocess_runner(
+    command: tuple[str, ...],
+    timeout_seconds: int = _DEFAULT_CYCLE_TIMEOUT_SECONDS,
+    inner_cycle_seconds: int = _DEFAULT_INNER_CYCLE_SECONDS,
+) -> CycleRunner:
     """Make a bounded no-shell runner without passing ambient credentials onward."""
-    if not command or not Path(command[0]).is_absolute() or timeout_seconds not in range(1, 3601):
+    if (
+        not command
+        or not Path(command[0]).is_absolute()
+        or isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, int)
+        or isinstance(inner_cycle_seconds, bool)
+        or not isinstance(inner_cycle_seconds, int)
+        or not 1 <= inner_cycle_seconds <= _MAX_CYCLE_TIMEOUT_SECONDS
+        or not inner_cycle_seconds + _OUTER_OVERHEAD_SECONDS <= timeout_seconds
+        or timeout_seconds > _MAX_CYCLE_TIMEOUT_SECONDS
+    ):
         raise DiscoveryError("autonomous_runner_invalid")
 
     def run(cycle_id: str, date: str) -> dict[str, object]:
@@ -372,10 +393,12 @@ def subprocess_runner(command: tuple[str, ...], timeout_seconds: int = 900) -> C
                 timeout=timeout_seconds,
                 check=False,
             )
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError:
             return {"status": "retryable", "code": "cycle_runner_unavailable"}
+        except subprocess.TimeoutExpired:
+            return {"status": "operator_required", "code": "cycle_runner_timeout"}
         if completed.returncode != 0 or len(completed.stdout) > _MAX_OUTPUT:
-            return {"status": "retryable", "code": "cycle_runner_failed"}
+            return {"status": "operator_required", "code": "cycle_runner_outcome_unknown"}
         try:
             value = json.loads(completed.stdout.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -51,3 +52,26 @@ def test_cycle_does_not_deliver_after_upstream_operator_hold(tmp_path: Path) -> 
         "code": "upstream_stage_operator_required",
     }
     assert not (tmp_path / "export" / "publication-intent.json").exists()
+
+
+def test_side_effecting_stage_timeout_or_exit_requires_operator(
+    tmp_path: Path, monkeypatch
+) -> None:
+    stage = _stage(tmp_path, "synced")
+
+    def timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired("synthetic", 1)
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    assert stage.run() == "operator_required"
+    assert (
+        TrustedStageCommand(stage.executable, stage.arguments, side_effecting=False).run()
+        == "retryable"
+    )
+
+
+def test_stage_timeout_budget_supports_five_story_gateway_batch(tmp_path: Path) -> None:
+    stage = _stage(tmp_path, "synced")
+    editorial = TrustedStageCommand(stage.executable, stage.arguments, timeout_seconds=10_800)
+    cycle = AutonomousCycle((editorial,), _delivery(tmp_path), timeout_seconds=14_400)
+    assert cycle.timeout_seconds == 14_400

@@ -39,6 +39,12 @@ def _store(path: Path, *, status: str = "VERIFIED", ready: bool = True) -> Path:
             value["delivery_id"],
             NOW.isoformat(),
         )
+        if ready:
+            fidelity = store.start_attempt(
+                value["delivery_id"], item["candidate_key"], "fidelity", NOW.isoformat()
+            )
+            store.finish_attempt(fidelity, NOW.isoformat())
+        store.acknowledged(value["delivery_id"], NOW.isoformat())
     return path
 
 

@@ -596,9 +596,19 @@ def test_controller_canonical_url_duplicate_never_reaches_editor_twice(tmp_path)
 
 
 def test_selected_trusted_candidates_alone_reach_idempotent_v2_export(tmp_path):
-    controller, _, _, _, _ = trusted_setup(tmp_path, count=8, selected=3)
+    controller, _, _, _, value = trusted_setup(tmp_path, count=8, selected=3)
 
     assert controller.process(NOW)["status"] == "results_saved"
+    with EditorialStore(controller.store_path, simulation=False) as store:
+        ready = store.connection.execute(
+            "SELECT candidate_key FROM decisions WHERE decision='READY_FOR_REVIEW'"
+        ).fetchall()
+        for row in ready:
+            fidelity = store.start_attempt(
+                value["delivery_id"], row["candidate_key"], "fidelity", NOW.isoformat()
+            )
+            store.finish_attempt(fidelity, NOW.isoformat())
+        store.acknowledged(value["delivery_id"], NOW.isoformat())
     with EditorialStore(controller.store_path, simulation=False, readonly=True) as store:
         first = exportable(store, policy=PublicationPolicy(automatic_enabled=True))
         second = exportable(store, policy=PublicationPolicy(automatic_enabled=True))

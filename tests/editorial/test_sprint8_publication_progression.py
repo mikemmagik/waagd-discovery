@@ -49,6 +49,11 @@ def _store(path: Path) -> Path:
             store.save_decision(
                 item["candidate_key"], 1, request, output, envelope["delivery_id"], NOW.isoformat()
             )
+            fidelity = store.start_attempt(
+                envelope["delivery_id"], item["candidate_key"], "fidelity", NOW.isoformat()
+            )
+            store.finish_attempt(fidelity, NOW.isoformat())
+        store.acknowledged(envelope["delivery_id"], NOW.isoformat())
     return path
 
 

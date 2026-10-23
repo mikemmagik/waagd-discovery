@@ -19,6 +19,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--daily-time", default="08:00")
     parser.add_argument("--maximum-attempts", type=int, default=3)
     parser.add_argument("--cycle-command", help="Trusted absolute executable and fixed arguments")
+    parser.add_argument("--cycle-timeout-seconds", type=int, default=28_800)
+    parser.add_argument("--inner-cycle-timeout-seconds", type=int, default=25_200)
     commands = parser.add_subparsers(dest="command", required=True)
     for name in (
         "install",
@@ -40,7 +42,11 @@ def main(argv: list[str] | None = None) -> int:
         policy = DailyPolicy(args.timezone, args.daily_time, args.maximum_attempts)
         command = tuple(shlex.split(args.cycle_command)) if args.cycle_command else ()
         runner = (
-            subprocess_runner(command)
+            subprocess_runner(
+                command,
+                args.cycle_timeout_seconds,
+                args.inner_cycle_timeout_seconds,
+            )
             if command
             else lambda _id, _date: {"status": "retryable", "code": "runner_missing"}
         )
