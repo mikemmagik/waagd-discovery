@@ -951,13 +951,38 @@ def test_store_migrates_v1_selection_state_transactionally(tmp_path):
         connection.commit()
 
     with EditorialStore(path, simulation=True) as store:
-        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 5
         assert store.connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='selection_items'"
         ).fetchone()
         assert store.connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='publication_jobs'"
         ).fetchone()
+
+
+def test_store_migrates_v4_publication_jobs_without_inferring_delivery(tmp_path):
+    path = tmp_path.resolve() / "private" / "editorial.sqlite3"
+    with EditorialStore(path, simulation=True):
+        pass
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("DROP TABLE publication_jobs")
+        connection.execute(
+            "CREATE TABLE publication_jobs (intent_id TEXT PRIMARY KEY, "
+            "candidate_key TEXT NOT NULL REFERENCES candidates, revision INTEGER NOT NULL, "
+            "content_hash TEXT NOT NULL, intent TEXT NOT NULL, status TEXT NOT NULL, "
+            "site_outcome TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+            "error_code TEXT, UNIQUE(candidate_key,revision))"
+        )
+        connection.execute("PRAGMA user_version=4")
+        connection.commit()
+
+    with EditorialStore(path, simulation=True) as store:
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        columns = {
+            row["name"]
+            for row in store.connection.execute("PRAGMA table_info(publication_jobs)").fetchall()
+        }
+        assert "delivery_id" in columns
 
 
 def test_store_rejects_hybrid_prepublication_schema_without_reset(tmp_path):
@@ -976,7 +1001,23 @@ def test_store_rejects_hybrid_prepublication_schema_without_reset(tmp_path):
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize("version", [-1, 5, 99])
+def test_store_rejects_v4_header_with_non_v4_publication_schema(tmp_path):
+    path = tmp_path.resolve() / "private" / "editorial.sqlite3"
+    with EditorialStore(path, simulation=True):
+        pass
+    with closing(sqlite3.connect(path)) as connection:
+        # A current table tagged as v4 is not a migration source.  In
+        # particular, migration must not discard an unexpected delivery binding.
+        connection.execute("PRAGMA user_version=4")
+        connection.commit()
+    before = path.read_bytes()
+    with pytest.raises(EditorialError, match="editorial_schema_invalid"):
+        with EditorialStore(path, simulation=True):
+            pass
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("version", [-1, 6, 99])
 def test_store_rejects_newer_schema_without_reset(tmp_path, version):
     path = tmp_path.resolve() / "private" / "editorial.sqlite3"
     with EditorialStore(path, simulation=True):
@@ -1851,11 +1892,11 @@ def test_fidelity_safety_rejection_finishes_creative_attempt_and_never_acks(tmp_
     assert bridge.acks == 0
 
 
-def test_attempt_pair_finish_is_atomic_in_schema_v4_store(tmp_path):
+def test_attempt_pair_finish_is_atomic_in_schema_v5_store(tmp_path):
     controller, _, _, _, value = setup(tmp_path, count=1, allow_ack=False)
     controller.process(NOW)
     with EditorialStore(controller.store_path, simulation=False) as store:
-        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 5
         editorial = store.start_attempt(
             value["delivery_id"],
             value["candidates"][0]["candidate_key"],

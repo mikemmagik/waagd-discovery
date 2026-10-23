@@ -110,8 +110,12 @@ class AutonomousCycle:
     ) -> None:
         if not stages:
             raise DiscoveryError("autonomous_stages_missing")
-        minimum = sum(stage.timeout_seconds for stage in stages) + _SITE_DELIVERY_BUDGET_SECONDS
-        budget = minimum + _CYCLE_OVERHEAD_SECONDS if timeout_seconds is None else timeout_seconds
+        minimum = (
+            sum(stage.timeout_seconds for stage in stages)
+            + _SITE_DELIVERY_BUDGET_SECONDS
+            + _CYCLE_OVERHEAD_SECONDS
+        )
+        budget = minimum if timeout_seconds is None else timeout_seconds
         if (
             isinstance(budget, bool)
             or not isinstance(budget, int)

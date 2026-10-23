@@ -308,10 +308,15 @@ def _delivery_decisions_are_valid(store: EditorialStore, delivery: str) -> bool:
     return True
 
 
-def _revision_is_publication_eligible(store: EditorialStore, key: str, revision: int) -> bool:
-    """Check the exact delivery associated with an existing immutable job."""
+def _eligible_delivery_for_revision(store: EditorialStore, key: str, revision: int) -> str | None:
+    """Return a sole acknowledged delivery that may authorize this revision.
 
-    row = store.connection.execute(
+    Several deliveries for one revision are intentionally ambiguous.  A Site
+    identity is never assigned by choosing one of them, and existing jobs retain
+    their independently stored delivery binding.
+    """
+
+    rows = store.connection.execute(
         "SELECT dc.delivery_id FROM candidates c "
         "JOIN decisions d ON d.candidate_key=c.candidate_key AND d.revision=c.current_revision "
         "JOIN delivery_candidates dc ON dc.candidate_key=c.candidate_key "
@@ -330,10 +335,26 @@ def _revision_is_publication_eligible(store: EditorialStore, key: str, revision:
         "required_decision.candidate_key=required.candidate_key "
         "AND required_decision.revision=required.revision "
         "WHERE required.delivery_id=dc.delivery_id "
-        "AND required_decision.candidate_key IS NULL) LIMIT 1",
+        "AND required_decision.candidate_key IS NULL) ORDER BY dc.delivery_id",
         (key, revision),
-    ).fetchone()
-    return row is not None and _delivery_decisions_are_valid(store, row["delivery_id"])
+    ).fetchall()
+    valid = [
+        row["delivery_id"]
+        for row in rows
+        if _delivery_decisions_are_valid(store, row["delivery_id"])
+    ]
+    return valid[0] if len(valid) == 1 else None
+
+
+def _revision_is_publication_eligible(
+    store: EditorialStore, key: str, revision: int, delivery: object
+) -> bool:
+    """Check the one delivery durably bound to an existing immutable job."""
+
+    return (
+        isinstance(delivery, str)
+        and _eligible_delivery_for_revision(store, key, revision) == delivery
+    )
 
 
 def exportable(
@@ -371,12 +392,12 @@ def exportable(
     )
     rows = store.connection.execute(query).fetchall()
     result = []
-    validated_deliveries: dict[str, bool] = {}
+    eligible_revisions: dict[tuple[str, int], str | None] = {}
     for row in rows:
-        delivery = row["delivery_id"]
-        if delivery not in validated_deliveries:
-            validated_deliveries[delivery] = _delivery_decisions_are_valid(store, delivery)
-        if not validated_deliveries[delivery]:
+        revision_key = (row["candidate_key"], row["current_revision"])
+        if revision_key not in eligible_revisions:
+            eligible_revisions[revision_key] = _eligible_delivery_for_revision(store, *revision_key)
+        if eligible_revisions[revision_key] != row["delivery_id"]:
             continue
         try:
             request = io.decode(row["request"].encode())
@@ -436,7 +457,7 @@ def prepare_next_publication(
     if pending is not None:
         needs_gate = pending["status"] in {"pending", "held", "failed"}
         if needs_gate and not _revision_is_publication_eligible(
-            store, pending["candidate_key"], pending["revision"]
+            store, pending["candidate_key"], pending["revision"], pending["delivery_id"]
         ):
             # Preserve the immutable historical job, but do not expose it to
             # Site until its exact source delivery satisfies the shared gate.
@@ -456,8 +477,11 @@ def prepare_next_publication(
             raise ValueError
     except (AttributeError, TypeError, ValueError):
         raise EditorialError("publication_store_invalid") from None
+    delivery = _eligible_delivery_for_revision(store, key, parsed_revision)
+    if delivery is None:
+        return None
     job = store.save_publication_job(
-        intent["intent_id"], key, parsed_revision, intent["content_hash"], intent, now
+        intent["intent_id"], key, parsed_revision, delivery, intent["content_hash"], intent, now
     )
     return {"status": job["status"], "intent": intent}
 

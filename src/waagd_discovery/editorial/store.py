@@ -13,7 +13,7 @@ from typing import Any
 from waagd_discovery.bridge import io
 from waagd_discovery.editorial.contracts import EditorialError, digest
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 _SELECTION_RUNS = (
     "CREATE TABLE selection_runs (run_id TEXT PRIMARY KEY, delivery_id TEXT UNIQUE NOT NULL "
     "REFERENCES deliveries, utc_day TEXT NOT NULL, shortlist TEXT NOT NULL, selected TEXT, "
@@ -25,11 +25,18 @@ _SELECTION_ITEMS = (
     "status TEXT NOT NULL, reason_code TEXT, editorial_status TEXT, export_status TEXT NOT NULL, "
     "PRIMARY KEY(run_id,candidate_key))"
 )
-_PUBLICATION_JOBS = (
+_PUBLICATION_JOBS_V4 = (
     "CREATE TABLE publication_jobs (intent_id TEXT PRIMARY KEY, "
     "candidate_key TEXT NOT NULL REFERENCES candidates, revision INTEGER NOT NULL, "
     "content_hash TEXT NOT NULL, intent TEXT NOT NULL, status TEXT NOT NULL, "
     "site_outcome TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+    "error_code TEXT, UNIQUE(candidate_key,revision))"
+)
+_PUBLICATION_JOBS = (
+    "CREATE TABLE publication_jobs (intent_id TEXT PRIMARY KEY, "
+    "candidate_key TEXT NOT NULL REFERENCES candidates, revision INTEGER NOT NULL, "
+    "delivery_id TEXT REFERENCES deliveries, content_hash TEXT NOT NULL, intent TEXT NOT NULL, "
+    "status TEXT NOT NULL, site_outcome TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
     "error_code TEXT, UNIQUE(candidate_key,revision))"
 )
 _SCHEMA = (
@@ -63,6 +70,9 @@ _SCHEMA = (
     "payload_digest TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, "
     "acknowledged_at TEXT, error_code TEXT)",
 )
+_SCHEMA_V4 = tuple(
+    _PUBLICATION_JOBS_V4 if statement == _PUBLICATION_JOBS else statement for statement in _SCHEMA
+)
 
 
 def _schema(connection: sqlite3.Connection) -> list[tuple[Any, ...]]:
@@ -75,9 +85,9 @@ def _schema(connection: sqlite3.Connection) -> list[tuple[Any, ...]]:
     ]
 
 
-def _expected_schema() -> list[tuple[Any, ...]]:
+def _expected_schema(statements: tuple[str, ...] = _SCHEMA) -> list[tuple[Any, ...]]:
     with closing(sqlite3.connect(":memory:")) as reference:
-        for statement in _SCHEMA:
+        for statement in statements:
             reference.execute(statement)
         return _schema(reference)
 
@@ -259,11 +269,40 @@ class EditorialStore:
                     raise EditorialError("editorial_schema_migration_required")
                 try:
                     with self.transaction():
-                        self.connection.execute(_PUBLICATION_JOBS)
+                        self.connection.execute(_PUBLICATION_JOBS_V4)
                         self.connection.execute("PRAGMA user_version=4")
                 except sqlite3.Error:
                     raise EditorialError("editorial_schema_invalid") from None
                 version = 4
+            if version == 4:
+                if self.readonly:
+                    raise EditorialError("editorial_schema_migration_required")
+                if _schema(self.connection) != _expected_schema(_SCHEMA_V4):
+                    raise EditorialError("editorial_schema_invalid")
+                try:
+                    with self.transaction():
+                        # v4 jobs did not record which delivery authorized an
+                        # immutable Site identity.  Retain those jobs, but do
+                        # not infer a binding from a potentially different
+                        # delivery: an unbound historical job stays held until
+                        # explicit operator reconciliation.
+                        self.connection.execute(
+                            "ALTER TABLE publication_jobs RENAME TO publication_jobs_v4"
+                        )
+                        self.connection.execute(_PUBLICATION_JOBS)
+                        self.connection.execute(
+                            "INSERT INTO publication_jobs "
+                            "(intent_id,candidate_key,revision,delivery_id,content_hash,intent,"
+                            "status,site_outcome,created_at,updated_at,error_code) "
+                            "SELECT intent_id,candidate_key,revision,NULL,content_hash,intent,"
+                            "status,site_outcome,created_at,updated_at,error_code "
+                            "FROM publication_jobs_v4"
+                        )
+                        self.connection.execute("DROP TABLE publication_jobs_v4")
+                        self.connection.execute("PRAGMA user_version=5")
+                except sqlite3.Error:
+                    raise EditorialError("editorial_schema_invalid") from None
+                version = 5
             if _schema(self.connection) != _expected_schema():
                 raise EditorialError("editorial_schema_invalid")
             if self.connection.execute("PRAGMA quick_check").fetchall()[0][0] != "ok":
@@ -572,6 +611,7 @@ class EditorialStore:
         intent_id: str,
         key: str,
         revision: int,
+        delivery: str,
         content_hash: str,
         intent: dict[str, Any],
         clock: str,
@@ -597,6 +637,7 @@ class EditorialStore:
                 if (
                     existing["candidate_key"] != key
                     or existing["revision"] != revision
+                    or existing["delivery_id"] != delivery
                     or existing["content_hash"] != content_hash
                     or existing["intent"] != encoded
                 ):
@@ -604,8 +645,11 @@ class EditorialStore:
                 return {name: existing[name] for name in existing.keys()}
             try:
                 self.connection.execute(
-                    "INSERT INTO publication_jobs VALUES (?,?,?,?,?,'pending',NULL,?,?,NULL)",
-                    (intent_id, key, revision, content_hash, encoded, clock, clock),
+                    "INSERT INTO publication_jobs "
+                    "(intent_id,candidate_key,revision,delivery_id,content_hash,intent,status,"
+                    "site_outcome,created_at,updated_at,error_code) "
+                    "VALUES (?,?,?,?,?,?,'pending',NULL,?,?,NULL)",
+                    (intent_id, key, revision, delivery, content_hash, encoded, clock, clock),
                 )
             except sqlite3.IntegrityError:
                 raise EditorialError("publication_identity_changed") from None

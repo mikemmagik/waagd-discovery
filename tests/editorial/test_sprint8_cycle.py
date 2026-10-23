@@ -6,11 +6,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from test_sprint8_publication_progression import _policy, _store
 
 from waagd_discovery.autonomous_cycle import AutonomousCycle, TrustedStageCommand
 from waagd_discovery.editorial.delivery import PublicationDelivery
 from waagd_discovery.editorial.site_import import SiteImportOutcome
+from waagd_discovery.models import DiscoveryError
 
 
 class FakeSite:
@@ -75,3 +77,10 @@ def test_stage_timeout_budget_supports_five_story_gateway_batch(tmp_path: Path) 
     editorial = TrustedStageCommand(stage.executable, stage.arguments, timeout_seconds=10_800)
     cycle = AutonomousCycle((editorial,), _delivery(tmp_path), timeout_seconds=14_400)
     assert cycle.timeout_seconds == 14_400
+
+
+def test_explicit_cycle_budget_includes_required_overhead(tmp_path: Path) -> None:
+    stage = _stage(tmp_path, "synced")
+    editorial = TrustedStageCommand(stage.executable, stage.arguments, timeout_seconds=10_800)
+    with pytest.raises(DiscoveryError, match="autonomous_cycle_timeout_invalid"):
+        AutonomousCycle((editorial,), _delivery(tmp_path), timeout_seconds=13_800)

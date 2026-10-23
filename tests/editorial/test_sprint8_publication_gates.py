@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import copy
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from test_independent_contracts import NOW
 from test_sprint8_publication_progression import _policy, _store
 
+from waagd_discovery.bridge import io
 from waagd_discovery.editorial.delivery import PublicationDelivery
 from waagd_discovery.editorial.publication import exportable, prepare_next_publication
 from waagd_discovery.editorial.site_import import SiteImportOutcome
@@ -117,3 +121,46 @@ def test_preexisting_pending_job_cannot_bypass_a_later_ack_hold(tmp_path: Path) 
             )
         assert prepare_next_publication(store, policy=_policy()) is None
         assert store.publication_job() is not None
+
+
+def test_pending_job_is_bound_to_its_original_delivery(tmp_path: Path) -> None:
+    """A later ACK for the same revisions cannot revive a held Site job."""
+
+    path = _path(tmp_path)
+    with EditorialStore(path, simulation=False) as store:
+        prepared = prepare_next_publication(store, policy=_policy())
+        assert prepared is not None
+        job = store.publication_job()
+        assert job is not None and job["delivery_id"]
+        original = job["delivery_id"]
+
+        envelope = copy.deepcopy(
+            io.decode(
+                store.connection.execute(
+                    "SELECT payload FROM deliveries WHERE delivery_id=?", (original,)
+                )
+                .fetchone()[0]
+                .encode()
+            )
+        )
+        later = str(uuid.uuid4())
+        envelope["delivery_id"] = later
+        store.register(envelope, NOW.isoformat())
+        for key, _revision in store.required(later):
+            fidelity = store.start_attempt(later, key, "fidelity", NOW.isoformat())
+            store.finish_attempt(fidelity, NOW.isoformat())
+        store.complete_reused(later, NOW.isoformat())
+        store.acknowledged(later, NOW.isoformat())
+        with store.transaction():
+            store.connection.execute(
+                "UPDATE deliveries SET status='operator_required',ack_status='not_ready' "
+                "WHERE delivery_id=?",
+                (original,),
+            )
+            store.connection.execute(
+                "UPDATE ack_outbox SET status='pending' WHERE delivery_id=?", (original,)
+            )
+
+        # The later delivery is acknowledged, but it is not the immutable
+        # identity's source delivery and therefore cannot authorize Site work.
+        assert prepare_next_publication(store, policy=_policy()) is None

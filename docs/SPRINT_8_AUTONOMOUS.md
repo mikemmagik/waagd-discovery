@@ -33,9 +33,12 @@ provider applies an independent limit. A timeout or nonzero child exit remains
 an ambiguous, operator-required result: it is not retried automatically and
 cannot produce an ACK or publication.
 
-Publication jobs live only in the independent Editorial Store, schema 4. Each
-job stores the exact immutable intent bytes, identity and content hash before the
-intent file is exposed. `created` and `duplicate` are terminal delivery receipts.
+Publication jobs live only in the independent Editorial Store, schema 5. Each
+job stores the exact immutable intent bytes, identity, content hash, and source
+delivery before the intent file is exposed. The forward-only schema migration
+retains pre-existing unbound jobs but never guesses their source delivery, so
+they remain unavailable for automatic Site submission pending operator
+reconciliation. `created` and `duplicate` are terminal delivery receipts.
 `uncertain` is operator-required and is never resent. `held` retains the same
 intent for a later Site resume; it does not bypass a quota or pause. `failed` is
 also held for classification rather than retried automatically.
@@ -46,7 +49,8 @@ candidate in that delivery must have a validated durable decision, and the READY
 candidate must have a completed Fidelity attempt. This is enforced at the shared
 publication-export boundary, so direct exports, prepared jobs, Site delivery,
 and restart recovery cannot bypass a partially processed or `operator_required`
-delivery.
+delivery. Multiple otherwise-eligible deliveries for one candidate revision are
+ambiguous and fail closed; no delivery is selected arbitrarily.
 
 ## Bounded timeout budget
 
