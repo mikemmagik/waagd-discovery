@@ -1648,10 +1648,12 @@ def test_controller_rejects_operator_canary_paraphrases_via_attested_fidelity_ga
 
     result = controller.process(NOW)
 
-    assert result["status"] == "operator_required"
-    assert result["error_code"] == f"editorial_fidelity_{reason}"
-    assert rows(controller, "decisions") == []
+    assert result["status"] == "results_saved"
+    assert result["error_code"] is None
+    decision = rows(controller, "decisions")[0]
+    assert decision["decision"] == "REJECTED"
     assert rows(controller, "attempts")[-1]["operation"] == "fidelity"
+    assert rows(controller, "attempts")[-1]["error_code"] == f"editorial_fidelity_{reason}"
 
 
 def test_controller_allows_grounded_satire_after_attested_fidelity_pass(tmp_path):
@@ -1674,6 +1676,50 @@ def test_controller_allows_grounded_satire_after_attested_fidelity_pass(tmp_path
 
     assert controller.process(NOW)["status"] == "results_saved"
     assert rows(controller, "decisions")[0]["decision"] == "READY_FOR_REVIEW"
+
+
+def test_completed_gateway_safety_rejection_is_durable_and_ackable(tmp_path):
+    """A received, attested safety failure completes one selected candidate safely."""
+
+    controller, bridge, _, _, value = setup(tmp_path, count=1, allow_ack=True)
+    value["candidates"][0]["description"] = "A council published a routine filing."
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    controller.editor = GatewayEditor(
+        fidelity_executable(
+            tmp_path,
+            {
+                "satirical_angle": "A council confuses a calendar with policy.",
+                "headline": "Council schedules its imaginary 2028 filing",
+                "summary": (
+                    "A fictional calendar receives another committee and a ceremonial stamp."
+                ),
+                "article": " ".join(
+                    ["The fictional council filed a form and called the queue a calendar policy."]
+                    * 12
+                ),
+            },
+        )
+    )
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "acknowledged"
+    assert result["error_code"] is None
+    assert bridge.acks == 1
+    decision = rows(controller, "decisions")[0]
+    assert decision["decision"] == "REJECTED"
+    attempt = next(
+        item for item in rows(controller, "attempts") if item["operation"] == "editorial_gateway"
+    )
+    assert attempt["status"] == "failed"
+    assert attempt["error_code"] == "editorial_safety_rejected:unsupported_date"
+    with EditorialStore(controller.store_path, simulation=False) as store:
+        assert exportable(store) == []
+    assert controller.process(NOW)["status"] == "acknowledged"
+    assert bridge.acks == 1
 
 
 def test_interrupted_fidelity_turn_is_not_replayed_automatically(tmp_path):

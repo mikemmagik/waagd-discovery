@@ -748,8 +748,45 @@ def test_cost_and_schema_fail_closed(tmp_path: Path) -> None:
             budget_policy=GatewayBudgetPolicy(max_reported_cost_usd=0.001),
         ).evaluate(request())
     bad = creative(article='A source said "a thing" happened. ' + "word " * 75)
-    with pytest.raises(EditorialError, match="gateway_creative_safety_invalid"):
+    with pytest.raises(EditorialError, match="gateway_creative_safety_unattributed_quote"):
         GatewayEditor(fake_cli(tmp_path, envelope(text=json.dumps(bad)))).evaluate(request())
+
+
+def test_creative_safety_allows_ordinary_quotes_and_sourced_dates(tmp_path: Path) -> None:
+    value = request()
+    value["candidate"]["description"] = (
+        'The council said "forms are freedom" in its 2026 filing dated 10/22/2026.'
+    )
+    grounded = creative(headline='Council said "forms are freedom" in 2026')
+
+    result = GatewayEditor(fake_cli(tmp_path, envelope(text=json.dumps(grounded)))).evaluate(value)
+
+    assert result["decision"] == "READY_FOR_REVIEW"
+    with pytest.raises(EditorialError, match="^gateway_creative_safety_unattributed_quote$"):
+        GatewayEditor(
+            fake_cli(
+                tmp_path,
+                envelope(text=json.dumps(creative(headline='Mayor said "forms are freedom"'))),
+            )
+        ).evaluate(value)
+
+
+@pytest.mark.parametrize(
+    ("headline", "code"),
+    [
+        ('Mayor said "forms are freedom"', "gateway_creative_safety_unattributed_quote"),
+        ("Council schedules another filing for 2028", "gateway_creative_safety_unsupported_date"),
+        ("Council publishes https://example.test/a-form", "gateway_creative_safety_url"),
+        ("Council faces fraud allegation", "gateway_creative_safety_sensitive_personal_accusation"),
+    ],
+)
+def test_creative_safety_rejects_only_bounded_factual_risks(
+    tmp_path: Path, headline: str, code: str
+) -> None:
+    with pytest.raises(EditorialError, match=f"^{code}$"):
+        GatewayEditor(
+            fake_cli(tmp_path, envelope(text=json.dumps(creative(headline=headline))))
+        ).evaluate(request())
 
 
 def test_executable_must_be_absolute_regular_and_not_shared_writable(tmp_path: Path) -> None:

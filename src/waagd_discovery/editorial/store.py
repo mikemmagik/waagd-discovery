@@ -780,6 +780,58 @@ class EditorialStore:
             if delivery is not None:
                 self._complete_delivery(delivery, clock)
 
+    def save_terminal_rejection(
+        self,
+        key: str,
+        revision: int,
+        request: dict[str, Any],
+        result: dict[str, Any],
+        delivery: str,
+        attempts: tuple[tuple[str, str | None], ...],
+        clock: str,
+    ) -> None:
+        """Atomically retain a host rejection and its completed-turn evidence.
+
+        A deterministic invalid result is final only after its REJECTED
+        decision, safe attempt codes, selection state, and delivery completion
+        are durable together.  This method is never used for uncertain or
+        unattested Gateway outcomes.
+        """
+
+        with self.transaction():
+            self.connection.execute(
+                "INSERT INTO decisions VALUES (?,?,?,?,?,?)",
+                (
+                    key,
+                    revision,
+                    result["decision"],
+                    io.encode(request).decode(),
+                    io.encode(result).decode(),
+                    clock,
+                ),
+            )
+            self.connection.execute(
+                "UPDATE candidates SET status='completed',editorial_status=?,processed_at=?,"
+                "current_revision=? WHERE candidate_key=?",
+                (result["decision"], clock, revision, key),
+            )
+            for attempt, error in attempts:
+                updated = self.connection.execute(
+                    "UPDATE attempts SET status=?,finished_at=?,error_code=? "
+                    "WHERE attempt_id=? AND status='started'",
+                    ("failed" if error else "completed", clock, error, attempt),
+                ).rowcount
+                if updated != 1:
+                    raise EditorialError("editorial_attempt_state_invalid")
+            self.connection.execute(
+                "UPDATE selection_items SET editorial_status='rejected',"
+                "export_status='not_exported' "
+                "WHERE run_id=(SELECT run_id FROM selection_runs WHERE delivery_id=?) "
+                "AND candidate_key=? AND status='selected'",
+                (delivery, key),
+            )
+            self._complete_delivery(delivery, clock)
+
     def _complete_delivery(self, delivery: str, clock: str) -> None:
         unfinished = self.connection.execute(
             "SELECT COUNT(*) FROM delivery_candidates dc LEFT JOIN decisions d ON "

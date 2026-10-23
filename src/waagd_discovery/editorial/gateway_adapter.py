@@ -36,16 +36,19 @@ _OUTPUT_GUIDE = (
     b"officials intend, the administration plans, or equivalent attribution unless the supplied "
     b"material provides a clear factual basis. Do not turn exploratory reporting into a stalled "
     b"outcome or describe an older policy as a new change. Never invent an accusation or an "
-    b"attributed statement. Satirical metaphors are allowed only when they are clearly commentary, "
+    b"attributed statement. Ordinary quotation marks are fine, but use a direct quote or a factual "
+    b"date only when the supplied evidence supports it. Satirical metaphors are allowed only when "
+    b"they are clearly commentary, "
     b"not a claim that an additional real-world event happened.\n"
-    b"Output contract: return JSON only, without Markdown, code fences, prose, links, quotations, "
-    b"or extra keys. Required keys: satirical_angle, headline, summary, article. All four are "
+    b"Output contract: return JSON only, without Markdown, code fences, prose, links, source-style "
+    b"citations, or extra keys. Required keys: satirical_angle, headline, summary, article. All "
+    b"four are "
     b"strings. satirical_angle is at most 1000 characters; headline should target 65 to 70 "
     b"characters and must not exceed 80; summary should target 100 to 120 characters and must not "
     b"exceed 160; article should target 100 to 130 words, must contain 80 to 150 words, and must "
     b"not exceed 2000 characters.\n"
     b"Do not output a decision, candidate key, source, date, publisher, factual summary, evidence, "
-    b"checked source, model name, policy, risk, quote, URL, citation, markdown, or any extra key. "
+    b"checked source, model name, policy, risk, URL, citation, markdown, or any extra key. "
     b"The trusted host supplies all provenance, factual fields, and policy. Before responding, "
     b"silently check the JSON structure, exact four keys, field lengths, word count, and factual "
     b"discipline; output only the final JSON object.\n"
@@ -69,8 +72,17 @@ _CREATIVE_LIMITS = {
     "article": 2000,
 }
 _FIDELITY_JSON_FENCE = re.compile(r"\A```(?:json)?\r?\n(?P<content>.*?)\r?\n```\Z", re.DOTALL)
-_CREATIVE_UNSAFE = re.compile(
-    r"https?://|\bwww\.|[\"“”]|\b(?:19|20)\d{2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
+_CREATIVE_URL = re.compile(r"https?://|\bwww\.", re.IGNORECASE)
+_CREATIVE_DATE = re.compile(
+    r"\b(?:19|20)\d{2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
+    re.IGNORECASE,
+)
+# Only an attributed quotation is factual provenance.  Typographic quote marks
+# alone remain ordinary creative punctuation and must not be treated as a claim.
+_ATTRIBUTED_QUOTE = re.compile(
+    r"\b(?:[A-Za-z][A-Za-z'’-]*(?:\s+[A-Za-z][A-Za-z'’-]*){0,5})\s+"
+    r"(?:said|says|stated|states|told|tells|wrote|writes|announced|announces)\s*"
+    r"(?:,|:)?\s*[\"“](?P<quote>[^\"”\r\n]{1,500})[\"”]",
     re.IGNORECASE,
 )
 
@@ -736,22 +748,60 @@ class GatewayEditor:
             creative = io.decode(text.encode("utf-8"))
         except (io.BridgeError, UnicodeError):
             raise EditorialError("gateway_model_json_invalid") from None
-        self._validate_creative(creative)
+        self._validate_creative(creative, request)
         return trusted_decision(request, creative=creative)
 
     @staticmethod
-    def _validate_creative(value: Any) -> None:
-        """Keep the model on a deliberately narrow, non-provenance surface."""
+    def _creative_evidence(request: dict[str, Any]) -> tuple[str, ...]:
+        """Return only supplied factual text used to check factual-looking output.
+
+        This is deliberately comparison-only: it neither extracts facts from a
+        creative response nor adds any model-provided provenance to a decision.
+        """
+
+        candidate = request["candidate"]
+        verification = request["verification"]
+        values: list[str] = [candidate["title"], candidate["description"]]
+        for evidence in verification["evidence"]:
+            excerpt = evidence.get("excerpt")
+            if isinstance(excerpt, str):
+                values.append(excerpt)
+        for support in verification["claim_support"]:
+            claim = support.get("claim")
+            if isinstance(claim, str):
+                values.append(claim)
+        for field in ("publication_date", "event_date"):
+            date = verification.get(field)
+            if isinstance(date, str):
+                values.append(date)
+        return tuple(value.casefold() for value in values)
+
+    @staticmethod
+    def _validate_creative(value: Any, request: dict[str, Any]) -> None:
+        """Keep factual-looking creative claims tied to supplied evidence.
+
+        URLs remain forbidden because they are untrusted provenance.  Dates and
+        attributed direct quotations are permitted only when their exact value
+        appears in host-supplied candidate or verification material.
+        """
 
         if not isinstance(value, dict) or set(value) != _CREATIVE_FIELDS:
             raise EditorialError("gateway_creative_schema_invalid")
+        evidence = GatewayEditor._creative_evidence(request)
         for field, maximum in _CREATIVE_LIMITS.items():
             text = value.get(field)
             if not isinstance(text, str) or len(text) > maximum:
                 raise EditorialError(f"gateway_creative_schema_invalid:{field}")
             if field == "article" and not 80 <= len(text.split()) <= 150:
                 raise EditorialError("gateway_creative_schema_invalid:article_words")
-            # Citations, URLs, explicit dates and typographic quotes would turn
-            # an otherwise creative field into untrusted provenance or a claim.
-            if _CREATIVE_UNSAFE.search(text) or sensitive_risks(text):
-                raise EditorialError("gateway_creative_safety_invalid")
+            if _CREATIVE_URL.search(text):
+                raise EditorialError("gateway_creative_safety_url")
+            risks = sensitive_risks(text)
+            if risks:
+                raise EditorialError("gateway_creative_safety_sensitive_" + risks[0])
+            for match in _CREATIVE_DATE.finditer(text):
+                if not any(match.group(0).casefold() in source for source in evidence):
+                    raise EditorialError("gateway_creative_safety_unsupported_date")
+            for match in _ATTRIBUTED_QUOTE.finditer(text):
+                if not any(match.group(0).casefold() in source for source in evidence):
+                    raise EditorialError("gateway_creative_safety_unattributed_quote")

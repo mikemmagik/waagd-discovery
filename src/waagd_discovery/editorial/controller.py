@@ -14,6 +14,7 @@ from waagd_discovery.editorial.contracts import (
     EditorAdapter,
     EditorialError,
     Verifier,
+    completed_editorial_rejection,
     digest,
     make_request,
     utc,
@@ -228,6 +229,18 @@ class Controller:
             require_source_fidelity(request, result)
         except (EditorialError, io.BridgeError, OSError, ValueError, TypeError) as error:
             code = self._editorial_failure_code(error)
+            if not reconsider and self._terminal_rejection(code, self.editor):
+                rejection = completed_editorial_rejection(request, now=now)
+                store.save_terminal_rejection(
+                    key,
+                    revision,
+                    request,
+                    rejection,
+                    delivery,
+                    ((attempt, code),),
+                    utc(now).isoformat(),
+                )
+                return None
             store.finish_attempt(attempt, utc(now).isoformat(), code)
             store.mark_selection_editorial(delivery, key, "failed")
             return code
@@ -240,6 +253,21 @@ class Controller:
                     raise EditorialError(review.code)
             except (EditorialError, io.BridgeError, OSError, ValueError, TypeError) as error:
                 code = self._editorial_failure_code(error)
+                if not reconsider and self._terminal_rejection(
+                    code, getattr(self.fidelity_reviewer, "editor", None)
+                ):
+                    assert fidelity_attempt is not None
+                    rejection = completed_editorial_rejection(request, now=now)
+                    store.save_terminal_rejection(
+                        key,
+                        revision,
+                        request,
+                        rejection,
+                        delivery,
+                        ((attempt, None), (fidelity_attempt, code)),
+                        utc(now).isoformat(),
+                    )
+                    return None
                 # Creative generation completed; fidelity is a separate policy
                 # gate. Finish both records together so the parent never
                 # remains falsely started after a terminal fidelity outcome.
@@ -304,6 +332,17 @@ class Controller:
             return "editorial_format_schema_invalid"
         if code == "gateway_creative_safety_invalid":
             return "editorial_safety_rejected"
+        safety_reason = code.removeprefix("gateway_creative_safety_")
+        if safety_reason in {
+            "url",
+            "unsupported_date",
+            "unattributed_quote",
+            "sensitive_sexual_violence",
+            "sensitive_minors",
+            "sensitive_personal_accusation",
+            "sensitive_acute_violence",
+        }:
+            return "editorial_safety_rejected:" + safety_reason
         if code in {"gateway_unavailable", "gateway_child_launch_failed"}:
             return "editorial_transport_unavailable"
         if code == "gateway_child_exit_nonzero":
@@ -341,6 +380,34 @@ class Controller:
         }:
             return "editorial_gateway_attestation_invalid"
         return "editorial_execution_failed"
+
+    @staticmethod
+    def _terminal_rejection(code: str, adapter: Any) -> bool:
+        """True only for a known policy result after an attested Gateway reply.
+
+        Transport, timeout, attestation, parse and persistence uncertainty never
+        reaches this path.  ``last_completion`` is metadata recorded only by
+        the Gateway adapter after it has received and attested one response.
+        """
+
+        known_policy_result = (
+            code.startswith("editorial_format_retry_exhausted:")
+            or code == "editorial_safety_rejected"
+            or code.startswith("editorial_safety_rejected:")
+            or code
+            in {
+                "editorial_fidelity_unsupported_attribution",
+                "editorial_fidelity_contradiction",
+                "editorial_fidelity_misleading_timing",
+                "editorial_fidelity_proposal_as_outcome",
+                "editorial_fidelity_scope_misrepresentation",
+                "editorial_fidelity_invented_event",
+            }
+        )
+        if not known_policy_result or not getattr(adapter, "gateway_backed", False):
+            return False
+        completion = getattr(adapter, "last_completion", None)
+        return isinstance(completion, dict) and bool(completion)
 
     @staticmethod
     def _requires_editorial_operator(code: str) -> bool:

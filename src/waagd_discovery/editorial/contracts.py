@@ -358,6 +358,48 @@ def trusted_decision(
     return result
 
 
+def completed_editorial_rejection(
+    request: dict[str, Any], *, now: datetime | None = None
+) -> dict[str, Any]:
+    """Record a completed, attested editorial turn rejected by host policy.
+
+    This intentionally contains no model text, inferred claims, or invented
+    evidence.  It is only valid after a Gateway response has completed and a
+    deterministic content or fidelity rule has supplied the durable attempt
+    reason code.
+    """
+
+    validate_request(request)
+    verification = request["verification"]
+    if verification["verification_status"] not in {"VERIFIED", "TRUSTED_PUBLISHER"}:
+        raise EditorialError("trusted_verification_invalid")
+    candidate = request["candidate"]
+    result = {
+        "schema_version": 1,
+        "candidate_key": candidate["candidate_key"],
+        "decision": "REJECTED",
+        "source": candidate["url"],
+        "date": verification["publication_date"] or verification["event_date"],
+        "factual_summary": "A completed editorial result was rejected by deterministic policy.",
+        "satirical_angle": "",
+        "headline": "",
+        "summary": "",
+        "article": "",
+        "established_facts": [],
+        "unverified_claims": [],
+        "open_questions": [],
+        "checked_sources": [],
+        "verification_evidence": [],
+        "risks": ["Completed editorial output did not pass deterministic policy."],
+        "rejection_reason": "EDITORIAL_RISK",
+        "created_at": utc(now).isoformat(),
+        "model_identifier": "trusted-editorial-policy-v1",
+        "prompt_version": PROMPT_VERSION,
+    }
+    validate_decision(result, request)
+    return result
+
+
 def validate_decision(value: Any, request: dict[str, Any]) -> None:
     validate_request(request)
     _validate(value, "editorial-decision-v1.schema.json", diagnose=True)
