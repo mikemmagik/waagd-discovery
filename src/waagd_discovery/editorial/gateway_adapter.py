@@ -177,6 +177,7 @@ class GatewayEditor:
         self.retry_format_once = retry_format_once
         self._last_completion: dict[str, str] | None = None
         self._last_metrics: dict[str, str] | None = None
+        self._last_diagnostics: dict[str, int | str | bool | None] | None = None
 
     @property
     def last_completion(self) -> dict[str, str] | None:
@@ -190,12 +191,24 @@ class GatewayEditor:
 
         return None if self._last_metrics is None else dict(self._last_metrics)
 
+    @property
+    def last_diagnostics(self) -> dict[str, int | str | bool | None] | None:
+        """Ephemeral scalar telemetry for the last Gateway child process.
+
+        This intentionally contains neither a prompt nor a model response.  A
+        host may surface these fields in its private operational telemetry, but
+        the adapter never writes them to editorial state or a Gateway session.
+        """
+
+        return None if self._last_diagnostics is None else dict(self._last_diagnostics)
+
     def evaluate(self, request: dict[str, Any], *, fresh_session: bool = False) -> dict[str, Any]:
         validate_request(request)
         if type(fresh_session) is not bool:
             raise EditorialError("gateway_session_policy_invalid")
         self._last_completion = None
         self._last_metrics = None
+        self._last_diagnostics = None
         if request["simulation"] is not False:
             raise EditorialError("gateway_simulation_forbidden")
         verification_status = request["verification"]["verification_status"]
@@ -259,6 +272,7 @@ class GatewayEditor:
                     continue
                 if attempt == 1 and self._format_retryable(code):
                     code = "gateway_format_retry_exhausted:" + self._format_failure_class(code)
+                self._record_diagnostic_failure(code)
                 self._last_metrics = {
                     "path": "gateway_creative",
                     "outcome": "rejected",
@@ -350,30 +364,35 @@ class GatewayEditor:
         if len(message) > self.budget_policy.max_prompt_bytes:
             raise EditorialError("gateway_request_too_large")
         self._last_completion = None
-        raw = self._run_gateway_turn(
-            message,
-            raw_payload,
-            fresh_session=False,
-            retry=False,
-            session_prefix="fidelity",
-        )
-        _, _, text, containers = self._parse_envelope_text(raw)
-        if self.budget_policy.max_reported_cost_usd is not None:
-            cost = self._reported_cost(containers)
-            if (
-                not isinstance(cost, (float, int))
-                or isinstance(cost, bool)
-                or not math.isfinite(cost)
-                or cost < 0
-                or cost > self.budget_policy.max_reported_cost_usd
-            ):
-                raise EditorialError("gateway_cost_unverified")
-        if not text.strip():
-            raise EditorialError("gateway_empty_response")
+        self._last_diagnostics = None
         try:
-            value = io.decode(self._normalize_fidelity_json(text).encode("utf-8"))
-        except (io.BridgeError, UnicodeError):
-            raise EditorialError("gateway_model_json_invalid") from None
+            raw = self._run_gateway_turn(
+                message,
+                raw_payload,
+                fresh_session=False,
+                retry=False,
+                session_prefix="fidelity",
+            )
+            _, _, text, containers = self._parse_envelope_text(raw)
+            if self.budget_policy.max_reported_cost_usd is not None:
+                cost = self._reported_cost(containers)
+                if (
+                    not isinstance(cost, (float, int))
+                    or isinstance(cost, bool)
+                    or not math.isfinite(cost)
+                    or cost < 0
+                    or cost > self.budget_policy.max_reported_cost_usd
+                ):
+                    raise EditorialError("gateway_cost_unverified")
+            if not text.strip():
+                raise EditorialError("gateway_empty_response")
+            try:
+                value = io.decode(self._normalize_fidelity_json(text).encode("utf-8"))
+            except (io.BridgeError, UnicodeError):
+                raise EditorialError("gateway_model_json_invalid") from None
+        except EditorialError as error:
+            self._record_diagnostic_failure(str(error))
+            raise
         self._last_metrics = {"path": "gateway_fidelity", "outcome": "received"}
         return value
 
@@ -398,6 +417,8 @@ class GatewayEditor:
         retry: bool,
         session_prefix: str,
     ) -> bytes:
+        started = time.monotonic()
+        process: subprocess.Popen[bytes] | None = None
         with tempfile.TemporaryDirectory(prefix="waagd-gateway-") as temporary:
             message_path = Path(temporary) / "message.json"
             descriptor = os.open(message_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -439,16 +460,50 @@ class GatewayEditor:
             except OSError:
                 # Popen failed before a child existed, so this is a known
                 # transport failure rather than an ambiguous model outcome.
+                self._set_gateway_diagnostics(started, None, "gateway_child_launch_failed")
                 raise EditorialError("gateway_child_launch_failed") from None
+            failure: EditorialError | None = None
             try:
                 raw = self._read_bounded(process)
+            except EditorialError as error:
+                failure = error
             finally:
                 if process.poll() is None:
                     self._terminate(process)
+            if failure is not None:
+                self._set_gateway_diagnostics(started, process.returncode, str(failure))
+                raise failure
         if process.returncode != 0:
             # The child may have handed the request to Gateway before exiting.
+            self._set_gateway_diagnostics(started, process.returncode, "gateway_child_exit_nonzero")
             raise EditorialError("gateway_child_exit_nonzero")
+        self._set_gateway_diagnostics(started, process.returncode, "none")
         return raw
+
+    def _set_gateway_diagnostics(
+        self, started: float, child_exit_status: int | None, failure_category: str
+    ) -> None:
+        """Record bounded transport facts only; model content is never retained."""
+
+        self._last_diagnostics = {
+            "elapsed_ms": max(0, int((time.monotonic() - started) * 1000)),
+            "child_exit_status": child_exit_status,
+            "failure_category": failure_category,
+            "terminal_completion_attested": False,
+        }
+
+    def _record_diagnostic_failure(
+        self,
+        code: str,
+        started: float | None = None,
+        child_exit_status: int | None = None,
+    ) -> None:
+        """Annotate an existing child result with a safe, bounded failure code."""
+
+        if started is not None:
+            self._set_gateway_diagnostics(started, child_exit_status, code)
+        elif self._last_diagnostics is not None:
+            self._last_diagnostics["failure_category"] = code
 
     def _read_bounded(self, process: subprocess.Popen[bytes]) -> bytes:
         assert process.stdout is not None
@@ -676,6 +731,7 @@ class GatewayEditor:
         """Keep only safe completion fields after a complete tool attestation."""
 
         completion = {"gateway_status": str(envelope["status"])}
+        model_routes: list[str] = []
         roots = (envelope,) if result is envelope else (envelope, result)
         for root in roots:
             meta = root.get("meta")
@@ -690,7 +746,20 @@ class GatewayEditor:
                 "not-visible",
             }:
                 completion["terminal_disposition"] = receipt["terminalDisposition"]
+            if isinstance(receipt, dict):
+                effective = receipt.get("effective")
+                if isinstance(effective, dict):
+                    route = effective.get("model")
+                    if (
+                        isinstance(route, str)
+                        and re.fullmatch(r"[A-Za-z0-9._:/-]{1,128}", route) is not None
+                    ):
+                        model_routes.append(route)
         self._last_completion = completion
+        if self._last_diagnostics is not None:
+            self._last_diagnostics["terminal_completion_attested"] = True
+            if model_routes and all(route == model_routes[0] for route in model_routes):
+                self._last_diagnostics["model_route"] = model_routes[0]
 
     def _parse_envelope_text(
         self, raw: bytes

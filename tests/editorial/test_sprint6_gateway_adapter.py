@@ -456,6 +456,13 @@ def test_gateway_parses_full_openclaw_2026_10_3_gateway_envelope(tmp_path: Path)
     raw = json.dumps(response).encode()
     assert editor._parse(raw, request())["decision"] == "READY_FOR_REVIEW"
     assert editor.evaluate(request())["decision"] == "READY_FOR_REVIEW"
+    diagnostics = editor.last_diagnostics
+    assert diagnostics is not None
+    assert diagnostics["elapsed_ms"] >= 0
+    assert diagnostics["child_exit_status"] == 0
+    assert diagnostics["failure_category"] == "none"
+    assert diagnostics["terminal_completion_attested"] is True
+    assert diagnostics["model_route"] == "minimax/minimax-m3.1-flash:free"
 
 
 def test_gateway_parses_full_openclaw_2026_10_3_tool_free_gateway_envelope(tmp_path: Path) -> None:
@@ -707,13 +714,21 @@ def test_gateway_does_not_treat_false_code_mode_as_complete_attestation(tmp_path
 
 
 def test_nonzero_exit_is_ambiguous_even_if_output_looks_valid(tmp_path: Path) -> None:
+    editor = GatewayEditor(fake_cli(tmp_path, envelope(), exit_code=1))
     with pytest.raises(EditorialError, match="gateway_child_exit_nonzero"):
-        GatewayEditor(fake_cli(tmp_path, envelope(), exit_code=1)).evaluate(request())
+        editor.evaluate(request())
+    assert editor.last_diagnostics is not None
+    assert editor.last_diagnostics["failure_category"] == "gateway_child_exit_nonzero"
+    assert editor.last_diagnostics["terminal_completion_attested"] is False
 
 
 def test_hung_gateway_is_terminated_and_requires_reconciliation(tmp_path: Path) -> None:
+    editor = GatewayEditor(fake_cli(tmp_path, envelope(), delay=30), timeout=5)
     with pytest.raises(EditorialError, match="gateway_timeout"):
-        GatewayEditor(fake_cli(tmp_path, envelope(), delay=30), timeout=5).evaluate(request())
+        editor.evaluate(request())
+    assert editor.last_diagnostics is not None
+    assert editor.last_diagnostics["failure_category"] == "gateway_timeout"
+    assert editor.last_diagnostics["terminal_completion_attested"] is False
 
 
 def test_missing_success_status_or_delivery_attempt_fails_closed(tmp_path: Path) -> None:

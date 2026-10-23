@@ -29,5 +29,5 @@
     "runtime_state_dir": "/absolute/private/waagd-staging/runtime-state"
   },
   "limits": {"gateway_max_candidates": 5, "gateway_max_cost_usd": 0.10},
-  "timeouts": {"bridge_seconds": 900, "editorial_seconds": 10800, "cycle_seconds": 15600}
+  "timeouts": {"bridge_seconds": 900, "gateway_seconds": 600, "editorial_seconds": 10800, "cycle_seconds": 15600}
 }

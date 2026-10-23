@@ -105,12 +105,19 @@ def load_config(path: Path) -> dict[str, Any]:
             not isinstance(limits, dict)
             or set(limits) != {"gateway_max_candidates", "gateway_max_cost_usd"}
             or not isinstance(timeouts, dict)
-            or set(timeouts) != {"bridge_seconds", "editorial_seconds", "cycle_seconds"}
+            or set(timeouts)
+            != {"bridge_seconds", "editorial_seconds", "cycle_seconds", "gateway_seconds"}
             or type(limits["gateway_max_candidates"]) is not int
             or not 1 <= limits["gateway_max_candidates"] <= 5
             or type(limits["gateway_max_cost_usd"]) not in {int, float}
             or not 0 < limits["gateway_max_cost_usd"] <= 1
             or any(type(item) is not int or item < 1 for item in timeouts.values())
+            # GatewayEditor has the matching hard safety range.  Requiring the
+            # stage deadline to be strictly larger prevents the wrapper from
+            # pre-empting a still-bounded Gateway call.
+            or not 5 <= timeouts["gateway_seconds"] <= 600
+            or timeouts["editorial_seconds"] <= timeouts["gateway_seconds"]
+            or timeouts["cycle_seconds"] <= timeouts["editorial_seconds"]
         ):
             raise ValueError
         return value
@@ -269,7 +276,7 @@ def editorial_stage(config: dict[str, Any], export: Path) -> dict[str, object]:
             "--gateway-agent",
             "waagd",
             "--gateway-timeout-seconds",
-            "360",
+            str(timeouts["gateway_seconds"]),
             "--gateway-max-candidates",
             str(limits["gateway_max_candidates"]),
             "--gateway-max-cost-usd",

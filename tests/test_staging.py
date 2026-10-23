@@ -49,7 +49,12 @@ def _config(root: Path) -> Path:
         "staging_origin": "https://waagd-staging.waagd.workers.dev",
         "paths": paths,
         "limits": {"gateway_max_candidates": 5, "gateway_max_cost_usd": 0.1},
-        "timeouts": {"bridge_seconds": 900, "editorial_seconds": 10800, "cycle_seconds": 15600},
+        "timeouts": {
+            "bridge_seconds": 900,
+            "gateway_seconds": 600,
+            "editorial_seconds": 10800,
+            "cycle_seconds": 15600,
+        },
     }
     root.mkdir(mode=0o700)
     path = root / "staging.json"
@@ -77,6 +82,48 @@ def test_config_rejects_production_origin_without_reading_any_secret(tmp_path: P
     path.chmod(0o600)
     with pytest.raises(DiscoveryError, match="staging_config_invalid"):
         load_config(path)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        {"gateway_seconds": 601},
+        {"gateway_seconds": 4},
+        {"editorial_seconds": 600},
+        {"cycle_seconds": 10800},
+    ),
+)
+def test_config_requires_nested_gateway_and_stage_deadlines(
+    tmp_path: Path, mutation: dict[str, int]
+) -> None:
+    path = _config(tmp_path.resolve() / "private")
+    value = json.loads(path.read_text())
+    value["timeouts"].update(mutation)
+    path.write_text(json.dumps(value))
+    path.chmod(0o600)
+    with pytest.raises(DiscoveryError, match="staging_config_invalid"):
+        load_config(path)
+
+
+def test_editorial_stage_passes_the_validated_six_hundred_second_gateway_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = load_config(_config(tmp_path.resolve() / "private"))
+    captured: dict[str, object] = {}
+
+    def stage_result(
+        argv: list[str], environment: dict[str, str], timeout: int
+    ) -> dict[str, object]:
+        captured.update(argv=argv, environment=environment, timeout=timeout)
+        return {"status": "acknowledged"}
+
+    monkeypatch.setattr(staging, "_stage_result", stage_result)
+
+    assert staging.editorial_stage(config, tmp_path / "snapshot.json") == {"status": "completed"}
+    argv = captured["argv"]
+    assert isinstance(argv, list)
+    assert argv[argv.index("--gateway-timeout-seconds") + 1] == "600"
+    assert captured["timeout"] == 10800
 
 
 def test_snapshot_is_validated_stable_and_never_overwritten(

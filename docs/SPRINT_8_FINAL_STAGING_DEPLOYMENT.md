@@ -16,6 +16,20 @@ environments. The OpenClaw process receives only its dedicated HOME,
 `OPENCLAW_CONFIG_PATH`, `OPENCLAW_STATE_DIR`, and system PATH. The Site process
 alone receives the Site environment-file and ingress-token paths.
 
+The `timeouts.gateway_seconds` setting is required and is set to `600` in the
+template. It is independently bounded to 5–600 seconds; the editorial-stage
+deadline must be larger and the cycle deadline must be larger again. The
+template's 600/10,800/15,600-second chain therefore leaves the Gateway call
+bounded while avoiding the former 360-second wrapper cutoff. For an existing
+private configuration, add only this required field; do not regenerate or
+alter any historical delivery, SQLite database, WAL sidecar, intent, or
+journal.
+
+The wrapper treats OpenClaw as an opaque child process and validates only its
+attested JSON stdout. It does not read, reconcile, or assume a JSONL layout for
+Gateway sessions, so SQLite/WAL-backed OpenClaw session storage remains
+operator-owned and untouched.
+
 Every private directory must be `0700`, every config/token/environment file
 `0600`, and every executable root-owned or `claw2`-owned and non-group-writable.
 The Site environment file must name a new `WAAGD_STATE_DIR`; do not point it at
