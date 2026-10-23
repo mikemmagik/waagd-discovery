@@ -1144,6 +1144,18 @@ def test_gateway_cli_wires_real_selector_into_controller(tmp_path, capsys, monke
     policy.write_text(Path("config/trusted_publishers.yaml").read_text())
     policy.chmod(0o600)
     monkeypatch.setattr("waagd_discovery.editorial.verifier.SourceVerifier", CliTrustedVerifier)
+    from waagd_discovery.editorial.gateway_adapter import GatewayEditor as RealGatewayEditor
+
+    configured_timeouts: list[float] = []
+
+    class RecordingGatewayEditor(RealGatewayEditor):
+        def __init__(self, *args, **kwargs):
+            configured_timeouts.append(kwargs["timeout"])
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "waagd_discovery.editorial.gateway_adapter.GatewayEditor", RecordingGatewayEditor
+    )
 
     assert (
         main(
@@ -1164,6 +1176,8 @@ def test_gateway_cli_wires_real_selector_into_controller(tmp_path, capsys, monke
                 "--allow-gateway",
                 "--gateway-executable",
                 str(real_selector_executable(tmp_path)),
+                "--gateway-timeout-seconds",
+                "360",
                 "--gateway-max-candidates",
                 "2",
                 "--gateway-max-cost-usd",
@@ -1176,6 +1190,58 @@ def test_gateway_cli_wires_real_selector_into_controller(tmp_path, capsys, monke
         == 0
     )
     assert json.loads(capsys.readouterr().out)["status"] == "results_saved"
+    assert configured_timeouts == [360.0]
+
+
+@pytest.mark.parametrize("timeout", ["nan", "inf", "4", "601"])
+def test_gateway_cli_rejects_invalid_timeout_before_openclaw_spawn(tmp_path, capsys, timeout):
+    bridge, _ = real_bridge(tmp_path)
+    root = tmp_path.resolve()
+    config = root / "gateway.yaml"
+    config.write_text(
+        "editorial: {enabled: true}\nnetwork: {enabled: true}\nllm: {enabled: true}\n"
+    )
+    policy_directory = root / "policy"
+    policy_directory.mkdir(mode=0o700)
+    policy_directory.chmod(0o700)
+    policy = policy_directory / "trusted.yaml"
+    policy.write_text(Path("config/trusted_publishers.yaml").read_text())
+    policy.chmod(0o600)
+
+    assert (
+        main(
+            [
+                "--config",
+                str(config),
+                "--inbox",
+                str(bridge.inbox_dir / "inbox.json"),
+                "--store",
+                str(root / "private" / "editorial.sqlite3"),
+                "--export",
+                str(root / "exports" / "candidates.json"),
+                "--workspace-root",
+                str(root / "workspace"),
+                "--state-dir",
+                str(root / "bridge-state"),
+                "--no-simulation",
+                "--allow-gateway",
+                "--gateway-executable",
+                str(real_selector_executable(tmp_path)),
+                "--gateway-timeout-seconds",
+                timeout,
+                "--gateway-max-candidates",
+                "2",
+                "--gateway-max-cost-usd",
+                "0.10",
+                "--trusted-publishers",
+                str(policy),
+                "gateway-process",
+            ]
+        )
+        == 1
+    )
+    assert "gateway_timeout_invalid" in capsys.readouterr().out
+    assert not (tmp_path / "selector-calls").exists()
 
 
 def test_mock_worker_is_separate_bounded_data_only(tmp_path, monkeypatch):

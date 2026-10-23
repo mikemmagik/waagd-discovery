@@ -187,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allow-gateway", action="store_true")
     parser.add_argument("--gateway-executable", type=Path)
     parser.add_argument("--gateway-agent", default="waagd")
+    parser.add_argument("--gateway-timeout-seconds", type=float, default=120)
     parser.add_argument("--gateway-max-candidates", type=int, default=1)
     parser.add_argument("--gateway-max-cost-usd", type=float)
     parser.add_argument("--corroboration-policy", type=Path)
@@ -264,6 +265,7 @@ def main(argv: list[str] | None = None) -> int:
                 editor = GatewayEditor(
                     args.gateway_executable,
                     agent_id=args.gateway_agent,
+                    timeout=args.gateway_timeout_seconds,
                     budget_policy=GatewayBudgetPolicy(
                         max_reported_cost_usd=args.gateway_max_cost_usd
                     ),

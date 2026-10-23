@@ -14,7 +14,11 @@ from waagd_discovery.editorial.selection_gateway import GatewaySelector
 
 
 def executable(
-    tmp_path: Path, outputs: list[str], *, payload_extras: dict[str, object] | None = None
+    tmp_path: Path,
+    outputs: list[str],
+    *,
+    payload_extras: dict[str, object] | None = None,
+    timeout_log: Path | None = None,
 ) -> Path:
     path = tmp_path / "fake-openclaw"
     rendered = repr(outputs)
@@ -24,8 +28,12 @@ def executable(
         f"outputs={rendered}\n"
         f"payload_extras={payload_extras!r}\n"
         f"state=pathlib.Path({str(tmp_path / 'calls')!r})\n"
+        f"timeout_log={str(timeout_log)!r}\n"
         "count=int(state.read_text()) if state.exists() else 0\n"
         "state.write_text(str(count + 1))\n"
+        "if timeout_log != 'None':\n"
+        "  timeout = sys.argv[sys.argv.index('--timeout') + 1]\n"
+        "  pathlib.Path(timeout_log).open('a').write(timeout + '\\n')\n"
         "assert b'Shortlist JSON' in pathlib.Path("
         "sys.argv[sys.argv.index('--message-file') + 1]).read_bytes()\n"
         "answer=outputs[min(count,len(outputs)-1)]\n"
@@ -63,6 +71,19 @@ def test_gateway_selector_accepts_bounded_choices(tmp_path: Path, count: int) ->
     selector = GatewaySelector(GatewayEditor(executable(tmp_path, [output])))
     selected = selector.select(shortlist())
     assert selected.selected == keys
+
+
+def test_gateway_selector_uses_configured_editor_timeout(tmp_path: Path) -> None:
+    timeouts = tmp_path / "timeouts"
+    keys = [item["candidate_key"] for item in shortlist().shortlist[:1]]
+    output = json.dumps({"schema_version": 1, "selected_candidate_keys": keys})
+
+    selected = GatewaySelector(
+        GatewayEditor(executable(tmp_path, [output], timeout_log=timeouts), timeout=360)
+    ).select(shortlist())
+
+    assert selected.selected == keys
+    assert timeouts.read_text().splitlines() == ["358"]
 
 
 @pytest.mark.parametrize(

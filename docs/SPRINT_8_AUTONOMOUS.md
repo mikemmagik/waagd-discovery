@@ -25,6 +25,14 @@ sanitized environment. It subsequently invokes the Site importer in a separate
 process. The Site environment file and ingress-token file are never passed to
 the Gateway/editorial command.
 
+`--gateway-timeout-seconds` defaults to `120` and accepts only finite values
+from `5` through `600`. The staging example uses `360` to give a slow but live
+Gateway turn a longer parent deadline; its subordinate OpenClaw timeout remains
+two seconds shorter. This does not guarantee completion if OpenClaw or its
+provider applies an independent limit. A timeout or nonzero child exit remains
+an ambiguous, operator-required result: it is not retried automatically and
+cannot produce an ACK or publication.
+
 Publication jobs live only in the independent Editorial Store, schema 4. Each
 job stores the exact immutable intent bytes, identity and content hash before the
 intent file is exposed. `created` and `duplicate` are terminal delivery receipts.
@@ -53,7 +61,7 @@ file below `0600`; none belongs in a Git checkout.
 ```sh
 /absolute/venv/bin/waagd-autonomous-cycle \
   --stage-command '/absolute/venv/bin/waagd-bridge --export /absolute/export/candidates.json --workspace-root /absolute/bridge-workspace --state-dir /absolute/bridge-state sync' \
-  --stage-command '/absolute/venv/bin/waagd-editorial --config /absolute/private/editorial.yaml --inbox /absolute/bridge-workspace/waagd-discovery/inbox.json --store /absolute/editorial/editorial.sqlite3 --export /absolute/export/candidates.json --workspace-root /absolute/bridge-workspace --state-dir /absolute/bridge-state --no-simulation --allow-ack --allow-gateway --gateway-executable /absolute/openclaw --gateway-max-candidates 5 --gateway-max-cost-usd 0.10 --trusted-publishers /absolute/private/trusted_publishers.yaml gateway-process' \
+  --stage-command '/absolute/venv/bin/waagd-editorial --config /absolute/private/editorial.yaml --inbox /absolute/bridge-workspace/waagd-discovery/inbox.json --store /absolute/editorial/editorial.sqlite3 --export /absolute/export/candidates.json --workspace-root /absolute/bridge-workspace --state-dir /absolute/bridge-state --no-simulation --allow-ack --allow-gateway --gateway-executable /absolute/openclaw --gateway-timeout-seconds 360 --gateway-max-candidates 5 --gateway-max-cost-usd 0.10 --trusted-publishers /absolute/private/trusted_publishers.yaml gateway-process' \
   --editorial-store /absolute/editorial/editorial.sqlite3 \
   --publication-output /absolute/publication-export/publication-intent.json \
   --publication-policy /absolute/private/publication.yaml \

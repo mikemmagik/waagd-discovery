@@ -135,12 +135,16 @@ def fake_cli(
     exit_code: int = 0,
     delay: int = 0,
     session_log: Path | None = None,
+    timeout_log: Path | None = None,
 ) -> Path:
     path = tmp_path / "fake-openclaw"
     record = ""
     if session_log is not None:
         record = f"log = open({str(session_log)!r}, 'a')\n"
         record += "log.write(args[args.index('--session-key') + 1] + '\\n')\nlog.close()\n"
+    if timeout_log is not None:
+        record += f"log = open({str(timeout_log)!r}, 'a')\n"
+        record += "log.write(args[args.index('--timeout') + 1] + '\\n')\nlog.close()\n"
     source = (
         f"#!{sys.executable}\n"
         "import os, pathlib, sys, time\n"
@@ -218,6 +222,39 @@ def test_gateway_success_fixed_argv_and_sanitized_environment(
     assert result["decision"] == "READY_FOR_REVIEW"
     assert result["headline"] == creative()["headline"]
     assert result["candidate_key"] == KEY
+
+
+def test_gateway_default_and_configured_timeout_propagate_to_child(tmp_path: Path) -> None:
+    timeouts = tmp_path / "timeouts"
+    GatewayEditor(fake_cli(tmp_path, envelope(), timeout_log=timeouts)).evaluate(request())
+    GatewayEditor(fake_cli(tmp_path, envelope(), timeout_log=timeouts), timeout=360).evaluate(
+        request()
+    )
+
+    assert timeouts.read_text().splitlines() == ["118", "358"]
+
+
+def test_fidelity_review_uses_configured_editor_timeout(tmp_path: Path) -> None:
+    timeouts = tmp_path / "timeouts"
+    review = {"schema_version": 1, "verdict": "PASS", "findings": []}
+    executable = tmp_path / "fidelity-openclaw"
+    executable.write_text(
+        f"#!{sys.executable}\n"
+        "import pathlib, sys\n"
+        f"pathlib.Path({str(timeouts)!r}).write_text(sys.argv[sys.argv.index('--timeout') + 1])\n"
+        f"sys.stdout.buffer.write({envelope(text=json.dumps(review))!r})\n"
+    )
+    executable.chmod(0o700)
+
+    assert GatewayEditor(executable, timeout=360).review_fidelity({}) == review
+    assert timeouts.read_text() == "358"
+
+
+@pytest.mark.parametrize("timeout", [True, 4, 601, float("nan"), float("inf")])
+def test_gateway_rejects_invalid_timeout_without_spawning(tmp_path: Path, timeout: object) -> None:
+    executable = fake_cli(tmp_path, envelope())
+    with pytest.raises(EditorialError, match="^gateway_timeout_invalid$"):
+        GatewayEditor(executable, timeout=timeout)  # type: ignore[arg-type]
 
 
 def test_gateway_smoke_sessions_are_fresh_without_changing_default_idempotency(
