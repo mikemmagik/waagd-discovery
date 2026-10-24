@@ -919,6 +919,119 @@ class EditorialStore:
                 (status, error, delivery),
             )
 
+    def begin_expired_quarantine(self, envelope: dict[str, Any], clock: str) -> bool:
+        """Durably reserve a proven-unused expired delivery for Bridge quarantine.
+
+        Any evidence that a Gateway call, ACK, publication intent, or Site
+        result may exist is deliberately an operator case.  This method does
+        not delete candidate history and never creates an ACK outbox entry.
+        """
+
+        delivery = envelope["delivery_id"]
+        expected = digest(envelope)
+        with self.transaction():
+            row = self.connection.execute(
+                "SELECT payload_digest,status,ack_status FROM deliveries WHERE delivery_id=?",
+                (delivery,),
+            ).fetchone()
+            if row is not None:
+                if row["payload_digest"] != expected:
+                    raise EditorialError("delivery_payload_changed")
+                if row["status"] == "quarantine_pending":
+                    return True
+                if row["status"] == "quarantined" or row["ack_status"] != "not_ready":
+                    return False
+                if row["status"] == "operator_required":
+                    return False
+                started = self.connection.execute(
+                    "SELECT 1 FROM attempts WHERE delivery_id=? LIMIT 1", (delivery,)
+                ).fetchone()
+                decisions = self.connection.execute(
+                    "SELECT 1 FROM decisions d JOIN delivery_candidates dc ON "
+                    "dc.candidate_key=d.candidate_key AND dc.revision=d.revision "
+                    "WHERE dc.delivery_id=? LIMIT 1",
+                    (delivery,),
+                ).fetchone()
+                if started is not None or decisions is not None:
+                    return False
+            else:
+                self.connection.execute(
+                    "INSERT INTO deliveries VALUES "
+                    "(?,?,?,?,?,'processing',?,NULL,'not_ready',NULL,?)",
+                    (
+                        delivery,
+                        expected,
+                        envelope["bridge_schema_version"],
+                        clock,
+                        envelope["expires_at"],
+                        clock,
+                        io.encode(envelope).decode(),
+                    ),
+                )
+                for candidate in envelope["candidates"]:
+                    key = candidate["candidate_key"]
+                    self.connection.execute(
+                        "INSERT INTO candidates(candidate_key,source_url,status,payload) "
+                        "VALUES (?,?,'pending',?) ON CONFLICT(candidate_key) DO NOTHING",
+                        (key, candidate["url"], io.encode(candidate).decode()),
+                    )
+                    candidate_row = self.connection.execute(
+                        "SELECT source_url,requested_revision FROM candidates "
+                        "WHERE candidate_key=?",
+                        (key,),
+                    ).fetchone()
+                    if candidate_row["source_url"] != candidate["url"]:
+                        raise EditorialError("candidate_identity_collision")
+                    self.connection.execute(
+                        "INSERT INTO delivery_candidates VALUES (?,?,?)",
+                        (delivery, key, candidate_row["requested_revision"]),
+                    )
+            if (
+                self.connection.execute(
+                    "SELECT 1 FROM ack_outbox WHERE delivery_id=?", (delivery,)
+                ).fetchone()
+                is not None
+            ):
+                return False
+            if (
+                self.connection.execute(
+                    "SELECT 1 FROM publication_jobs WHERE delivery_id=? LIMIT 1", (delivery,)
+                ).fetchone()
+                is not None
+            ):
+                return False
+            self.connection.execute(
+                "UPDATE deliveries SET status='quarantine_pending',"
+                "error_code='delivery_expired_quarantine_pending' WHERE delivery_id=?",
+                (delivery,),
+            )
+            self.connection.execute(
+                "UPDATE candidates SET status='quarantined',editorial_status='quarantined',"
+                "processed_at=? WHERE candidate_key IN "
+                "(SELECT candidate_key FROM delivery_candidates WHERE delivery_id=?)",
+                (clock, delivery),
+            )
+            return True
+
+    def finish_expired_quarantine(self, delivery: str) -> None:
+        with self.transaction():
+            self.connection.execute(
+                "UPDATE deliveries SET status='quarantined',"
+                "processing_finished_at=COALESCE(processing_finished_at,received_at),"
+                "error_code='delivery_expired_quarantined' WHERE delivery_id=? "
+                "AND status='quarantine_pending'",
+                (delivery,),
+            )
+
+    def fail_expired_quarantine(self, delivery: str) -> None:
+        with self.transaction():
+            self.connection.execute(
+                "UPDATE deliveries SET status='operator_required',"
+                "error_code='delivery_expired_quarantine_uncertain' WHERE delivery_id=? "
+                "AND status='quarantine_pending'",
+                (delivery,),
+            )
+
     def acknowledged(self, delivery: str, clock: str) -> None:
         with self.transaction():
             self.connection.execute(

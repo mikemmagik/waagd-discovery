@@ -43,6 +43,10 @@ class BridgePort(Protocol):
 
     def ack_if_current(self, delivery_id: str, expected_digest: str) -> dict[str, Any]: ...
 
+    def quarantine_expired(
+        self, delivery_id: str, expected_digest: str, now: datetime | None = None
+    ) -> dict[str, Any]: ...
+
 
 def utc(now: datetime | None = None) -> datetime:
     value = now or datetime.now(UTC)

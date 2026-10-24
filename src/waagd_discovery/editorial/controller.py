@@ -1,6 +1,7 @@
 """Agent-independent editorial orchestration with a durable post-result ACK outbox."""
 
 import os
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -625,7 +626,148 @@ class Controller:
             "completed": completed,
             "total": len(required),
             "simulation": self.simulation,
+            "operational": {
+                "stage": "editorial",
+                "failure_category": row["error_code"] or "none",
+                "recovered": 0,
+                "quarantined": int(row["status"] == "quarantined"),
+                "operator_required": row["status"] == "operator_required",
+            },
         }
+
+    @staticmethod
+    def _expired_operational(
+        *, failure_category: str, recovered: int, quarantined: int, operator_required: bool
+    ) -> dict[str, object]:
+        return {
+            "stage": "editorial",
+            "failure_category": failure_category,
+            "recovered": recovered,
+            "quarantined": quarantined,
+            "operator_required": operator_required,
+        }
+
+    def _quarantine_expired(self, envelope: dict[str, Any], now: datetime | None) -> dict[str, Any]:
+        """Quarantine only an expired delivery with no possible external work.
+
+        The Bridge ledger owns release of the pending batch.  The Editorial
+        Store first records a crash-recoverable reservation and rejects any
+        hint of a Gateway, ACK, publication, or Site submission.  A failed
+        Bridge commit is reconciled only by its durable receipt; otherwise the
+        delivery remains operator-required rather than being replayed.
+        """
+
+        delivery = envelope["delivery_id"]
+        expected = digest(envelope)
+        try:
+            receipt = self.bridge.inspect_delivery(delivery)
+            if (
+                receipt.get("delivery_id") != delivery
+                or receipt.get("payload_digest") != expected
+                or receipt.get("schema_version") != envelope["bridge_schema_version"]
+                or receipt.get("expires_at") != envelope["expires_at"]
+                or receipt.get("status") not in {"pending", "dismissed"}
+            ):
+                raise EditorialError("bridge_authority_mismatch")
+        except (EditorialError, io.BridgeError, OSError, KeyError, TypeError):
+            return {
+                "status": "operator_required",
+                "error_code": "delivery_expired_authority_unknown",
+                "simulation": self.simulation,
+                "operational": self._expired_operational(
+                    failure_category="delivery_expired_authority_unknown",
+                    recovered=0,
+                    quarantined=0,
+                    operator_required=True,
+                ),
+            }
+        if receipt["status"] == "pending" and not callable(
+            getattr(self.bridge, "quarantine_expired", None)
+        ):
+            return {
+                "status": "operator_required",
+                "error_code": "delivery_expired_authority_unknown",
+                "simulation": self.simulation,
+                "operational": self._expired_operational(
+                    failure_category="delivery_expired_authority_unknown",
+                    recovered=0,
+                    quarantined=0,
+                    operator_required=True,
+                ),
+            }
+        try:
+            with self._store() as store:
+                if receipt["status"] == "dismissed":
+                    store.finish_expired_quarantine(delivery)
+                    result = self._result(store, delivery)
+                    result["status"] = "quarantined"
+                    result["operational"] = self._expired_operational(
+                        failure_category="delivery_expired_quarantined",
+                        recovered=1,
+                        quarantined=1,
+                        operator_required=False,
+                    )
+                    return result
+                if not store.begin_expired_quarantine(envelope, utc(now).isoformat()):
+                    row = self._result(store, delivery)
+                    row["status"] = "operator_required"
+                    row["error_code"] = "delivery_expired_requires_operator"
+                    row["operational"] = self._expired_operational(
+                        failure_category="delivery_expired_requires_operator",
+                        recovered=0,
+                        quarantined=0,
+                        operator_required=True,
+                    )
+                    return row
+                try:
+                    quarantined = self.bridge.quarantine_expired(delivery, expected, now)
+                    if (
+                        quarantined.get("delivery_id") != delivery
+                        or quarantined.get("payload_digest") != expected
+                        or quarantined.get("status") != "dismissed"
+                    ):
+                        raise EditorialError("bridge_quarantine_invalid")
+                except (
+                    AttributeError,
+                    EditorialError,
+                    io.BridgeError,
+                    OSError,
+                    KeyError,
+                    TypeError,
+                ):
+                    try:
+                        reconciled = self.bridge.inspect_delivery(delivery)
+                    except (io.BridgeError, OSError, KeyError, TypeError):
+                        reconciled = {}
+                    if (
+                        reconciled.get("delivery_id") != delivery
+                        or reconciled.get("payload_digest") != expected
+                        or reconciled.get("status") != "dismissed"
+                    ):
+                        store.fail_expired_quarantine(delivery)
+                        return self._result(store, delivery)
+                store.finish_expired_quarantine(delivery)
+                result = self._result(store, delivery)
+                result["status"] = "quarantined"
+                result["operational"] = self._expired_operational(
+                    failure_category="delivery_expired_quarantined",
+                    recovered=1,
+                    quarantined=1,
+                    operator_required=False,
+                )
+                return result
+        except (EditorialError, io.BridgeError, OSError, sqlite3.Error, TypeError):
+            return {
+                "status": "operator_required",
+                "error_code": "delivery_expired_quarantine_uncertain",
+                "simulation": self.simulation,
+                "operational": self._expired_operational(
+                    failure_category="delivery_expired_quarantine_uncertain",
+                    recovered=0,
+                    quarantined=0,
+                    operator_required=True,
+                ),
+            }
 
     def process(self, now: datetime | None = None) -> dict[str, Any]:
         utc(now)
@@ -649,29 +791,7 @@ class Controller:
             validate_input(envelope, utc(now))
         except EditorialError as error:
             if str(error) == "delivery_expired":
-                if self._has_state():
-                    with self._store() as store:
-                        self._recover(store, now)
-                        if store.connection.execute(
-                            "SELECT 1 FROM deliveries WHERE delivery_id=?",
-                            (envelope["delivery_id"],),
-                        ).fetchone():
-                            if (
-                                store.connection.execute(
-                                    "SELECT ack_status FROM deliveries WHERE delivery_id=?",
-                                    (envelope["delivery_id"],),
-                                ).fetchone()[0]
-                                != "acknowledged"
-                            ):
-                                store.mark_delivery(
-                                    envelope["delivery_id"], "operator_required", "delivery_expired"
-                                )
-                            return self._result(store, envelope["delivery_id"])
-                return {
-                    "status": "operator_required",
-                    "error_code": "delivery_expired",
-                    "simulation": self.simulation,
-                }
+                return self._quarantine_expired(envelope, now)
             raise
         authority = self._authority(envelope, now)
         if authority["status"] == "acknowledged":

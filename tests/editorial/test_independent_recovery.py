@@ -32,6 +32,11 @@ class FixturePort:
         self.ack_calls += 1
         return self.bridge.ack_if_current(identifier, expected_digest, NOW)
 
+    def quarantine_expired(
+        self, identifier: str, expected_digest: str, now: Any = None
+    ) -> dict[str, Any]:
+        return self.bridge.quarantine_expired(identifier, expected_digest, now)
+
 
 class FixtureVerifier:
     def verify(self, candidate: dict[str, Any], *, policy_id: str) -> dict[str, Any]:
@@ -252,19 +257,57 @@ def test_protected_id_is_rejected_before_bridge_store_verifier_or_editor(tmp_pat
     assert ((bridge.state_dir / "ledger.json").read_bytes(), path.read_bytes()) == before
 
 
-def test_expired_pending_batch_is_operator_required_without_ack_or_dismiss(tmp_path: Path) -> None:
+def test_expired_pending_batch_without_any_side_effect_is_quarantined(tmp_path: Path) -> None:
     bridge = seed_bridge(tmp_path)
     envelope = read_inbox(bridge)
-    before = (bridge.state_dir / "ledger.json").read_bytes()
     store = tmp_path.resolve() / "editorial/store.sqlite3"
     instance, port = controller(bridge, store)
     result = instance.process(NOW + timedelta(hours=3))
-    assert result["status"] == "operator_required"
-    assert result["error_code"] == "delivery_expired"
+    assert result["status"] == "quarantined"
+    assert result["error_code"] == "delivery_expired_quarantined"
+    assert result["operational"] == {
+        "stage": "editorial",
+        "failure_category": "delivery_expired_quarantined",
+        "recovered": 1,
+        "quarantined": 1,
+        "operator_required": False,
+    }
     assert port.ack_calls == 0
-    assert not store.parent.exists()
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "dismissed"
+    with closing(sqlite3.connect(store)) as connection:
+        assert connection.execute("SELECT status,error_code FROM deliveries").fetchone() == (
+            "quarantined",
+            "delivery_expired_quarantined",
+        )
+        assert connection.execute("SELECT status FROM candidates").fetchone()[0] == "quarantined"
+        assert connection.execute("SELECT COUNT(*) FROM ack_outbox").fetchone()[0] == 0
+
+
+def test_expired_delivery_with_a_started_gateway_attempt_remains_operator_required(
+    tmp_path: Path,
+) -> None:
+    bridge = seed_bridge(tmp_path)
+    envelope = read_inbox(bridge)
+    store_path = tmp_path.resolve() / "editorial/store.sqlite3"
+    from waagd_discovery.editorial.store import EditorialStore
+
+    with EditorialStore(store_path, simulation=False) as store:
+        store.register(envelope, NOW.isoformat())
+        store.start_attempt(
+            envelope["delivery_id"],
+            envelope["candidates"][0]["candidate_key"],
+            "editorial_gateway",
+            NOW.isoformat(),
+        )
+    instance, port = controller(bridge, store_path)
+
+    result = instance.process(NOW + timedelta(hours=3))
+
+    assert result["status"] == "operator_required"
+    assert result["error_code"] == "delivery_expired_requires_operator"
+    assert result["operational"]["operator_required"] is True
+    assert port.ack_calls == 0
     assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
-    assert (bridge.state_dir / "ledger.json").read_bytes() == before
 
 
 def test_acknowledged_delivery_without_editorial_history_cannot_be_regenerated(

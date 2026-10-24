@@ -246,7 +246,7 @@ def bridge_stage(config: dict[str, Any], export: Path) -> dict[str, object]:
     )
     return (
         {"status": "completed"}
-        if value.get("status") in {"idle", "delivered"}
+        if value.get("status") in {"idle", "delivered", "pending_expired"}
         else {"status": "operator_required"}
     )
 
@@ -295,7 +295,7 @@ def editorial_stage(config: dict[str, Any], export: Path) -> dict[str, object]:
     )
     return (
         {"status": "completed"}
-        if value.get("status") in {"acknowledged", "inbox_empty", "inbox_missing"}
+        if value.get("status") in {"acknowledged", "inbox_empty", "inbox_missing", "quarantined"}
         else {"status": "operator_required"}
     )
 
