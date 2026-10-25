@@ -1809,13 +1809,76 @@ class FidelityGatewayFailure:
         raise EditorialError(self.code)
 
 
+class FidelityCompletedInvalidGateway:
+    """Synthetic attested completion that never exposes model content durably."""
+
+    gateway_backed = True
+    last_completion = {"gateway_status": "ok", "terminal_disposition": "visible"}
+    last_fidelity_output_visible = True
+
+    def __init__(self, failure):
+        self.failure, self.calls = failure, 0
+
+    def review_fidelity(self, payload):
+        del payload
+        self.calls += 1
+        if self.calls == 1:
+            if self.failure == "schema":
+                return {"schema_version": 1, "verdict": "PASS", "findings": [], "extra": True}
+            raise EditorialError("gateway_fidelity_invalid_json")
+        return {"schema_version": 1, "verdict": "PASS", "findings": []}
+
+
+@pytest.mark.parametrize(
+    ("failure", "stored_code"),
+    [
+        ("json", "editorial_fidelity_invalid_json"),
+        ("schema", "editorial_fidelity_invalid_schema"),
+    ],
+)
+def test_attested_invalid_fidelity_rejects_only_that_candidate_and_continues(
+    tmp_path, failure, stored_code
+):
+    """No retry occurs; a safe terminal rejection leaves later work eligible."""
+
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    controller, bridge, _, _, value = setup(tmp_path, count=2, allow_ack=False)
+    for candidate_value in value["candidates"]:
+        candidate_value["description"] = "A council published a routine filing."
+    controller.inbox.write_bytes(io.encode(value))
+    controller.inbox.chmod(0o600)
+    controller.bridge.value = value
+    controller.verifier = GroundedTrustedVerifier()
+    editor = DraftEditor("Council Finds Another Form", "A filing becomes another committee.")
+    gateway = FidelityCompletedInvalidGateway(failure)
+    controller.editor = editor
+    controller.fidelity_reviewer = GatewayFidelityReviewer(gateway)
+
+    result = controller.process(NOW)
+
+    assert result["status"] == "results_saved"
+    assert result["error_code"] is None
+    assert result["delivery_id"] == value["delivery_id"]
+    decisions = rows(controller, "decisions")
+    assert {item["decision"] for item in decisions} == {"REJECTED", "READY_FOR_REVIEW"}
+    fidelity_attempts = [
+        item for item in rows(controller, "attempts") if item["operation"] == "fidelity"
+    ]
+    assert [item["error_code"] for item in fidelity_attempts] == [stored_code, None]
+    assert editor.calls == gateway.calls == 2
+    assert bridge.acks == 0
+
+
 @pytest.mark.parametrize(
     ("gateway_code", "stored_code"),
     [
         ("gateway_timeout", "editorial_fidelity_gateway_timeout"),
         ("gateway_child_exit_nonzero", "editorial_fidelity_gateway_child_exit_nonzero"),
         ("gateway_response_too_large", "editorial_fidelity_gateway_response_too_large"),
-        ("gateway_envelope_invalid", "editorial_fidelity_attestation_invalid"),
+        ("gateway_envelope_invalid", "editorial_fidelity_gateway_attestation_failure"),
+        ("gateway_no_visible_assistant_output", "editorial_fidelity_no_visible_assistant_output"),
+        ("gateway_outcome_unknown", "editorial_fidelity_gateway_outcome_unknown"),
         ("gateway_child_launch_failed", "editorial_fidelity_transport_unavailable"),
     ],
 )

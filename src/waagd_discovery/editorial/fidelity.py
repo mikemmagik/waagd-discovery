@@ -169,7 +169,7 @@ class GatewayFidelityReviewer:
         try:
             return self._validate(value, request)
         except (KeyError, TypeError, ValueError):
-            return SourceFidelityReview("editorial_fidelity_response_invalid")
+            return SourceFidelityReview("editorial_fidelity_invalid_schema")
 
     @staticmethod
     def _payload(request: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
@@ -254,10 +254,14 @@ class GatewayFidelityReviewer:
         if code == "gateway_stream_failure":
             return "editorial_fidelity_gateway_stream_failure"
         if code == "gateway_outcome_unknown":
-            return "editorial_fidelity_outcome_unknown"
+            return "editorial_fidelity_gateway_outcome_unknown"
+        if code == "gateway_no_visible_assistant_output":
+            return "editorial_fidelity_no_visible_assistant_output"
+        if code in {"gateway_fidelity_invalid_json", "gateway_model_json_invalid"}:
+            return "editorial_fidelity_invalid_json"
         if code.startswith("gateway_tool_") or code in {
             "gateway_envelope_invalid",
             "gateway_cost_unverified",
         }:
-            return "editorial_fidelity_attestation_invalid"
+            return "editorial_fidelity_gateway_attestation_failure"
         return "editorial_fidelity_response_invalid"

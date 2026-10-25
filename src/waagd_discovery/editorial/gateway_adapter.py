@@ -72,6 +72,18 @@ _CREATIVE_LIMITS = {
     "article": 2000,
 }
 _FIDELITY_JSON_FENCE = re.compile(r"\A```(?:json)?\r?\n(?P<content>.*?)\r?\n```\Z", re.DOTALL)
+_FIDELITY_RESPONSE_SCHEMA = (
+    b'{"type":"object","additionalProperties":false,"required":['
+    b'"schema_version","verdict","findings"],"properties":{'
+    b'"schema_version":{"const":1},"verdict":{"enum":["PASS","REVISE","REJECT"]},'
+    b'"findings":{"type":"array","maxItems":5,"items":{"type":"object",'
+    b'"additionalProperties":false,"required":["field","reason_code","evidence_refs"],'
+    b'"properties":{"field":{"enum":["headline","summary","article"]},'
+    b'"reason_code":{"enum":["contradiction","unsupported_attribution",'
+    b'"proposal_as_outcome","misleading_timing","scope_misrepresentation",'
+    b'"invented_event"]},"evidence_refs":{"type":"array","minItems":1,'
+    b'"maxItems":8,"items":{"type":"string"}}}}}}}'
+)
 _CREATIVE_URL = re.compile(r"https?://|\bwww\.", re.IGNORECASE)
 _CREATIVE_DATE = re.compile(
     r"\b(?:19|20)\d{2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
@@ -178,6 +190,7 @@ class GatewayEditor:
         self._last_completion: dict[str, str] | None = None
         self._last_metrics: dict[str, str] | None = None
         self._last_diagnostics: dict[str, int | str | bool | None] | None = None
+        self._last_fidelity_output_visible = False
 
     @property
     def last_completion(self) -> dict[str, str] | None:
@@ -201,6 +214,17 @@ class GatewayEditor:
         """
 
         return None if self._last_diagnostics is None else dict(self._last_diagnostics)
+
+    @property
+    def last_fidelity_output_visible(self) -> bool:
+        """Whether the last attested Fidelity response had visible assistant text.
+
+        This is deliberately a boolean rather than retained model output.  It
+        prevents a terminal Gateway receipt, by itself, from being mistaken for
+        evidence that the model generated a review.
+        """
+
+        return self._last_fidelity_output_visible
 
     def evaluate(self, request: dict[str, Any], *, fresh_session: bool = False) -> dict[str, Any]:
         validate_request(request)
@@ -359,12 +383,21 @@ class GatewayEditor:
             b"misleading_timing, scope_misrepresentation, or invented_event. evidence_refs names "
             b"only candidate_title, candidate_description, or supplied evidence IDs. Never claim "
             b"factual "
-            b"certainty. JSON input follows:\n" + raw_payload
+            b"certainty. Validate your response against this exact JSON Schema before replying:\n"
+            + _FIDELITY_RESPONSE_SCHEMA
+            + b'\nPASS example: {"schema_version":1,"verdict":"PASS","findings":[]}\n'
+            + b'REVISE example: {"schema_version":1,"verdict":"REVISE","findings":['
+            + b'{"field":"headline","reason_code":"contradiction","evidence_refs":'
+            + b'["candidate_title"]}]}\n'
+            + b"For PASS findings must be []; for REVISE and REJECT findings must be nonempty. "
+            + b"JSON input follows:\n"
+            + raw_payload
         )
         if len(message) > self.budget_policy.max_prompt_bytes:
             raise EditorialError("gateway_request_too_large")
         self._last_completion = None
         self._last_diagnostics = None
+        self._last_fidelity_output_visible = False
         try:
             raw = self._run_gateway_turn(
                 message,
@@ -384,12 +417,17 @@ class GatewayEditor:
                     or cost > self.budget_policy.max_reported_cost_usd
                 ):
                     raise EditorialError("gateway_cost_unverified")
-            if not text.strip():
-                raise EditorialError("gateway_empty_response")
+            self._last_fidelity_output_visible = bool(text.strip())
+            if (
+                not self._last_fidelity_output_visible
+                or self._last_completion is None
+                or self._last_completion.get("terminal_disposition") == "not-visible"
+            ):
+                raise EditorialError("gateway_no_visible_assistant_output")
             try:
                 value = io.decode(self._normalize_fidelity_json(text).encode("utf-8"))
             except (io.BridgeError, UnicodeError):
-                raise EditorialError("gateway_model_json_invalid") from None
+                raise EditorialError("gateway_fidelity_invalid_json") from None
         except EditorialError as error:
             self._record_diagnostic_failure(str(error))
             raise
@@ -405,7 +443,7 @@ class GatewayEditor:
             return normalized
         match = _FIDELITY_JSON_FENCE.fullmatch(normalized)
         if match is None:
-            raise EditorialError("gateway_model_json_invalid")
+            raise EditorialError("gateway_fidelity_invalid_json")
         return match["content"]
 
     def _run_gateway_turn(
@@ -785,18 +823,26 @@ class GatewayEditor:
         result = envelope.get("result", envelope)
         if not isinstance(result, dict) or result.get("deliveryStatus"):
             raise EditorialError("gateway_envelope_invalid")
-        payloads = result.get("payloads")
-        if not isinstance(payloads, list) or len(payloads) != 1:
-            raise EditorialError("gateway_envelope_invalid")
-        item = payloads[0]
-        if (
-            not isinstance(item, dict)
-            or not isinstance(item.get("text"), str)
-            or any(value not in (None, []) for key, value in item.items() if key != "text")
-        ):
-            raise EditorialError("gateway_envelope_invalid")
         containers = self._validate_tool_attestation(envelope, result)
         self._record_completion(envelope, result)
+        payloads = result.get("payloads")
+        if not isinstance(payloads, list):
+            raise EditorialError("gateway_envelope_invalid")
+        if not payloads:
+            # A tool-free terminal receipt can prove that the child ended, but
+            # not that an assistant message was ever emitted.
+            return envelope, result, "", containers
+        if len(payloads) != 1:
+            raise EditorialError("gateway_envelope_invalid")
+        item = payloads[0]
+        if not isinstance(item, dict) or any(
+            value not in (None, []) for key, value in item.items() if key != "text"
+        ):
+            raise EditorialError("gateway_envelope_invalid")
+        if "text" not in item:
+            return envelope, result, "", containers
+        if not isinstance(item["text"], str):
+            raise EditorialError("gateway_envelope_invalid")
         return envelope, result, item["text"], containers
 
     def _parse(self, raw: bytes, request: dict[str, Any]) -> dict[str, Any]:

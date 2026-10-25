@@ -369,8 +369,11 @@ class Controller:
             "editorial_fidelity_gateway_timeout",
             "editorial_fidelity_gateway_response_too_large",
             "editorial_fidelity_gateway_stream_failure",
-            "editorial_fidelity_attestation_invalid",
-            "editorial_fidelity_outcome_unknown",
+            "editorial_fidelity_gateway_attestation_failure",
+            "editorial_fidelity_gateway_outcome_unknown",
+            "editorial_fidelity_no_visible_assistant_output",
+            "editorial_fidelity_invalid_json",
+            "editorial_fidelity_invalid_schema",
         }:
             return code
         if code.startswith("editorial_fidelity_"):
@@ -391,6 +394,10 @@ class Controller:
         the Gateway adapter after it has received and attested one response.
         """
 
+        terminal_invalid_fidelity = code in {
+            "editorial_fidelity_invalid_json",
+            "editorial_fidelity_invalid_schema",
+        }
         known_policy_result = (
             code.startswith("editorial_format_retry_exhausted:")
             or code == "editorial_safety_rejected"
@@ -404,11 +411,19 @@ class Controller:
                 "editorial_fidelity_scope_misrepresentation",
                 "editorial_fidelity_invented_event",
             }
+            or terminal_invalid_fidelity
         )
         if not known_policy_result or not getattr(adapter, "gateway_backed", False):
             return False
         completion = getattr(adapter, "last_completion", None)
-        return isinstance(completion, dict) and bool(completion)
+        if not isinstance(completion, dict) or not completion:
+            return False
+        if terminal_invalid_fidelity:
+            return (
+                completion.get("terminal_disposition") == "visible"
+                and getattr(adapter, "last_fidelity_output_visible", False) is True
+            )
+        return True
 
     @staticmethod
     def _requires_editorial_operator(code: str) -> bool:
@@ -426,7 +441,7 @@ class Controller:
         """
 
         fallback = (
-            "editorial_fidelity_outcome_unknown"
+            "editorial_fidelity_gateway_outcome_unknown"
             if operation == "fidelity"
             else "editorial_outcome_unknown"
         )

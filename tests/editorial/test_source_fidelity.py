@@ -174,4 +174,4 @@ def test_gateway_fidelity_rejects_noninteger_schema_version(schema_version: obje
             return {"schema_version": schema_version, "verdict": "PASS", "findings": []}
 
     review = GatewayFidelityReviewer(Gateway()).review(value, result)
-    assert review.code == "editorial_fidelity_response_invalid"
+    assert review.code == "editorial_fidelity_invalid_schema"

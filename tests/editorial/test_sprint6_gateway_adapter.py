@@ -201,6 +201,7 @@ def fidelity_cli(
     exit_code: int = 0,
     delay: int = 0,
     invocation_log: Path | None = None,
+    response: bytes | None = None,
 ) -> Path:
     """A tool-free synthetic Fidelity response; it records no prompt or model text."""
 
@@ -213,7 +214,7 @@ def fidelity_cli(
         "import pathlib, sys, time\n"
         f"{record}"
         f"time.sleep({delay})\n"
-        f"sys.stdout.buffer.write({envelope(calls=calls, text=text)!r})\n"
+        f"sys.stdout.buffer.write({(response or envelope(calls=calls, text=text))!r})\n"
         f"raise SystemExit({exit_code})\n"
     )
     path.chmod(0o700)
@@ -250,6 +251,21 @@ def openclaw_2026_10_3_tool_free(*, text: str | None = None) -> dict[str, Any]:
     )
     fixture["result"]["payloads"][0]["text"] = text if text is not None else json.dumps(creative())
     return fixture
+
+
+def visible_tool_free_fidelity_response(text: str | None) -> bytes:
+    """Construct the current, fully attested tool-free Fidelity envelope."""
+
+    response = openclaw_2026_10_3_tool_free(text=text or "")
+    receipt = response["result"]["meta"]["agentMeta"]["terminalReceipt"]
+    receipt.update(
+        {
+            "terminalDisposition": "visible" if text else "not-visible",
+            "requested": {"model": "openrouter/openrouter/free"},
+            "effective": {"model": "openrouter/openrouter/free"},
+        }
+    )
+    return json.dumps(response).encode()
 
 
 def test_gateway_success_fixed_argv_and_sanitized_environment(
@@ -336,7 +352,7 @@ def test_fidelity_accepts_only_raw_or_complete_json_fence(
     ],
 )
 def test_fidelity_rejects_malformed_or_nonexclusive_fence(tmp_path: Path, text: str) -> None:
-    with pytest.raises(EditorialError, match="^gateway_model_json_invalid$"):
+    with pytest.raises(EditorialError, match="^gateway_fidelity_invalid_json$"):
         GatewayEditor(fidelity_cli(tmp_path, text)).review_fidelity({})
 
 
@@ -366,7 +382,87 @@ def test_fidelity_fence_preserves_strict_downstream_contract(tmp_path: Path, tex
         request(),
         {"decision": "READY_FOR_REVIEW", "headline": "h", "summary": "s", "article": "a"},
     )
-    assert review.code == "editorial_fidelity_response_invalid"
+    assert review.code == "editorial_fidelity_invalid_schema"
+
+
+def test_fidelity_invalid_json_requires_visible_terminal_receipt(tmp_path: Path) -> None:
+    """A completed tool-free response is terminal only with visible output."""
+
+    editor = GatewayEditor(
+        fidelity_cli(
+            tmp_path,
+            "ignored",
+            response=visible_tool_free_fidelity_response("not valid JSON"),
+        )
+    )
+
+    with pytest.raises(EditorialError, match="^gateway_fidelity_invalid_json$"):
+        editor.review_fidelity({})
+
+    assert editor.last_completion == {
+        "gateway_status": "ok",
+        "terminal_disposition": "visible",
+    }
+    assert editor.last_fidelity_output_visible is True
+    assert editor.last_diagnostics is not None
+    assert editor.last_diagnostics["failure_category"] == "gateway_fidelity_invalid_json"
+    assert editor.last_diagnostics["terminal_completion_attested"] is True
+
+
+def test_fidelity_done_without_visible_assistant_output_is_not_json_failure(tmp_path: Path) -> None:
+    editor = GatewayEditor(
+        fidelity_cli(
+            tmp_path,
+            "ignored",
+            response=visible_tool_free_fidelity_response(None),
+        )
+    )
+
+    with pytest.raises(EditorialError, match="^gateway_no_visible_assistant_output$"):
+        editor.review_fidelity({})
+
+    assert editor.last_completion == {
+        "gateway_status": "ok",
+        "terminal_disposition": "not-visible",
+    }
+    assert editor.last_fidelity_output_visible is False
+
+
+def test_fidelity_attested_envelope_without_any_assistant_payload_is_not_terminal(
+    tmp_path: Path,
+) -> None:
+    response = json.loads(visible_tool_free_fidelity_response("ignored"))
+    response["result"]["payloads"] = []
+    response["result"]["meta"]["agentMeta"]["terminalReceipt"]["terminalDisposition"] = (
+        "not-visible"
+    )
+    editor = GatewayEditor(
+        fidelity_cli(tmp_path, "ignored", response=json.dumps(response).encode())
+    )
+
+    with pytest.raises(EditorialError, match="^gateway_no_visible_assistant_output$"):
+        editor.review_fidelity({})
+
+    assert editor.last_fidelity_output_visible is False
+
+
+def test_fidelity_prompt_includes_schema_and_safe_examples(tmp_path: Path) -> None:
+    """The synthetic executable verifies prompt guidance without invoking a Gateway."""
+
+    output = visible_tool_free_fidelity_response(fidelity_value())
+    executable = tmp_path / "fidelity-prompt-check"
+    executable.write_text(
+        f"#!{sys.executable}\n"
+        "import pathlib, sys\n"
+        "message = pathlib.Path(sys.argv[sys.argv.index('--message-file') + 1]).read_bytes()\n"
+        "assert b'Validate your response against this exact JSON Schema' in message\n"
+        "assert b'\\\"additionalProperties\\\":false' in message\n"
+        "assert b'PASS example:' in message and b'REVISE example:' in message\n"
+        f"sys.stdout.buffer.write({output!r})\n"
+    )
+    executable.chmod(0o700)
+
+    assert GatewayEditor(executable).review_fidelity({}) == json.loads(fidelity_value())
 
 
 @pytest.mark.parametrize(

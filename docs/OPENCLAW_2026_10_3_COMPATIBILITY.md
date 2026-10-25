@@ -165,11 +165,21 @@ allowed candidate/evidence references and a bounded reason code. The trusted
 Controller accepts only an attested `PASS` with no findings.
 
 This advisory review cannot publish, change provenance, select a model, or
-replace the deterministic safety checks. Invalid JSON, tools, failed
-attestation, transport failure, timeout, missing evidence references, and an
-ambiguous result all fail closed. The fidelity attempt is durable. A restart
-never repeats an interrupted fidelity Gateway call; it marks the delivery
-`operator_required` with `editorial_fidelity_outcome_unknown`.
+replace the deterministic safety checks. Its diagnostics distinguish
+`editorial_fidelity_no_visible_assistant_output`, `editorial_fidelity_invalid_json`,
+`editorial_fidelity_invalid_schema`,
+`editorial_fidelity_gateway_attestation_failure`, and
+`editorial_fidelity_gateway_outcome_unknown`. A SQLite `done` status is not
+proof that an assistant response was generated: missing visible output, timeout,
+lost result, incomplete attestation, transport failure, and an ambiguous result
+all remain fail closed and `operator_required`.
+
+An attested Gateway envelope with `terminalDisposition: visible` and nonempty
+assistant text may safely terminal-reject that candidate when the JSON or strict
+schema is invalid; this does not authorize publication and allows later
+candidates to continue. The fidelity attempt is durable. A restart never repeats
+an interrupted or ambiguous fidelity Gateway call; it marks the delivery
+`operator_required` with `editorial_fidelity_gateway_outcome_unknown`.
 
 The review helps detect contradictions and unsupported characterisations. It
 cannot prove complete factual correctness or certify that satire is humorous.
