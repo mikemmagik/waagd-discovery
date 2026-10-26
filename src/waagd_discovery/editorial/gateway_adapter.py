@@ -24,6 +24,7 @@ from waagd_discovery.editorial.contracts import EditorialError, trusted_decision
 from waagd_discovery.editorial.trusted_publishers import sensitive_risks
 
 _MAXIMUM = 128 * 1024
+_OPENROUTER_FREE_ROUTE = "openrouter/openrouter/free"
 _OUTPUT_GUIDE = (
     b"WAAGD style: write sharp, dry, intelligent, deadpan absurdist satire for an international "
     b"English-speaking audience. Find one independent satirical angle, rather than retelling the "
@@ -157,6 +158,7 @@ class GatewayEditor:
         timeout: float = 120,
         budget_policy: GatewayBudgetPolicy | None = None,
         retry_format_once: bool = True,
+        required_model_route: str | None = None,
     ) -> None:
         path = Path(executable)
         try:
@@ -184,9 +186,12 @@ class GatewayEditor:
         self.agent_id = agent_id
         if type(retry_format_once) is not bool:
             raise EditorialError("gateway_retry_policy_invalid")
+        if required_model_route is not None and required_model_route != _OPENROUTER_FREE_ROUTE:
+            raise EditorialError("gateway_model_route_invalid")
         self.timeout = float(timeout)
         self.budget_policy = budget_policy or GatewayBudgetPolicy()
         self.retry_format_once = retry_format_once
+        self.required_model_route = required_model_route
         self._last_completion: dict[str, str] | None = None
         self._last_metrics: dict[str, str] | None = None
         self._last_diagnostics: dict[str, int | str | bool | None] | None = None
@@ -726,6 +731,13 @@ class GatewayEditor:
                 )
             ):
                 raise EditorialError("gateway_tool_attestation_missing")
+        if self.required_model_route is not None:
+            requested = receipt.get("requested")
+            if (
+                not isinstance(requested, dict)
+                or requested.get("model") != self.required_model_route
+            ):
+                raise EditorialError("gateway_model_route_unverified")
         if "rerouted" in receipt and type(receipt["rerouted"]) is not bool:
             raise EditorialError("gateway_tool_attestation_missing")
         if "terminalDisposition" in receipt and receipt["terminalDisposition"] not in {

@@ -163,3 +163,10 @@
     candidate revision; ambiguous Site outcomes require reconciliation and never
     cause a replacement identity or automatic resend. The Site contract is pinned
     to `ffa34ce097fbdb34161bdd3b9782f798d1dc7936` pending its reviewed merge.
+40. v1.0.0 is released only after an owner-confirmed staging chain completed a
+    delivered publication and acknowledged Bridge receipt. Production consumes an
+    isolated runtime and private state, while the existing Docker Discovery
+    Scheduler remains the sole collector. The only requested Gateway model route
+    is `openrouter/openrouter/free`; a missing or different requested route in a
+    detailed terminal receipt fails closed. Staging and production never share
+    Bridge, Editorial, coordinator, publication, Gateway or Site state.

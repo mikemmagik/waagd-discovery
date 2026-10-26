@@ -2,6 +2,7 @@
 
 import copy
 import hashlib
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,7 @@ from waagd_discovery.editorial.store import EditorialStore
 
 
 def _policy() -> PublicationPolicy:
-    return PublicationPolicy(automatic_enabled=True)
+    return PublicationPolicy(automatic_enabled=True, maximum_age=timedelta(days=31))
 
 
 def _store(path: Path, *, status: str = "VERIFIED", ready: bool = True) -> Path:

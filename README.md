@@ -1,8 +1,9 @@
 # WAAGD Discovery
 
 Independent RSS/Atom discovery for We Are All Gonna Die. Python modular monolith,
-Docker Compose and persistent SQLite. Manual collection and an explicitly enabled scheduler; no AI requests or
-automatic publication. This repository is private and separate from the website.
+Docker Compose and persistent SQLite. The Docker collector remains separate from
+the explicitly configured, tool-free editorial Gateway and publication runtime.
+This repository is private and separate from the website.
 
 ```sh
 git clone https://github.com/mikemmagik/waagd-discovery.git
@@ -100,6 +101,13 @@ default-deny and requires VERIFIED evidence plus the site's independent kill swi
 The final compatibility target is site commit
 `ca112b2ab89a7ec0d82b85b06df07bb86a35b41c`; see the
 [final operator handoff](docs/WAAGD_DISCOVERY_STABLE_HANDOFF.md).
+
+v1.0.0 is the production release of the accepted Discovery-to-publication chain.
+It retains the Docker Discovery Scheduler, isolated Bridge and Editorial state,
+OpenClaw tool-free Gateway restricted to `openrouter/openrouter/free`, Fidelity,
+immutable PublicationIntent delivery, ACK reconciliation and the Bangkok daily
+coordinator. Production installation, state separation and rollback are specified
+in the [v1.0.0 release guide](docs/RELEASE_1_0_0.md).
 
 ## Development
 

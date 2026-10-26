@@ -312,7 +312,8 @@ def real_selector_executable(tmp_path):
         "  'The fictional institution filed another meeting and called it progress.'\n"
         "] * 12)})\n"
         "print(json.dumps({'status':'ok','result':{'payloads':[{'text':text}],"
-        "'meta':{'agentMeta':{'costUsd':0.0,'terminalReceipt':{'successfulToolNames':[]},"
+        "'meta':{'agentMeta':{'costUsd':0.0,'terminalReceipt':{'successfulToolNames':[],"
+        "'requested':{'model':'openrouter/openrouter/free'}},"
         "'codeModeEngaged':False},'systemPromptReport':{'tools':{'entries':[]}}}}}))\n"
     )
     path.chmod(0o700)
@@ -609,10 +610,11 @@ def test_selected_trusted_candidates_alone_reach_idempotent_v2_export(tmp_path):
             )
             store.finish_attempt(fidelity, NOW.isoformat())
         store.acknowledged(value["delivery_id"], NOW.isoformat())
+    policy = PublicationPolicy(automatic_enabled=True, maximum_age=timedelta(days=31))
     with EditorialStore(controller.store_path, simulation=False, readonly=True) as store:
-        first = exportable(store, policy=PublicationPolicy(automatic_enabled=True))
-        second = exportable(store, policy=PublicationPolicy(automatic_enabled=True))
-        limited = exportable(store, limit=1, policy=PublicationPolicy(automatic_enabled=True))
+        first = exportable(store, policy=policy)
+        second = exportable(store, policy=policy)
+        limited = exportable(store, limit=1, policy=policy)
 
     assert len(first) == len(second) == 3
     assert [item["intent_id"] for item in first] == [item["intent_id"] for item in second]
@@ -625,7 +627,7 @@ def test_selected_trusted_candidates_alone_reach_idempotent_v2_export(tmp_path):
         export_file(
             controller.store_path,
             output,
-            policy=PublicationPolicy(automatic_enabled=True),
+            policy=policy,
         )["status"]
         == "exported"
     )

@@ -381,6 +381,7 @@ class Controller:
         if code.startswith("gateway_tool_") or code in {
             "gateway_envelope_invalid",
             "gateway_cost_unverified",
+            "gateway_model_route_unverified",
         }:
             return "editorial_gateway_attestation_invalid"
         return "editorial_execution_failed"

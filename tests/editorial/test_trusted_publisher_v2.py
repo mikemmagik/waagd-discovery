@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -96,7 +96,7 @@ def decision() -> dict[str, object]:
 
 
 def policy() -> PublicationPolicy:
-    return PublicationPolicy(automatic_enabled=True)
+    return PublicationPolicy(automatic_enabled=True, maximum_age=timedelta(days=31))
 
 
 def test_trusted_publisher_exports_site_v2_with_honest_provenance() -> None:

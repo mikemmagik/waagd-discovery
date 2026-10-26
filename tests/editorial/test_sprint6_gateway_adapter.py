@@ -561,6 +561,27 @@ def test_gateway_parses_full_openclaw_2026_10_3_gateway_envelope(tmp_path: Path)
     assert diagnostics["model_route"] == "minimax/minimax-m3.1-flash:free"
 
 
+def test_gateway_requires_the_configured_openrouter_free_route(tmp_path: Path) -> None:
+    response = openclaw_2026_10_3()
+    editor = GatewayEditor(
+        fake_cli(tmp_path, json.dumps(response).encode()),
+        required_model_route="openrouter/openrouter/free",
+    )
+    with pytest.raises(EditorialError, match="^gateway_model_route_unverified$"):
+        editor._parse(json.dumps(response).encode(), request())
+
+    response["result"]["meta"]["agentMeta"]["terminalReceipt"]["requested"]["model"] = (
+        "openrouter/openrouter/free"
+    )
+    assert editor._parse(json.dumps(response).encode(), request())["decision"] == "READY_FOR_REVIEW"
+
+
+@pytest.mark.parametrize("route", ["openrouter/other/free", "paid/provider-model", ""])
+def test_gateway_rejects_any_nonfree_required_route(tmp_path: Path, route: str) -> None:
+    with pytest.raises(EditorialError, match="^gateway_model_route_invalid$"):
+        GatewayEditor(fake_cli(tmp_path, envelope()), required_model_route=route)
+
+
 def test_gateway_parses_full_openclaw_2026_10_3_tool_free_gateway_envelope(tmp_path: Path) -> None:
     response = openclaw_2026_10_3_tool_free()
     editor = GatewayEditor(fake_cli(tmp_path, json.dumps(response).encode()))

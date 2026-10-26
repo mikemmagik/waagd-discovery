@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.13"
 
 [[package]]
@@ -601,7 +601,7 @@ wheels = [
 
 [[package]]
 name = "waagd-discovery"
-version = "0.7.0"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "defusedxml" },

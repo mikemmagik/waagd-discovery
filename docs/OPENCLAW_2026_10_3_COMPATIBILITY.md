@@ -60,7 +60,7 @@ adapter or change the shared OpenClaw installation.
 ## Upgrade
 
 From an isolated Discovery checkout, preserve the existing SQLite and private
-Bridge state, then replace only the application checkout/image with `v0.7.0`.
+Bridge state, then replace only the application checkout/image with `v1.0.0`.
 Do not ACK, dismiss, reset, or migrate the protected pending delivery
 `dbf6d7a2-395e-40c6-8e91-7866aab89e53`. Keep publication disabled for the
 preflight. Roll back by stopping the new container and restoring the prior
@@ -94,8 +94,9 @@ then builds and validates the complete existing `editorial-decision-v1` result.
 The final `READY_FOR_REVIEW` gate still requires validated independent evidence.
 Publication remains default-deny.
 
-The isolated Gateway continues to use the configured OpenRouter free route; Discovery
-does not pin a particular free model. GatewayEditor permits one fresh-session correction
+The isolated Gateway requests exactly `openrouter/openrouter/free`; Discovery
+rejects a detailed terminal receipt with another or missing requested route. The
+route may report its free backing model separately. GatewayEditor permits one fresh-session correction
 only after a completed, fully attested response fails JSON, creative-schema, field-length,
 or word-count validation. The correction receives only a bounded validation code, never
 the previous model text. Gateway ambiguity, timeout, transport failure, tool use, budget

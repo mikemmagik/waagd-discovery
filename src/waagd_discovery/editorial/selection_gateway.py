@@ -85,6 +85,7 @@ class GatewaySelector:
             "gateway_empty_response": "selection_empty_response",
             "gateway_model_json_invalid": "selection_model_json_invalid",
             "gateway_cost_unverified": "selection_budget_unverified",
+            "gateway_model_route_unverified": "selection_attestation_missing",
             "gateway_tool_attestation_missing": "selection_attestation_missing",
             "gateway_tool_attestation_conflict": "selection_attestation_conflict",
             "gateway_tools_used": "selection_tools_used",

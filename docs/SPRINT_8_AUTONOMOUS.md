@@ -1,9 +1,9 @@
 # Sprint 8 autonomous daily integration
 
-Sprint 8 is an owner-authorized development addition to v0.7.0. It does not
-change historical Sprint 5–7 evidence and does not authorize a deployment,
-production publication, Gateway change, or access to the operator's existing
-v0.4.1 Discovery state.
+Sprint 8 is the accepted autonomous component included in v1.0.0. It does not
+change historical Sprint 5–7 evidence or authorize mutation of the operator's
+existing Discovery state. Production cutover remains an Infrastructure &
+Deployment operation under the v1.0.0 release guide.
 
 The Site importer contract is pinned to `mikemmagik/weareallgonnadie`
 `ffa34ce097fbdb34161bdd3b9782f798d1dc7936`. It is not an ancestor of Site

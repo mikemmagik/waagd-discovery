@@ -269,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
                     budget_policy=GatewayBudgetPolicy(
                         max_reported_cost_usd=args.gateway_max_cost_usd
                     ),
+                    required_model_route="openrouter/openrouter/free",
                 )
                 fidelity_reviewer = GatewayFidelityReviewer(editor)
                 if args.trusted_publishers:
