@@ -17,6 +17,7 @@ from waagd_discovery.bridge import Bridge, BridgeError, io
 from waagd_discovery.bridge.validation import envelope
 from waagd_discovery.editorial.adapter import MockEditor
 from waagd_discovery.editorial.cli import (
+    _attests_gateway_stage_completed,
     _check_gateway_batch,
     load_config,
     load_corroboration_policies,
@@ -42,6 +43,39 @@ from waagd_discovery.editorial.trusted_publishers import load_trusted_publishers
 from waagd_discovery.editorial.verifier import FetchDocument, SourceVerifier, SyntheticVerifier
 
 NOW = datetime(2026, 10, 18, 12, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"status": "inbox_empty"},
+        {"status": "inbox_missing"},
+        {"status": "acknowledged", "ack_status": "acknowledged"},
+        {
+            "status": "quarantined",
+            "operational": {
+                "failure_category": "delivery_expired_quarantined",
+                "operator_required": False,
+            },
+        },
+    ],
+)
+def test_gateway_stage_accepts_only_proven_terminal_controller_outcomes(result):
+    assert _attests_gateway_stage_completed(result)
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {},
+        {"status": "operator_required"},
+        {"status": "acknowledged", "ack_status": "not_ready"},
+        {"status": "quarantined", "operational": {"operator_required": True}},
+        {"status": "delivered"},
+    ],
+)
+def test_gateway_stage_rejects_ambiguous_or_nonterminal_controller_outcomes(result):
+    assert not _attests_gateway_stage_completed(result)
 
 
 def candidate(index=0):
@@ -1244,6 +1278,75 @@ def test_gateway_cli_wires_real_selector_into_controller(tmp_path, capsys, monke
     )
     assert json.loads(capsys.readouterr().out)["status"] == "results_saved"
     assert configured_timeouts == [360.0]
+
+
+@pytest.mark.parametrize(
+    ("controller_result", "exit_code", "stage_result"),
+    [
+        (
+            {"status": "acknowledged", "ack_status": "acknowledged"},
+            0,
+            {"status": "completed"},
+        ),
+        (
+            {"status": "operator_required", "error_code": "editorial_outcome_unknown"},
+            1,
+            {"status": "operator_required", "code": "editorial_stage_unconfirmed"},
+        ),
+    ],
+)
+def test_gateway_stage_emits_only_the_narrow_autonomous_contract(
+    tmp_path, capsys, monkeypatch, controller_result, exit_code, stage_result
+):
+    bridge, _ = real_bridge(tmp_path)
+    root = tmp_path.resolve()
+    config = root / "gateway.yaml"
+    config.write_text(
+        "editorial: {enabled: true}\nnetwork: {enabled: true}\nllm: {enabled: true}\n"
+    )
+    policy_directory = root / "policy"
+    policy_directory.mkdir(mode=0o700)
+    policy_directory.chmod(0o700)
+    policy = policy_directory / "trusted.yaml"
+    policy.write_text(Path("config/trusted_publishers.yaml").read_text())
+    policy.chmod(0o600)
+    gateway = root / "fake-openclaw"
+    gateway.write_text("#!/bin/sh\nexit 99\n")
+    gateway.chmod(0o700)
+    monkeypatch.setattr(Controller, "process", lambda _self: controller_result)
+
+    assert (
+        main(
+            [
+                "--config",
+                str(config),
+                "--inbox",
+                str(bridge.inbox_dir / "inbox.json"),
+                "--store",
+                str(root / "private" / "editorial.sqlite3"),
+                "--export",
+                str(root / "exports" / "candidates.json"),
+                "--workspace-root",
+                str(root / "workspace"),
+                "--state-dir",
+                str(root / "bridge-state"),
+                "--no-simulation",
+                "--allow-ack",
+                "--allow-gateway",
+                "--gateway-executable",
+                str(gateway),
+                "--gateway-max-candidates",
+                "2",
+                "--gateway-max-cost-usd",
+                "0.10",
+                "--trusted-publishers",
+                str(policy),
+                "gateway-stage",
+            ]
+        )
+        == exit_code
+    )
+    assert json.loads(capsys.readouterr().out) == stage_result
 
 
 @pytest.mark.parametrize("timeout", ["nan", "inf", "4", "601"])

@@ -20,7 +20,7 @@ allows three bounded retries, and never replays a completed or
 does not drain historical backlog. Asia/Bangkok and `08:00` are the defaults.
 
 The configured `waagd-autonomous-cycle` process runs fixed absolute upstream
-commands (normally Bridge sync then `waagd-editorial gateway-process`) in a
+commands (normally `waagd-bridge-stage` then `waagd-editorial gateway-stage`) in a
 sanitized environment. It subsequently invokes the Site importer in a separate
 process. The Site environment file and ingress-token file are never passed to
 the Gateway/editorial command.
@@ -88,17 +88,17 @@ file below `0600`; none belongs in a Git checkout.
    mount that volume in the new worktree.
 2. Configure the existing collector to export candidate-v2 data into a new,
    private path. The existing v0.4.1 scheduler remains the sole collector.
-3. Build two fixed absolute commands: a Bridge `sync` command and an editorial
-   `gateway-process` command. The latter receives only its editorial config,
+3. Build two fixed absolute commands: a Bridge `waagd-bridge-stage` command and an editorial
+   `gateway-stage` command. The latter receives only its editorial config,
    Bridge paths, trusted-publisher/corroboration policy and Gateway allowlist.
 4. Create the cycle command, with the Site credentials confined to the final
    importer process:
 
 ```sh
 /absolute/venv/bin/waagd-autonomous-cycle \
-  --stage-command '/absolute/venv/bin/waagd-bridge --export /absolute/export/candidates.json --workspace-root /absolute/bridge-workspace --state-dir /absolute/bridge-state sync' \
+  --stage-command '/absolute/venv/bin/waagd-bridge-stage --export /absolute/export/candidates.json --workspace-root /absolute/bridge-workspace --state-dir /absolute/bridge-state' \
   --stage-timeout-seconds 900 \
-  --stage-command '/absolute/venv/bin/waagd-editorial --config /absolute/private/editorial.yaml --inbox /absolute/bridge-workspace/waagd-discovery/inbox.json --store /absolute/editorial/editorial.sqlite3 --export /absolute/export/candidates.json --workspace-root /absolute/bridge-workspace --state-dir /absolute/bridge-state --no-simulation --allow-ack --allow-gateway --gateway-executable /absolute/openclaw --gateway-timeout-seconds 360 --gateway-max-candidates 5 --gateway-max-cost-usd 0.10 --trusted-publishers /absolute/private/trusted_publishers.yaml gateway-process' \
+  --stage-command '/absolute/venv/bin/waagd-editorial --config /absolute/private/editorial.yaml --inbox /absolute/bridge-workspace/waagd-discovery/inbox.json --store /absolute/editorial/editorial.sqlite3 --export /absolute/export/candidates.json --workspace-root /absolute/bridge-workspace --state-dir /absolute/bridge-state --no-simulation --allow-ack --allow-gateway --gateway-executable /absolute/openclaw --gateway-timeout-seconds 600 --gateway-max-candidates 5 --gateway-max-cost-usd 0.10 --trusted-publishers /absolute/private/trusted_publishers.yaml gateway-stage' \
   --stage-timeout-seconds 10800 \
   --cycle-timeout-seconds 15600 \
   --editorial-store /absolute/editorial/editorial.sqlite3 \

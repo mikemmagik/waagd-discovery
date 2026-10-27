@@ -32,6 +32,26 @@ class EditorialConfig:
     publishing_enabled: bool = False
 
 
+def _attests_gateway_stage_completed(value: object) -> bool:
+    """Recognize only terminal Controller outcomes safe for cycle progression."""
+
+    if not isinstance(value, dict):
+        return False
+    status = value.get("status")
+    if status in {"inbox_empty", "inbox_missing"}:
+        return True
+    if status == "acknowledged":
+        return value.get("ack_status") == "acknowledged"
+    if status == "quarantined":
+        operational = value.get("operational")
+        return (
+            isinstance(operational, dict)
+            and operational.get("failure_category") == "delivery_expired_quarantined"
+            and operational.get("operator_required") is False
+        )
+    return False
+
+
 class _Loader(yaml.SafeLoader):
     pass
 
@@ -196,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("dry-run")
     commands.add_parser("process")
     commands.add_parser("gateway-process")
+    commands.add_parser("gateway-stage")
     retry_selection = commands.add_parser("retry-selection")
     retry_selection.add_argument("--delivery-id", required=True)
     retry_selection.add_argument("--operator-confirm", action="store_true")
@@ -205,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         config = load_config(args.config)
-        gateway = args.command in {"gateway-process", "retry-selection"}
+        gateway = args.command in {"gateway-process", "gateway-stage", "retry-selection"}
         if (args.allow_ack and not gateway) or (
             not args.simulation and args.command != "status" and not gateway
         ):
@@ -317,6 +338,14 @@ def main(argv: list[str] | None = None) -> int:
                 if gateway:
                     _check_gateway_batch(args.inbox, args.gateway_max_candidates)
                 result = instance.process()
+        if args.command == "gateway-stage":
+            if _attests_gateway_stage_completed(result):
+                print('{"status":"completed"}')
+                return 0
+            print(
+                json.dumps({"status": "operator_required", "code": "editorial_stage_unconfirmed"})
+            )
+            return 1
         print(json.dumps(result, sort_keys=True, allow_nan=False))
         return 0
     except EditorialError as error:

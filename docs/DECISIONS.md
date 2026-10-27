@@ -170,3 +170,9 @@
     is `openrouter/openrouter/free`; a missing or different requested route in a
     detailed terminal receipt fails closed. Staging and production never share
     Bridge, Editorial, coordinator, publication, Gateway or Site state.
+
+41. v1.0.1 keeps public Bridge and Editorial CLI summaries for operators, but
+    uses separate narrow autonomous-stage adapters. They attest only a durable
+    Bridge sync or terminal Controller outcome before emitting the exact
+    `{"status":"completed"}` protocol; expired, unknown and malformed outcomes
+    remain fail-closed.

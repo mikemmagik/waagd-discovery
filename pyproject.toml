@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "waagd-discovery"
-version = "1.0.0"
+version = "1.0.1"
 description = "Independent, deterministic RSS/Atom discovery for WAAGD"
 requires-python = ">=3.13"
 dependencies = ["httpx==0.28.1", "defusedxml==0.7.1", "PyYAML==6.0.3", "jsonschema==4.26.0", "idna==3.20"]
@@ -12,6 +12,7 @@ dependencies = ["httpx==0.28.1", "defusedxml==0.7.1", "PyYAML==6.0.3", "jsonsche
 [project.scripts]
 waagd-discovery = "waagd_discovery.cli:main"
 waagd-bridge = "waagd_discovery.bridge.cli:main"
+waagd-bridge-stage = "waagd_discovery.bridge.stage_cli:main"
 waagd-editorial = "waagd_discovery.editorial.cli:main"
 waagd-publication-export = "waagd_discovery.editorial.publication_cli:main"
 waagd-publication-bridge = "waagd_discovery.editorial.publication_bridge_cli:main"
