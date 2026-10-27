@@ -175,7 +175,7 @@ def load_corroboration_policies(path: Path) -> dict[str, CorroborationPolicy]:
     return load_corroboration_rules(path)
 
 
-def _check_gateway_batch(inbox: Path, maximum: int) -> None:
+def _check_gateway_batch(inbox: Path, maximum: int, *, allow_expired: bool = False) -> None:
     """Bound calls before opening any network transport or Gateway process."""
     try:
         directory = io.open_directory(inbox.parent, private=True)
@@ -187,7 +187,7 @@ def _check_gateway_batch(inbox: Path, maximum: int) -> None:
             os.close(directory)
         if not isinstance(value, dict):
             raise EditorialError("inbox_invalid")
-        validate_input(value)
+        validate_input(value, allow_expired=allow_expired)
         if len(value["candidates"]) > maximum:
             raise EditorialError("gateway_candidate_limit")
     except (OSError, io.BridgeError):
@@ -336,7 +336,11 @@ def main(argv: list[str] | None = None) -> int:
                 result = instance.retry_selection(args.delivery_id)
             else:
                 if gateway:
-                    _check_gateway_batch(args.inbox, args.gateway_max_candidates)
+                    _check_gateway_batch(
+                        args.inbox,
+                        args.gateway_max_candidates,
+                        allow_expired=args.command == "gateway-stage",
+                    )
                 result = instance.process()
         if args.command == "gateway-stage":
             if _attests_gateway_stage_completed(result):

@@ -176,3 +176,10 @@
     Bridge sync or terminal Controller outcome before emitting the exact
     `{"status":"completed"}` protocol; expired, unknown and malformed outcomes
     remain fail-closed.
+
+42. v1.0.2 permits only `gateway-stage` preflight to carry an otherwise valid
+    expired envelope into the existing Controller quarantine procedure. The
+    normal gateway path still rejects expiry before any Gateway process. The
+    Controller remains the sole authority for Bridge receipt/digest checks and
+    proven-unused expiry quarantine; it never invokes an LLM or ACKs a delivery
+    on that path.

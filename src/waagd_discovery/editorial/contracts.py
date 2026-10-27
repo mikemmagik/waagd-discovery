@@ -139,7 +139,9 @@ def _url(value: str) -> str:
         raise EditorialError("editorial_url_invalid") from None
 
 
-def validate_input(value: Any, now: datetime | None = None) -> None:
+def validate_input(value: Any, now: datetime | None = None, *, allow_expired: bool = False) -> None:
+    if type(allow_expired) is not bool:
+        raise EditorialError("editorial_input_policy_invalid")
     try:
         validate_envelope(value)
     except (BridgeError, TypeError, KeyError, RecursionError):
@@ -151,7 +153,7 @@ def validate_input(value: Any, now: datetime | None = None) -> None:
         raise EditorialError("protected_delivery")
     if _date(value["created_at"]) > clock + timedelta(minutes=5):
         raise EditorialError("inbox_future")
-    if _date(value["expires_at"]) <= clock:
+    if _date(value["expires_at"]) <= clock and not allow_expired:
         raise EditorialError("delivery_expired")
     keys = [item["candidate_key"] for item in value["candidates"]]
     if len(set(keys)) != len(keys):
