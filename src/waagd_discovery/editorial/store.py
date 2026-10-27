@@ -912,6 +912,14 @@ class EditorialStore:
             )
         ]
 
+    def persisted_delivery(self, delivery: str) -> tuple[str, str] | None:
+        """Return the private durable envelope bytes and digest without mutation."""
+
+        row = self.connection.execute(
+            "SELECT payload_digest,payload FROM deliveries WHERE delivery_id=?", (delivery,)
+        ).fetchone()
+        return None if row is None else (row["payload_digest"], row["payload"])
+
     def mark_delivery(self, delivery: str, status: str, error: str | None) -> None:
         with self.transaction():
             self.connection.execute(
@@ -1029,6 +1037,129 @@ class EditorialStore:
                 "UPDATE deliveries SET status='operator_required',"
                 "error_code='delivery_expired_quarantine_uncertain' WHERE delivery_id=? "
                 "AND status='quarantine_pending'",
+                (delivery,),
+            )
+
+    def begin_selection_abandon(self, envelope: dict[str, Any], clock: str) -> bool:
+        """Reserve exactly one expired, ambiguous selection for terminal abandon.
+
+        The selection record and its failed attempt remain untouched so this
+        cannot be mistaken for a valid model choice.  Only an operator-required
+        delivery with the one expected ambiguous selection attempt may proceed;
+        any possible ACK, decision, PublicationIntent, Site job, or other
+        Gateway operation remains fail-closed.
+        """
+
+        delivery = envelope["delivery_id"]
+        expected = digest(envelope)
+        with self.transaction():
+            row = self.connection.execute(
+                "SELECT payload_digest,payload,status,ack_status,error_code FROM deliveries "
+                "WHERE delivery_id=?",
+                (delivery,),
+            ).fetchone()
+            if row is None or row["payload_digest"] != expected:
+                raise EditorialError("delivery_payload_changed")
+            try:
+                persisted = io.decode(row["payload"].encode())
+            except (AttributeError, io.BridgeError, UnicodeError):
+                raise EditorialError("persisted_delivery_invalid") from None
+            if not isinstance(persisted, dict) or digest(persisted) != expected:
+                raise EditorialError("persisted_delivery_invalid")
+            if row["status"] == "selection_abandon_pending":
+                return True
+            if row["status"] == "selection_abandoned":
+                return False
+            if (
+                row["status"] != "operator_required"
+                or row["ack_status"] != "not_ready"
+                or row["error_code"] != "selection_outcome_unknown"
+            ):
+                return False
+            run = self.connection.execute(
+                "SELECT status,selected,finished_at FROM selection_runs WHERE delivery_id=?",
+                (delivery,),
+            ).fetchone()
+            if (
+                run is None
+                or run["status"] != "in_flight"
+                or run["selected"] is not None
+                or run["finished_at"] is not None
+            ):
+                return False
+            attempts = self.connection.execute(
+                "SELECT operation,status,error_code,candidate_key FROM attempts "
+                "WHERE delivery_id=?",
+                (delivery,),
+            ).fetchall()
+            if len(attempts) != 1 or tuple(attempts[0]) != (
+                "selection",
+                "failed",
+                "selection_outcome_unknown",
+                None,
+            ):
+                return False
+            if (
+                self.connection.execute(
+                    "SELECT 1 FROM ack_outbox WHERE delivery_id=?", (delivery,)
+                ).fetchone()
+                is not None
+                or self.connection.execute(
+                    "SELECT 1 FROM decisions d JOIN delivery_candidates dc ON "
+                    "dc.candidate_key=d.candidate_key AND dc.revision=d.revision "
+                    "WHERE dc.delivery_id=? LIMIT 1",
+                    (delivery,),
+                ).fetchone()
+                is not None
+                or self.connection.execute(
+                    "SELECT 1 FROM publication_jobs WHERE delivery_id=? LIMIT 1", (delivery,)
+                ).fetchone()
+                is not None
+                or self.connection.execute(
+                    "SELECT 1 FROM publication_jobs p JOIN delivery_candidates dc ON "
+                    "dc.candidate_key=p.candidate_key AND dc.revision=p.revision "
+                    "WHERE dc.delivery_id=? LIMIT 1",
+                    (delivery,),
+                ).fetchone()
+                is not None
+                or self.connection.execute(
+                    "SELECT 1 FROM selection_items WHERE run_id=(SELECT run_id FROM "
+                    "selection_runs WHERE delivery_id=?) AND "
+                    "(editorial_status IS NOT NULL OR export_status!='not_exported') LIMIT 1",
+                    (delivery,),
+                ).fetchone()
+                is not None
+            ):
+                return False
+            self.connection.execute(
+                "UPDATE deliveries SET status='selection_abandon_pending',"
+                "error_code='selection_outcome_unknown_abandon_pending' WHERE delivery_id=?",
+                (delivery,),
+            )
+            self.connection.execute(
+                "UPDATE candidates SET status='selection_abandoned',"
+                "editorial_status='selection_abandoned',processed_at=? WHERE candidate_key IN "
+                "(SELECT candidate_key FROM delivery_candidates WHERE delivery_id=?)",
+                (clock, delivery),
+            )
+            return True
+
+    def finish_selection_abandon(self, delivery: str) -> None:
+        with self.transaction():
+            self.connection.execute(
+                "UPDATE deliveries SET status='selection_abandoned',"
+                "processing_finished_at=COALESCE(processing_finished_at,received_at),"
+                "error_code='selection_outcome_unknown_abandoned' WHERE delivery_id=? "
+                "AND status='selection_abandon_pending'",
+                (delivery,),
+            )
+
+    def fail_selection_abandon(self, delivery: str) -> None:
+        with self.transaction():
+            self.connection.execute(
+                "UPDATE deliveries SET status='operator_required',"
+                "error_code='selection_outcome_unknown_abandon_uncertain' WHERE delivery_id=? "
+                "AND status='selection_abandon_pending'",
                 (delivery,),
             )
 

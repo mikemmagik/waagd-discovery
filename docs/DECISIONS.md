@@ -183,3 +183,10 @@
     Controller remains the sole authority for Bridge receipt/digest checks and
     proven-unused expiry quarantine; it never invokes an LLM or ACKs a delivery
     on that path.
+
+43. v1.0.3 adds an explicit, operator-confirmed terminal abandon for an
+    expired `selection_outcome_unknown` only. It requires the matching pending
+    Bridge receipt, persisted inbox digest, an in-flight selection run and its
+    sole failed ambiguous selection attempt, while rejecting any decision, ACK,
+    PublicationIntent or Site trace. The original selection history remains
+    in-flight; Bridge is released only through its exact expired-receipt method.

@@ -480,6 +480,44 @@ class Bridge:
             self._commit_completion(ledger, state, inbox, delivery_id, "dismissed", clock)
             return self._receipt(ledger, delivery_id)
 
+    def abandon_ambiguous_selection(
+        self, delivery_id: str, expected_digest: str, now: datetime | None = None
+    ) -> dict[str, Any]:
+        """Dismiss one expired ambiguous-selection delivery by its exact receipt.
+
+        This narrow terminal operation deliberately does not expose the general
+        ``dismiss`` capability to the Editorial controller.  The caller must
+        independently prove that the durable selection record is ambiguous and
+        no downstream side effect exists.  Bridge still verifies the pending
+        receipt identity and expiry atomically before it releases the batch.
+        """
+
+        if delivery_id in _PROTECTED or not _uuid(delivery_id):
+            raise BridgeError("invalid_delivery_id")
+        if (
+            not isinstance(expected_digest, str)
+            or len(expected_digest) != 64
+            or any(char not in "0123456789abcdef" for char in expected_digest)
+        ):
+            raise BridgeError("invalid_payload_digest")
+        clock = _utc(now)
+        with self._access(mutate=True) as (state, inbox):
+            ledger = self._load(state, inbox)
+            if ledger is None or ledger["version"] != 2:
+                raise BridgeError("state_migration_required")
+            receipt = self._receipt(ledger, delivery_id)
+            if receipt["payload_digest"] != expected_digest:
+                raise BridgeError("delivery_digest_mismatch")
+            if receipt["status"] == "dismissed":
+                self._publish(inbox, ledger["snapshot"])
+                return receipt
+            if receipt["status"] != "pending":
+                raise BridgeError("delivery_not_pending")
+            if timestamp(receipt["expires_at"]) > clock:
+                raise BridgeError("delivery_not_expired")
+            self._commit_completion(ledger, state, inbox, delivery_id, "dismissed", clock)
+            return self._receipt(ledger, delivery_id)
+
     def _complete(self, delivery_id: str, terminal: str, now: datetime | None) -> dict[str, Any]:
         clock = _utc(now)
         if not _uuid(delivery_id):

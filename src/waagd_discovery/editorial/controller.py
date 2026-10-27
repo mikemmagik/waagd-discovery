@@ -663,6 +663,21 @@ class Controller:
             "operator_required": operator_required,
         }
 
+    def _selection_abandon_result(
+        self, store: EditorialStore, delivery: str, *, recovered: int
+    ) -> dict[str, Any]:
+        result = self._result(store, delivery)
+        result["status"] = "selection_abandoned"
+        result["error_code"] = "selection_outcome_unknown_abandoned"
+        result["operational"] = {
+            "stage": "editorial",
+            "failure_category": "selection_outcome_unknown_abandoned",
+            "recovered": recovered,
+            "quarantined": 0,
+            "operator_required": False,
+        }
+        return result
+
     def _quarantine_expired(self, envelope: dict[str, Any], now: datetime | None) -> dict[str, Any]:
         """Quarantine only an expired delivery with no possible external work.
 
@@ -1091,6 +1106,145 @@ class Controller:
             # not to be in flight. Let process resume that durable run.
             store.mark_delivery(delivery, "processing", None)
         return self.process(now)
+
+    def abandon_ambiguous_selection(
+        self, delivery: str, *, operator_confirm: bool = False, now: datetime | None = None
+    ) -> dict[str, Any]:
+        """Explicitly abandon one expired, ambiguous Gateway selection.
+
+        This is deliberately distinct from selection retry and expiry quarantine.
+        It neither invokes a Gateway adapter nor creates an ACK; it only releases
+        the Bridge receipt after the Store proves the exact in-flight selection
+        state and the absence of all downstream side effects.
+        """
+
+        if operator_confirm is not True:
+            raise EditorialError("selection_abandon_confirmation_required")
+        clock = utc(now)
+        with self._store(readonly=True) as store:
+            persisted = store.persisted_delivery(delivery)
+        if persisted is None:
+            raise EditorialError("selection_abandon_delivery_mismatch")
+        persisted_digest, raw_persisted = persisted
+        envelope = _stored_envelope(raw_persisted)
+        validate_input(envelope, clock, allow_expired=True)
+        if envelope["delivery_id"] != delivery or digest(envelope) != persisted_digest:
+            raise EditorialError("persisted_delivery_invalid")
+        live_inbox = False
+        try:
+            current = self._read()
+        except FileNotFoundError:
+            current = None
+        if isinstance(current, dict) and current.get("delivery_id") is not None:
+            validate_input(current, clock, allow_expired=True)
+            if (
+                current.get("delivery_id") != delivery
+                or digest(current) != persisted_digest
+                or current.get("bridge_schema_version") != envelope["bridge_schema_version"]
+                or current.get("expires_at") != envelope["expires_at"]
+            ):
+                return {
+                    "delivery_id": delivery,
+                    "status": "operator_required",
+                    "error_code": "selection_abandon_inbox_mismatch",
+                    "simulation": self.simulation,
+                }
+            live_inbox = True
+        if timestamp(envelope["expires_at"]) > clock:
+            raise EditorialError("selection_abandon_requires_expiry")
+        expected = digest(envelope)
+        try:
+            receipt = self.bridge.inspect_delivery(delivery)
+            if (
+                receipt.get("delivery_id") != delivery
+                or receipt.get("payload_digest") != expected
+                or receipt.get("schema_version") != envelope["bridge_schema_version"]
+                or receipt.get("expires_at") != envelope["expires_at"]
+                or receipt.get("status") not in {"pending", "dismissed"}
+            ):
+                raise EditorialError("bridge_authority_mismatch")
+            if receipt["status"] == "pending" and not live_inbox:
+                raise EditorialError("selection_abandon_inbox_unavailable")
+            if receipt["status"] == "pending" and not callable(
+                getattr(self.bridge, "abandon_ambiguous_selection", None)
+            ):
+                raise EditorialError("bridge_authority_mismatch")
+        except (EditorialError, io.BridgeError, OSError, KeyError, TypeError):
+            return {
+                "delivery_id": delivery,
+                "status": "operator_required",
+                "error_code": "selection_abandon_authority_unknown",
+                "simulation": self.simulation,
+                "operational": {
+                    "stage": "editorial",
+                    "failure_category": "selection_abandon_authority_unknown",
+                    "recovered": 0,
+                    "quarantined": 0,
+                    "operator_required": True,
+                },
+            }
+        try:
+            with self._store() as store:
+                reserved = store.begin_selection_abandon(envelope, clock.isoformat())
+                if not reserved:
+                    result = self._result(store, delivery)
+                    if (
+                        result["status"] == "selection_abandoned"
+                        and receipt["status"] == "dismissed"
+                    ):
+                        return self._selection_abandon_result(store, delivery, recovered=1)
+                    result["status"] = "operator_required"
+                    return result
+                if receipt["status"] == "dismissed":
+                    store.finish_selection_abandon(delivery)
+                    return self._selection_abandon_result(store, delivery, recovered=1)
+                try:
+                    abandoned = self.bridge.abandon_ambiguous_selection(delivery, expected, clock)
+                    if (
+                        abandoned.get("delivery_id") != delivery
+                        or abandoned.get("payload_digest") != expected
+                        or abandoned.get("schema_version") != envelope["bridge_schema_version"]
+                        or abandoned.get("expires_at") != envelope["expires_at"]
+                        or abandoned.get("status") != "dismissed"
+                    ):
+                        raise EditorialError("bridge_selection_abandon_invalid")
+                except (
+                    AttributeError,
+                    EditorialError,
+                    io.BridgeError,
+                    OSError,
+                    KeyError,
+                    TypeError,
+                ):
+                    try:
+                        reconciled = self.bridge.inspect_delivery(delivery)
+                    except (io.BridgeError, OSError, KeyError, TypeError):
+                        reconciled = {}
+                    if (
+                        reconciled.get("delivery_id") != delivery
+                        or reconciled.get("payload_digest") != expected
+                        or reconciled.get("schema_version") != envelope["bridge_schema_version"]
+                        or reconciled.get("expires_at") != envelope["expires_at"]
+                        or reconciled.get("status") != "dismissed"
+                    ):
+                        store.fail_selection_abandon(delivery)
+                        return self._result(store, delivery)
+                store.finish_selection_abandon(delivery)
+                return self._selection_abandon_result(store, delivery, recovered=1)
+        except (EditorialError, io.BridgeError, OSError, sqlite3.Error, TypeError):
+            return {
+                "delivery_id": delivery,
+                "status": "operator_required",
+                "error_code": "selection_abandon_reconciliation_uncertain",
+                "simulation": self.simulation,
+                "operational": {
+                    "stage": "editorial",
+                    "failure_category": "selection_abandon_reconciliation_uncertain",
+                    "recovered": 0,
+                    "quarantined": 0,
+                    "operator_required": True,
+                },
+            }
 
     def reconsider(self, candidate_key: str, now: datetime | None = None) -> dict[str, Any]:
         if len(candidate_key) != 64 or any(c not in "0123456789abcdef" for c in candidate_key):

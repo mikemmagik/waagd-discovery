@@ -220,6 +220,9 @@ def main(argv: list[str] | None = None) -> int:
     retry_selection = commands.add_parser("retry-selection")
     retry_selection.add_argument("--delivery-id", required=True)
     retry_selection.add_argument("--operator-confirm", action="store_true")
+    abandon_selection = commands.add_parser("abandon-ambiguous-selection")
+    abandon_selection.add_argument("--delivery-id", required=True)
+    abandon_selection.add_argument("--operator-confirm", action="store_true")
     commands.add_parser("status")
     reconsider = commands.add_parser("reconsider")
     reconsider.add_argument("--candidate-key", required=True)
@@ -227,8 +230,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = load_config(args.config)
         gateway = args.command in {"gateway-process", "gateway-stage", "retry-selection"}
+        operator_abandon = args.command == "abandon-ambiguous-selection"
         if (args.allow_ack and not gateway) or (
-            not args.simulation and args.command != "status" and not gateway
+            not args.simulation
+            and args.command != "status"
+            and not gateway
+            and not operator_abandon
         ):
             raise EditorialError("real_editor_unavailable")
         if gateway and (
@@ -244,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
             raise EditorialError("gateway_processing_not_authorized")
         if args.command == "retry-selection" and not args.operator_confirm:
             raise EditorialError("selection_retry_confirmation_required")
+        if operator_abandon and (args.simulation or not args.operator_confirm):
+            raise EditorialError("selection_abandon_confirmation_required")
         maximum_gateway_candidates = 50 if args.trusted_publishers else 10
         if gateway and (
             isinstance(args.gateway_max_candidates, bool)
@@ -334,6 +343,10 @@ def main(argv: list[str] | None = None) -> int:
             elif args.command == "retry-selection":
                 _check_gateway_batch(args.inbox, args.gateway_max_candidates)
                 result = instance.retry_selection(args.delivery_id)
+            elif args.command == "abandon-ambiguous-selection":
+                result = instance.abandon_ambiguous_selection(
+                    args.delivery_id, operator_confirm=args.operator_confirm
+                )
             else:
                 if gateway:
                     _check_gateway_batch(

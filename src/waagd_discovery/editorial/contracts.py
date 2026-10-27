@@ -47,6 +47,10 @@ class BridgePort(Protocol):
         self, delivery_id: str, expected_digest: str, now: datetime | None = None
     ) -> dict[str, Any]: ...
 
+    def abandon_ambiguous_selection(
+        self, delivery_id: str, expected_digest: str, now: datetime | None = None
+    ) -> dict[str, Any]: ...
+
 
 def utc(now: datetime | None = None) -> datetime:
     value = now or datetime.now(UTC)
