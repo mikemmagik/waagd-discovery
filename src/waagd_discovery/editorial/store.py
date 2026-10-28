@@ -13,7 +13,7 @@ from typing import Any
 from waagd_discovery.bridge import io
 from waagd_discovery.editorial.contracts import EditorialError, digest
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 _SELECTION_RUNS = (
     "CREATE TABLE selection_runs (run_id TEXT PRIMARY KEY, delivery_id TEXT UNIQUE NOT NULL "
     "REFERENCES deliveries, utc_day TEXT NOT NULL, shortlist TEXT NOT NULL, selected TEXT, "
@@ -39,6 +39,14 @@ _PUBLICATION_JOBS = (
     "status TEXT NOT NULL, site_outcome TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
     "error_code TEXT, UNIQUE(candidate_key,revision))"
 )
+_ATTEMPT_DIAGNOSTICS = (
+    "CREATE TABLE attempt_diagnostics (attempt_id TEXT PRIMARY KEY REFERENCES attempts, "
+    "delivery_id TEXT REFERENCES deliveries, candidate_key TEXT REFERENCES candidates, "
+    "operation TEXT NOT NULL, failure_category TEXT NOT NULL, child_exit_status INTEGER, "
+    "elapsed_ms INTEGER, terminal_receipt INTEGER NOT NULL CHECK(terminal_receipt IN (0,1)), "
+    "route_attestation TEXT NOT NULL, cost_attestation TEXT NOT NULL, "
+    "tool_attestation TEXT NOT NULL, terminal_disposition TEXT)"
+)
 _SCHEMA = (
     "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK(singleton=1), "
     "simulation INTEGER NOT NULL CHECK(simulation IN (0,1)))",
@@ -63,6 +71,7 @@ _SCHEMA = (
     "CREATE TABLE attempts (attempt_id TEXT PRIMARY KEY, delivery_id TEXT REFERENCES deliveries, "
     "candidate_key TEXT REFERENCES candidates, operation TEXT NOT NULL, status TEXT NOT NULL, "
     "started_at TEXT NOT NULL, finished_at TEXT, error_code TEXT)",
+    _ATTEMPT_DIAGNOSTICS,
     _SELECTION_RUNS,
     _SELECTION_ITEMS,
     _PUBLICATION_JOBS,
@@ -70,8 +79,10 @@ _SCHEMA = (
     "payload_digest TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, "
     "acknowledged_at TEXT, error_code TEXT)",
 )
+_SCHEMA_V5 = tuple(statement for statement in _SCHEMA if statement != _ATTEMPT_DIAGNOSTICS)
 _SCHEMA_V4 = tuple(
-    _PUBLICATION_JOBS_V4 if statement == _PUBLICATION_JOBS else statement for statement in _SCHEMA
+    _PUBLICATION_JOBS_V4 if statement == _PUBLICATION_JOBS else statement
+    for statement in _SCHEMA_V5
 )
 
 
@@ -303,6 +314,18 @@ class EditorialStore:
                 except sqlite3.Error:
                     raise EditorialError("editorial_schema_invalid") from None
                 version = 5
+            if version == 5:
+                if self.readonly:
+                    raise EditorialError("editorial_schema_migration_required")
+                if _schema(self.connection) != _expected_schema(_SCHEMA_V5):
+                    raise EditorialError("editorial_schema_invalid")
+                try:
+                    with self.transaction():
+                        self.connection.execute(_ATTEMPT_DIAGNOSTICS)
+                        self.connection.execute("PRAGMA user_version=6")
+                except sqlite3.Error:
+                    raise EditorialError("editorial_schema_invalid") from None
+                version = 6
             if _schema(self.connection) != _expected_schema():
                 raise EditorialError("editorial_schema_invalid")
             if self.connection.execute("PRAGMA quick_check").fetchall()[0][0] != "ok":
@@ -753,6 +776,109 @@ class EditorialStore:
             self.connection.execute(
                 "UPDATE attempts SET status=?,finished_at=?,error_code=? WHERE attempt_id=?",
                 ("failed" if error else "completed", clock, error, attempt),
+            )
+
+    @staticmethod
+    def _gateway_diagnostic_values(error: str, diagnostic: dict[str, Any]) -> tuple[Any, ...]:
+        allowed_status = {"passed", "failed", "not_checked", "unknown"}
+        category = diagnostic.get("failure_category")
+        route = diagnostic.get("route_attestation")
+        cost = diagnostic.get("cost_attestation")
+        tools = diagnostic.get("tool_attestation")
+        exit_status = diagnostic.get("child_exit_status")
+        elapsed = diagnostic.get("elapsed_ms")
+        terminal = diagnostic.get("terminal_receipt")
+        disposition = diagnostic.get("terminal_disposition")
+        if (
+            not isinstance(error, str)
+            or not error
+            or not isinstance(category, str)
+            or not category
+            or route not in allowed_status
+            or cost not in allowed_status
+            or tools not in allowed_status
+            or (exit_status is not None and (type(exit_status) is not int))
+            or (elapsed is not None and (type(elapsed) is not int or elapsed < 0))
+            or type(terminal) is not bool
+            or disposition not in {None, "visible", "not-visible"}
+        ):
+            raise EditorialError("editorial_diagnostic_invalid")
+        return category, exit_status, elapsed, int(terminal), route, cost, tools, disposition
+
+    def finish_gateway_attempt(
+        self, attempt: str, clock: str, error: str, diagnostic: dict[str, Any]
+    ) -> None:
+        """Finish one failed Gateway turn with bounded, non-content telemetry."""
+
+        values = self._gateway_diagnostic_values(error, diagnostic)
+        with self.transaction():
+            row = self.connection.execute(
+                "SELECT delivery_id,candidate_key,operation FROM attempts WHERE attempt_id=? "
+                "AND status='started'",
+                (attempt,),
+            ).fetchone()
+            if row is None:
+                raise EditorialError("editorial_attempt_state_invalid")
+            updated = self.connection.execute(
+                "UPDATE attempts SET status='failed',finished_at=?,error_code=? WHERE attempt_id=? "
+                "AND status='started'",
+                (clock, error, attempt),
+            ).rowcount
+            if updated != 1:
+                raise EditorialError("editorial_attempt_state_invalid")
+            self.connection.execute(
+                "INSERT INTO attempt_diagnostics VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    attempt,
+                    row["delivery_id"],
+                    row["candidate_key"],
+                    row["operation"],
+                    *values,
+                ),
+            )
+
+    def finish_fidelity_gateway_failure(
+        self,
+        editorial_attempt: str,
+        fidelity_attempt: str,
+        clock: str,
+        error: str,
+        diagnostic: dict[str, Any],
+    ) -> None:
+        """Atomically retain a completed draft and failed Gateway fidelity telemetry."""
+
+        values = self._gateway_diagnostic_values(error, diagnostic)
+        with self.transaction():
+            completed = self.connection.execute(
+                "UPDATE attempts SET status='completed',finished_at=?,error_code=NULL "
+                "WHERE attempt_id=? AND status='started'",
+                (clock, editorial_attempt),
+            ).rowcount
+            if completed != 1:
+                raise EditorialError("editorial_attempt_state_invalid")
+            row = self.connection.execute(
+                "SELECT delivery_id,candidate_key,operation FROM attempts WHERE attempt_id=? "
+                "AND status='started'",
+                (fidelity_attempt,),
+            ).fetchone()
+            if row is None:
+                raise EditorialError("editorial_attempt_state_invalid")
+            failed = self.connection.execute(
+                "UPDATE attempts SET status='failed',finished_at=?,error_code=? WHERE attempt_id=? "
+                "AND status='started'",
+                (clock, error, fidelity_attempt),
+            ).rowcount
+            if failed != 1:
+                raise EditorialError("editorial_attempt_state_invalid")
+            self.connection.execute(
+                "INSERT INTO attempt_diagnostics VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    fidelity_attempt,
+                    row["delivery_id"],
+                    row["candidate_key"],
+                    row["operation"],
+                    *values,
+                ),
             )
 
     def finish_attempts(self, attempts: tuple[tuple[str, str | None], ...], clock: str) -> None:
@@ -1259,6 +1385,177 @@ class EditorialStore:
             pending_status="selection_attestation_abandon_pending",
             uncertain_error="selection_attestation_missing_abandon_uncertain",
         )
+
+    def begin_partial_editorial_abandon(self, envelope: dict[str, Any], clock: str) -> bool:
+        """Reserve an expired, mixed-result Gateway batch for terminal abandonment.
+
+        This is intentionally narrower than ordinary recovery.  It preserves
+        completed Fidelity-passed decisions but never exposes them for export,
+        ACK or publication; one ambiguous failed Gateway turn means the whole
+        delivery can only be dismissed after this proof succeeds.
+        """
+
+        delivery = envelope["delivery_id"]
+        expected = digest(envelope)
+        with self.transaction():
+            row = self.connection.execute(
+                "SELECT payload_digest,payload,status,ack_status,error_code FROM deliveries "
+                "WHERE delivery_id=?",
+                (delivery,),
+            ).fetchone()
+            if row is None or row["payload_digest"] != expected:
+                raise EditorialError("delivery_payload_changed")
+            try:
+                persisted = io.decode(row["payload"].encode())
+            except (AttributeError, io.BridgeError, UnicodeError):
+                raise EditorialError("persisted_delivery_invalid") from None
+            if not isinstance(persisted, dict) or digest(persisted) != expected:
+                raise EditorialError("persisted_delivery_invalid")
+            if row["status"] == "partial_editorial_abandon_pending":
+                return True
+            if row["status"] == "partial_editorial_batch_abandoned":
+                return False
+            if (
+                row["status"] != "operator_required"
+                or row["ack_status"] != "not_ready"
+                or row["error_code"] != "editorial_gateway_attestation_invalid"
+            ):
+                return False
+            run = self.connection.execute(
+                "SELECT run_id,status,selected,finished_at,error_code FROM selection_runs "
+                "WHERE delivery_id=?",
+                (delivery,),
+            ).fetchone()
+            if run is None or run["status"] != "completed" or run["finished_at"] is None:
+                return False
+            try:
+                selected = io.decode(run["selected"].encode())
+            except (AttributeError, io.BridgeError, UnicodeError):
+                return False
+            if (
+                not isinstance(selected, list)
+                or len(selected) < 2
+                or not all(isinstance(key, str) for key in selected)
+            ):
+                return False
+            candidate_keys = {
+                entry[0]
+                for entry in self.connection.execute(
+                    "SELECT candidate_key FROM delivery_candidates WHERE delivery_id=?", (delivery,)
+                ).fetchall()
+            }
+            if set(selected) - candidate_keys:
+                return False
+            attempts = self.connection.execute(
+                "SELECT operation,status,error_code,candidate_key,finished_at FROM attempts "
+                "WHERE delivery_id=?",
+                (delivery,),
+            ).fetchall()
+            verifications: set[str] = set()
+            selections = 0
+            failed_gateway: set[str] = set()
+            completed_gateway: set[str] = set()
+            completed_fidelity: set[str] = set()
+            for attempt in attempts:
+                operation, status, error, key, finished = tuple(attempt)
+                if finished is None or status not in {"completed", "failed"}:
+                    return False
+                if operation == "verification":
+                    if key not in candidate_keys or status != "completed" or error is not None:
+                        return False
+                    verifications.add(key)
+                elif operation == "selection":
+                    if key is not None or status != "completed" or error is not None:
+                        return False
+                    selections += 1
+                elif operation == "editorial_gateway":
+                    if key not in set(selected):
+                        return False
+                    if status == "completed" and error is None:
+                        completed_gateway.add(key)
+                    elif status == "failed" and error == "editorial_gateway_attestation_invalid":
+                        failed_gateway.add(key)
+                    else:
+                        return False
+                elif operation == "fidelity":
+                    if key not in set(selected) or status != "completed" or error is not None:
+                        return False
+                    completed_fidelity.add(key)
+                else:
+                    return False
+            if verifications != candidate_keys or selections != 1 or not failed_gateway:
+                return False
+            retained = set(selected) - failed_gateway
+            if not retained or retained != completed_gateway or retained != completed_fidelity:
+                return False
+            for key in retained:
+                decision = self.connection.execute(
+                    "SELECT decision FROM decisions WHERE candidate_key=? AND revision="
+                    "(SELECT revision FROM delivery_candidates WHERE delivery_id=? "
+                    "AND candidate_key=?)",
+                    (key, delivery, key),
+                ).fetchone()
+                if decision is None or decision["decision"] != "READY_FOR_REVIEW":
+                    return False
+            for key in failed_gateway:
+                if self.connection.execute(
+                    "SELECT 1 FROM decisions WHERE candidate_key=? AND revision="
+                    "(SELECT revision FROM delivery_candidates WHERE delivery_id=? "
+                    "AND candidate_key=?)",
+                    (key, delivery, key),
+                ).fetchone():
+                    return False
+            if (
+                self.connection.execute(
+                    "SELECT 1 FROM ack_outbox WHERE delivery_id=?", (delivery,)
+                ).fetchone()
+                is not None
+                or self.connection.execute(
+                    "SELECT 1 FROM publication_jobs p JOIN delivery_candidates dc ON "
+                    "dc.candidate_key=p.candidate_key AND dc.revision=p.revision "
+                    "WHERE dc.delivery_id=? LIMIT 1",
+                    (delivery,),
+                ).fetchone()
+                is not None
+                or self.connection.execute(
+                    "SELECT 1 FROM selection_items WHERE run_id=? "
+                    "AND export_status!='not_exported'",
+                    (run["run_id"],),
+                ).fetchone()
+                is not None
+            ):
+                return False
+            self.connection.execute(
+                "UPDATE deliveries SET status='partial_editorial_abandon_pending',"
+                "error_code='partial_editorial_batch_abandon_pending' WHERE delivery_id=?",
+                (delivery,),
+            )
+            for key in failed_gateway:
+                self.connection.execute(
+                    "UPDATE selection_items SET editorial_status='partial_batch_abandoned' "
+                    "WHERE run_id=? AND candidate_key=? AND status='selected'",
+                    (run["run_id"], key),
+                )
+            return True
+
+    def finish_partial_editorial_abandon(self, delivery: str) -> None:
+        with self.transaction():
+            self.connection.execute(
+                "UPDATE deliveries SET status='partial_editorial_batch_abandoned',"
+                "processing_finished_at=COALESCE(processing_finished_at,received_at),"
+                "error_code='partial_editorial_batch_abandoned' WHERE delivery_id=? "
+                "AND status='partial_editorial_abandon_pending'",
+                (delivery,),
+            )
+
+    def fail_partial_editorial_abandon(self, delivery: str) -> None:
+        with self.transaction():
+            self.connection.execute(
+                "UPDATE deliveries SET status='operator_required',"
+                "error_code='partial_editorial_batch_abandon_uncertain' WHERE delivery_id=? "
+                "AND status='partial_editorial_abandon_pending'",
+                (delivery,),
+            )
 
     def acknowledged(self, delivery: str, clock: str) -> None:
         with self.transaction():

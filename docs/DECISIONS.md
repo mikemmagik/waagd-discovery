@@ -211,3 +211,10 @@
     `meta.terminalReply.modelRouteChange`. Both must be explicit and match the
     attested Free Router receipt; any duplicate, missing or conflicting route
     metadata remains fail-closed. No routing metadata is treated as cost proof.
+
+47. v1.0.7 adds a forward-only private attempt-diagnostics table containing
+    only bounded Gateway failure telemetry. It also permits an explicit,
+    expired partial-editorial batch abandon only when a completed selection has
+    both retained Fidelity-passed decisions and a proven failed attestation
+    turn, with no ACK, intent, Site or export evidence. Retained decisions stay
+    historical and are never published through this recovery.

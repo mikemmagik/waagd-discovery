@@ -53,7 +53,7 @@ def test_lost_marker_preserves_existing_database_history(tmp_path: Path) -> None
         assert store.status()["candidates"] == 1
 
 
-@pytest.mark.parametrize("version", [6, 999])
+@pytest.mark.parametrize("version", [7, 999])
 def test_newer_or_discovery_schema_is_never_reset(tmp_path: Path, version: int) -> None:
     path = store_path(tmp_path)
     with closing(sqlite3.connect(path)) as connection, connection:

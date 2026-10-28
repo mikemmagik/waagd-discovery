@@ -226,6 +226,9 @@ def main(argv: list[str] | None = None) -> int:
     abandon_attestation = commands.add_parser("abandon-selection-attestation")
     abandon_attestation.add_argument("--delivery-id", required=True)
     abandon_attestation.add_argument("--operator-confirm", action="store_true")
+    abandon_partial = commands.add_parser("abandon-partial-editorial-batch")
+    abandon_partial.add_argument("--delivery-id", required=True)
+    abandon_partial.add_argument("--operator-confirm", action="store_true")
     commands.add_parser("status")
     reconsider = commands.add_parser("reconsider")
     reconsider.add_argument("--candidate-key", required=True)
@@ -236,6 +239,7 @@ def main(argv: list[str] | None = None) -> int:
         operator_abandon = args.command in {
             "abandon-ambiguous-selection",
             "abandon-selection-attestation",
+            "abandon-partial-editorial-batch",
         }
         if (args.allow_ack and not gateway) or (
             not args.simulation
@@ -355,6 +359,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
             elif args.command == "abandon-selection-attestation":
                 result = instance.abandon_selection_attestation(
+                    args.delivery_id, operator_confirm=args.operator_confirm
+                )
+            elif args.command == "abandon-partial-editorial-batch":
+                result = instance.abandon_partial_editorial_batch(
                     args.delivery_id, operator_confirm=args.operator_confirm
                 )
             else:

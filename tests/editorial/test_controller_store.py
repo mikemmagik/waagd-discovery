@@ -992,11 +992,12 @@ def test_store_migrates_v1_selection_state_transactionally(tmp_path):
         connection.execute("DROP TABLE selection_items")
         connection.execute("DROP TABLE selection_runs")
         connection.execute("DROP TABLE publication_jobs")
+        connection.execute("DROP TABLE attempt_diagnostics")
         connection.execute("PRAGMA user_version=1")
         connection.commit()
 
     with EditorialStore(path, simulation=True) as store:
-        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 6
         assert store.connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='selection_items'"
         ).fetchone()
@@ -1011,6 +1012,7 @@ def test_store_migrates_v4_publication_jobs_without_inferring_delivery(tmp_path)
         pass
     with closing(sqlite3.connect(path)) as connection:
         connection.execute("DROP TABLE publication_jobs")
+        connection.execute("DROP TABLE attempt_diagnostics")
         connection.execute(
             "CREATE TABLE publication_jobs (intent_id TEXT PRIMARY KEY, "
             "candidate_key TEXT NOT NULL REFERENCES candidates, revision INTEGER NOT NULL, "
@@ -1022,7 +1024,7 @@ def test_store_migrates_v4_publication_jobs_without_inferring_delivery(tmp_path)
         connection.commit()
 
     with EditorialStore(path, simulation=True) as store:
-        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 6
         columns = {
             row["name"]
             for row in store.connection.execute("PRAGMA table_info(publication_jobs)").fetchall()
@@ -1062,7 +1064,7 @@ def test_store_rejects_v4_header_with_non_v4_publication_schema(tmp_path):
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize("version", [-1, 6, 99])
+@pytest.mark.parametrize("version", [-1, 7, 99])
 def test_store_rejects_newer_schema_without_reset(tmp_path, version):
     path = tmp_path.resolve() / "private" / "editorial.sqlite3"
     with EditorialStore(path, simulation=True):
@@ -1588,6 +1590,34 @@ class GatewayFailureEditor:
         raise EditorialError(self.code)
 
 
+class DiagnosedGatewayFailureEditor(GatewayFailureEditor):
+    gateway_backed = True
+    last_completion: dict[str, str] = {}
+    last_diagnostics = {
+        "failure_category": "gateway_model_route_unverified",
+        "child_exit_status": 0,
+        "elapsed_ms": 189000,
+        "terminal_completion_attested": False,
+    }
+
+
+def test_controller_persists_bounded_gateway_failure_diagnostics(tmp_path):
+    controller, _, _, _, _ = setup(tmp_path, count=1, allow_ack=False)
+    controller.editor = DiagnosedGatewayFailureEditor("gateway_model_route_unverified")
+
+    result = controller.process(NOW)
+
+    assert result["error_code"] == "editorial_gateway_attestation_invalid"
+    row = rows(controller, "attempt_diagnostics")[-1]
+    assert row["failure_category"] == "gateway_model_route_unverified"
+    assert row["child_exit_status"] == 0
+    assert row["elapsed_ms"] == 189000
+    assert row["terminal_receipt"] == 0
+    assert row["route_attestation"] == "failed"
+    assert row["cost_attestation"] == "not_checked"
+    assert row["tool_attestation"] == "unknown"
+
+
 @pytest.mark.parametrize(
     ("gateway_code", "stored_code"),
     [
@@ -2069,11 +2099,11 @@ def test_fidelity_safety_rejection_finishes_creative_attempt_and_never_acks(tmp_
     assert bridge.acks == 0
 
 
-def test_attempt_pair_finish_is_atomic_in_schema_v5_store(tmp_path):
+def test_attempt_pair_finish_is_atomic_in_schema_v6_store(tmp_path):
     controller, _, _, _, value = setup(tmp_path, count=1, allow_ack=False)
     controller.process(NOW)
     with EditorialStore(controller.store_path, simulation=False) as store:
-        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 6
         editorial = store.start_attempt(
             value["delivery_id"],
             value["candidates"][0]["candidate_key"],

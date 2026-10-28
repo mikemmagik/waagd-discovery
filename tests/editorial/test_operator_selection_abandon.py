@@ -100,6 +100,59 @@ def _expired() -> object:
     return NOW + timedelta(hours=3)
 
 
+def _partial_editorial_batch(
+    tmp_path: Path,
+) -> tuple[Bridge, dict[str, Any], Path, Controller]:
+    bridge, envelope, store_path, controller, _selector = _ambiguous_selection(
+        tmp_path, candidate_count=2, completed_verifications=True
+    )
+    selected = [candidate["candidate_key"] for candidate in envelope["candidates"]]
+    with EditorialStore(store_path, simulation=False) as store:
+        selection = store.connection.execute(
+            "SELECT attempt_id FROM attempts WHERE operation='selection'"
+        ).fetchone()[0]
+        store.finish_attempt(selection, NOW.isoformat())
+        store.finish_selection(envelope["delivery_id"], selected, NOW.isoformat())
+        completed = selected[0]
+        editorial = store.start_attempt(
+            envelope["delivery_id"], completed, "editorial_gateway", NOW.isoformat()
+        )
+        fidelity = store.start_attempt(
+            envelope["delivery_id"], completed, "fidelity", NOW.isoformat()
+        )
+        store.finish_attempts(((editorial, None), (fidelity, None)), NOW.isoformat())
+        with store.transaction():
+            store.connection.execute(
+                "INSERT INTO decisions VALUES (?,?,?,?,?,?)",
+                (completed, 1, "READY_FOR_REVIEW", "{}", "{}", NOW.isoformat()),
+            )
+        store.mark_selection_editorial(envelope["delivery_id"], completed, "completed")
+        failed = selected[1]
+        failed_attempt = store.start_attempt(
+            envelope["delivery_id"], failed, "editorial_gateway", NOW.isoformat()
+        )
+        store.finish_gateway_attempt(
+            failed_attempt,
+            NOW.isoformat(),
+            "editorial_gateway_attestation_invalid",
+            {
+                "failure_category": "gateway_model_route_unverified",
+                "child_exit_status": 0,
+                "elapsed_ms": 189000,
+                "terminal_receipt": False,
+                "route_attestation": "failed",
+                "cost_attestation": "not_checked",
+                "tool_attestation": "unknown",
+                "terminal_disposition": None,
+            },
+        )
+        store.mark_selection_editorial(envelope["delivery_id"], failed, "failed")
+        store.mark_delivery(
+            envelope["delivery_id"], "operator_required", "editorial_gateway_attestation_invalid"
+        )
+    return bridge, envelope, store_path, controller
+
+
 def _cli_arguments(
     bridge: Bridge, store_path: Path, delivery: str, command: str = "abandon-ambiguous-selection"
 ) -> list[str]:
@@ -120,6 +173,113 @@ def _cli_arguments(
         delivery,
         "--operator-confirm",
     ]
+
+
+def test_partial_editorial_abandon_preserves_fidelity_pass_and_releases_expired_batch(
+    tmp_path: Path,
+) -> None:
+    bridge, envelope, store_path, controller = _partial_editorial_batch(tmp_path)
+
+    result = controller.abandon_partial_editorial_batch(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+
+    assert result["status"] == "partial_editorial_batch_abandoned"
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "dismissed"
+    with closing(sqlite3.connect(store_path)) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM decisions").fetchone() == (1,)
+        assert connection.execute("SELECT COUNT(*) FROM ack_outbox").fetchone() == (0,)
+        assert connection.execute("SELECT COUNT(*) FROM publication_jobs").fetchone() == (0,)
+        assert connection.execute(
+            "SELECT failure_category,elapsed_ms,route_attestation FROM attempt_diagnostics"
+        ).fetchone() == ("gateway_model_route_unverified", 189000, "failed")
+
+
+def test_partial_editorial_abandon_refuses_unexpired_unknown_or_downstream_batch(
+    tmp_path: Path,
+) -> None:
+    bridge, envelope, store_path, controller = _partial_editorial_batch(tmp_path)
+    with pytest.raises(EditorialError, match="^partial_editorial_abandon_requires_expiry$"):
+        controller.abandon_partial_editorial_batch(
+            envelope["delivery_id"], operator_confirm=True, now=NOW
+        )
+    with EditorialStore(store_path, simulation=False) as store:
+        extra = store.start_attempt(
+            envelope["delivery_id"], None, "editorial_gateway", NOW.isoformat()
+        )
+        del extra
+    assert (
+        controller.abandon_partial_editorial_batch(
+            envelope["delivery_id"], operator_confirm=True, now=_expired()
+        )["status"]
+        == "operator_required"
+    )
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
+
+
+def test_partial_editorial_abandon_is_idempotent_after_bridge_reconciliation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge, envelope, _store_path, controller = _partial_editorial_batch(tmp_path)
+    assert (
+        controller.abandon_partial_editorial_batch(
+            envelope["delivery_id"], operator_confirm=True, now=_expired()
+        )["status"]
+        == "partial_editorial_batch_abandoned"
+    )
+
+
+def test_partial_editorial_abandon_refuses_downstream_evidence(tmp_path: Path) -> None:
+    bridge, envelope, store_path, controller = _partial_editorial_batch(tmp_path)
+    with EditorialStore(store_path, simulation=False) as store, store.transaction():
+        store.connection.execute(
+            "INSERT INTO ack_outbox VALUES (?,?,?, ?,NULL,NULL)",
+            (envelope["delivery_id"], digest(envelope), "pending", NOW.isoformat()),
+        )
+    result = controller.abandon_partial_editorial_batch(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+    assert result["status"] == "operator_required"
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
+
+
+def test_partial_editorial_abandon_recovers_after_bridge_commit_interrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge, envelope, store_path, controller = _partial_editorial_batch(tmp_path)
+    original = bridge.abandon_ambiguous_selection
+
+    def commit_then_interrupt(*args: object, **kwargs: object) -> dict[str, Any]:
+        original(*args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(bridge, "abandon_ambiguous_selection", commit_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        controller.abandon_partial_editorial_batch(
+            envelope["delivery_id"], operator_confirm=True, now=_expired()
+        )
+    with closing(sqlite3.connect(store_path)) as connection:
+        assert connection.execute("SELECT status FROM deliveries").fetchone() == (
+            "partial_editorial_abandon_pending",
+        )
+    monkeypatch.setattr(bridge, "abandon_ambiguous_selection", original)
+    assert (
+        controller.abandon_partial_editorial_batch(
+            envelope["delivery_id"], operator_confirm=True, now=_expired()
+        )["status"]
+        == "partial_editorial_batch_abandoned"
+    )
+    monkeypatch.setattr(
+        bridge,
+        "abandon_ambiguous_selection",
+        lambda *_args, **_kwargs: pytest.fail("terminal recovery must not repeat Bridge mutation"),
+    )
+    assert (
+        controller.abandon_partial_editorial_batch(
+            envelope["delivery_id"], operator_confirm=True, now=_expired()
+        )["status"]
+        == "partial_editorial_batch_abandoned"
+    )
 
 
 def test_operator_abandon_expired_ambiguous_selection_is_terminal_and_side_effect_free(

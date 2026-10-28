@@ -242,7 +242,15 @@ class Controller:
                     utc(now).isoformat(),
                 )
                 return None
-            store.finish_attempt(attempt, utc(now).isoformat(), code)
+            if getattr(self.editor, "gateway_backed", False):
+                store.finish_gateway_attempt(
+                    attempt,
+                    utc(now).isoformat(),
+                    code,
+                    self._gateway_diagnostic(self.editor, error),
+                )
+            else:
+                store.finish_attempt(attempt, utc(now).isoformat(), code)
             store.mark_selection_editorial(delivery, key, "failed")
             return code
         fidelity_attempt: str | None = None
@@ -272,9 +280,20 @@ class Controller:
                 # Creative generation completed; fidelity is a separate policy
                 # gate. Finish both records together so the parent never
                 # remains falsely started after a terminal fidelity outcome.
-                store.finish_attempts(
-                    ((attempt, None), (fidelity_attempt, code)), utc(now).isoformat()
-                )
+                fidelity_editor = getattr(self.fidelity_reviewer, "editor", None)
+                if getattr(fidelity_editor, "gateway_backed", False):
+                    assert fidelity_attempt is not None
+                    store.finish_fidelity_gateway_failure(
+                        attempt,
+                        fidelity_attempt,
+                        utc(now).isoformat(),
+                        code,
+                        self._gateway_diagnostic(fidelity_editor, error),
+                    )
+                else:
+                    store.finish_attempts(
+                        ((attempt, None), (fidelity_attempt, code)), utc(now).isoformat()
+                    )
                 store.mark_selection_editorial(delivery, key, "failed")
                 return code
         self._fresh(envelope, now)
@@ -385,6 +404,41 @@ class Controller:
         }:
             return "editorial_gateway_attestation_invalid"
         return "editorial_execution_failed"
+
+    @staticmethod
+    def _gateway_diagnostic(adapter: Any, error: Exception) -> dict[str, Any]:
+        """Return scalar Gateway evidence only; never retain a response or prompt."""
+
+        raw = str(error)
+        observed = getattr(adapter, "last_diagnostics", None)
+        observed = observed if isinstance(observed, dict) else {}
+        category = observed.get("failure_category")
+        if not isinstance(category, str) or not category.startswith("gateway_"):
+            category = raw if raw.startswith("gateway_") else "gateway_diagnostic_unavailable"
+        completion = getattr(adapter, "last_completion", None)
+        completion = completion if isinstance(completion, dict) else {}
+        terminal = observed.get("terminal_completion_attested") is True
+        route = "failed" if raw == "gateway_model_route_unverified" else "unknown"
+        cost = "failed" if raw == "gateway_cost_unverified" else "not_checked"
+        tools = (
+            "failed"
+            if raw.startswith("gateway_tool_")
+            or raw in {"gateway_tools_exposed", "gateway_tools_used"}
+            else "unknown"
+        )
+        if terminal:
+            route = "passed" if route != "failed" else route
+            tools = "passed" if tools != "failed" else tools
+        return {
+            "failure_category": category,
+            "child_exit_status": observed.get("child_exit_status"),
+            "elapsed_ms": observed.get("elapsed_ms"),
+            "terminal_receipt": terminal,
+            "route_attestation": route,
+            "cost_attestation": cost,
+            "tool_attestation": tools,
+            "terminal_disposition": completion.get("terminal_disposition"),
+        }
 
     @staticmethod
     def _terminal_rejection(code: str, adapter: Any) -> bool:
@@ -1308,6 +1362,116 @@ class Controller:
             terminal_status="selection_attestation_abandoned",
             terminal_error="selection_attestation_missing_abandoned",
         )
+
+    def abandon_partial_editorial_batch(
+        self, delivery: str, *, operator_confirm: bool = False, now: datetime | None = None
+    ) -> dict[str, Any]:
+        """Terminally dismiss one expired mixed-result Gateway batch without publication."""
+
+        if operator_confirm is not True:
+            raise EditorialError("partial_editorial_abandon_confirmation_required")
+        clock = utc(now)
+        with self._store(readonly=True) as store:
+            persisted = store.persisted_delivery(delivery)
+        if persisted is None:
+            raise EditorialError("partial_editorial_abandon_delivery_mismatch")
+        persisted_digest, raw_persisted = persisted
+        envelope = _stored_envelope(raw_persisted)
+        validate_input(envelope, clock, allow_expired=True)
+        if envelope["delivery_id"] != delivery or digest(envelope) != persisted_digest:
+            raise EditorialError("persisted_delivery_invalid")
+        try:
+            current = self._read()
+        except FileNotFoundError:
+            current = None
+        live_inbox = False
+        if isinstance(current, dict) and current.get("delivery_id") is not None:
+            validate_input(current, clock, allow_expired=True)
+            if (
+                current.get("delivery_id") != delivery
+                or digest(current) != persisted_digest
+                or current.get("bridge_schema_version") != envelope["bridge_schema_version"]
+                or current.get("expires_at") != envelope["expires_at"]
+            ):
+                return {
+                    "delivery_id": delivery,
+                    "status": "operator_required",
+                    "error_code": "partial_editorial_abandon_inbox_mismatch",
+                    "simulation": self.simulation,
+                }
+            live_inbox = True
+        if timestamp(envelope["expires_at"]) > clock:
+            raise EditorialError("partial_editorial_abandon_requires_expiry")
+        expected = digest(envelope)
+        try:
+            receipt = self.bridge.inspect_delivery(delivery)
+            if (
+                receipt.get("delivery_id") != delivery
+                or receipt.get("payload_digest") != expected
+                or receipt.get("schema_version") != envelope["bridge_schema_version"]
+                or receipt.get("expires_at") != envelope["expires_at"]
+                or receipt.get("status") not in {"pending", "dismissed"}
+                or (receipt.get("status") == "pending" and not live_inbox)
+                or (
+                    receipt.get("status") == "pending"
+                    and not callable(getattr(self.bridge, "abandon_ambiguous_selection", None))
+                )
+            ):
+                raise EditorialError("bridge_authority_mismatch")
+        except (EditorialError, io.BridgeError, OSError, KeyError, TypeError):
+            return {
+                "delivery_id": delivery,
+                "status": "operator_required",
+                "error_code": "partial_editorial_abandon_authority_unknown",
+                "simulation": self.simulation,
+            }
+        try:
+            with self._store() as store:
+                reserved = store.begin_partial_editorial_abandon(envelope, clock.isoformat())
+                if not reserved:
+                    result = self._result(store, delivery)
+                    if (
+                        result["status"] == "partial_editorial_batch_abandoned"
+                        and receipt["status"] == "dismissed"
+                    ):
+                        return self._selection_abandon_result(
+                            store,
+                            delivery,
+                            recovered=1,
+                            terminal_status="partial_editorial_batch_abandoned",
+                            terminal_error="partial_editorial_batch_abandoned",
+                        )
+                    result["status"] = "operator_required"
+                    return result
+                if receipt["status"] == "pending":
+                    try:
+                        receipt = self.bridge.abandon_ambiguous_selection(delivery, expected, clock)
+                    except (EditorialError, io.BridgeError, OSError, KeyError, TypeError):
+                        receipt = self.bridge.inspect_delivery(delivery)
+                if (
+                    receipt.get("delivery_id") != delivery
+                    or receipt.get("payload_digest") != expected
+                    or receipt.get("schema_version") != envelope["bridge_schema_version"]
+                    or receipt.get("expires_at") != envelope["expires_at"]
+                    or receipt.get("status") != "dismissed"
+                ):
+                    store.fail_partial_editorial_abandon(delivery)
+                    return self._result(store, delivery)
+                store.finish_partial_editorial_abandon(delivery)
+                return self._selection_abandon_result(
+                    store,
+                    delivery,
+                    recovered=1,
+                    terminal_status="partial_editorial_batch_abandoned",
+                    terminal_error="partial_editorial_batch_abandoned",
+                )
+        except (EditorialError, io.BridgeError, OSError, sqlite3.Error, TypeError):
+            return {
+                "delivery_id": delivery,
+                "status": "operator_required",
+                "error_code": "partial_editorial_abandon_reconciliation_uncertain",
+                "simulation": self.simulation,
+            }
 
     def reconsider(self, candidate_key: str, now: datetime | None = None) -> dict[str, Any]:
         if len(candidate_key) != 64 or any(c not in "0123456789abcdef" for c in candidate_key):
