@@ -6,7 +6,7 @@ import os
 import sqlite3
 import uuid
 from collections.abc import Iterator
-from contextlib import closing, contextmanager
+from contextlib import closing, contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -119,10 +119,14 @@ class EditorialStore:
         simulation: bool,
         protected_roots: tuple[Path, ...] = (),
         readonly: bool = False,
+        allow_legacy_readonly: bool = False,
     ):
+        if type(allow_legacy_readonly) is not bool or (allow_legacy_readonly and not readonly):
+            raise EditorialError("editorial_store_mode_invalid")
         self.path = Path(path)
         self.simulation = simulation
         self.readonly = readonly
+        self.allow_legacy_readonly = allow_legacy_readonly
         io.path_parts(self.path)
         if not self.path.name or not self.path.suffix or self.path.parent == Path("/"):
             raise EditorialError("editorial_store_path_invalid")
@@ -314,19 +318,23 @@ class EditorialStore:
                 except sqlite3.Error:
                     raise EditorialError("editorial_schema_invalid") from None
                 version = 5
+            legacy_readonly = False
             if version == 5:
-                if self.readonly:
+                if self.readonly and not self.allow_legacy_readonly:
                     raise EditorialError("editorial_schema_migration_required")
                 if _schema(self.connection) != _expected_schema(_SCHEMA_V5):
                     raise EditorialError("editorial_schema_invalid")
-                try:
-                    with self.transaction():
-                        self.connection.execute(_ATTEMPT_DIAGNOSTICS)
-                        self.connection.execute("PRAGMA user_version=6")
-                except sqlite3.Error:
-                    raise EditorialError("editorial_schema_invalid") from None
-                version = 6
-            if _schema(self.connection) != _expected_schema():
+                if self.readonly:
+                    legacy_readonly = True
+                else:
+                    try:
+                        with self.transaction():
+                            self.connection.execute(_ATTEMPT_DIAGNOSTICS)
+                            self.connection.execute("PRAGMA user_version=6")
+                    except sqlite3.Error:
+                        raise EditorialError("editorial_schema_invalid") from None
+                    version = 6
+            if not legacy_readonly and _schema(self.connection) != _expected_schema():
                 raise EditorialError("editorial_schema_invalid")
             if self.connection.execute("PRAGMA quick_check").fetchall()[0][0] != "ok":
                 raise EditorialError("editorial_store_corrupt")
@@ -1386,7 +1394,14 @@ class EditorialStore:
             uncertain_error="selection_attestation_missing_abandon_uncertain",
         )
 
-    def begin_partial_editorial_abandon(self, envelope: dict[str, Any], clock: str) -> bool:
+    def preflight_partial_editorial_abandon(self, envelope: dict[str, Any], clock: str) -> bool:
+        """Read-only proof for a partial-batch abandon, including schema v5."""
+
+        return self.begin_partial_editorial_abandon(envelope, clock, preflight=True)
+
+    def begin_partial_editorial_abandon(
+        self, envelope: dict[str, Any], clock: str, *, preflight: bool = False
+    ) -> bool:
         """Reserve an expired, mixed-result Gateway batch for terminal abandonment.
 
         This is intentionally narrower than ordinary recovery.  It preserves
@@ -1395,9 +1410,12 @@ class EditorialStore:
         delivery can only be dismissed after this proof succeeds.
         """
 
+        if type(preflight) is not bool:
+            raise EditorialError("editorial_recovery_mode_invalid")
         delivery = envelope["delivery_id"]
         expected = digest(envelope)
-        with self.transaction():
+        transaction = nullcontext() if preflight else self.transaction()
+        with transaction:
             row = self.connection.execute(
                 "SELECT payload_digest,payload,status,ack_status,error_code FROM deliveries "
                 "WHERE delivery_id=?",
@@ -1583,6 +1601,8 @@ class EditorialStore:
                 is not None
             ):
                 return False
+            if preflight:
+                return True
             self.connection.execute(
                 "UPDATE deliveries SET status='partial_editorial_abandon_pending',"
                 "error_code='partial_editorial_batch_abandon_pending' WHERE delivery_id=?",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from contextlib import closing
+from contextlib import closing, contextmanager
 from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
@@ -104,6 +104,14 @@ def _ambiguous_selection(
 
 def _expired() -> object:
     return NOW + timedelta(hours=3)
+
+
+def _downgrade_partial_batch_store_to_v5(path: Path) -> None:
+    """Model the accepted production Store before the v1.0.7 schema migration."""
+
+    with closing(sqlite3.connect(path)) as connection, connection:
+        connection.execute("DROP TABLE attempt_diagnostics")
+        connection.execute("PRAGMA user_version=5")
 
 
 def _partial_editorial_batch(
@@ -278,6 +286,150 @@ def test_partial_editorial_abandon_accepts_production_nonselected_policy_history
         assert connection.execute("SELECT COUNT(*) FROM decisions").fetchone() == (9,)
         assert connection.execute("SELECT COUNT(*) FROM publication_jobs").fetchone() == (0,)
         assert connection.execute("SELECT COUNT(*) FROM ack_outbox").fetchone() == (0,)
+
+
+def test_partial_editorial_abandon_cli_migrates_v5_production_batch_and_is_idempotent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bridge, envelope, store_path, _controller = _partial_editorial_batch(
+        tmp_path, production_shape=True
+    )
+    _downgrade_partial_batch_store_to_v5(store_path)
+    with closing(sqlite3.connect(store_path)) as connection:
+        before_decisions = connection.execute(
+            "SELECT candidate_key,revision,decision,request,result,created_at FROM decisions "
+            "ORDER BY candidate_key,revision"
+        ).fetchall()
+        before_attempts = connection.execute(
+            "SELECT attempt_id,delivery_id,candidate_key,operation,status,started_at,finished_at,"
+            "error_code FROM attempts ORDER BY attempt_id"
+        ).fetchall()
+        assert connection.execute("PRAGMA user_version").fetchone() == (5,)
+
+    arguments = _cli_arguments(
+        bridge, store_path, envelope["delivery_id"], command="abandon-partial-editorial-batch"
+    )
+    assert main(arguments) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "partial_editorial_batch_abandoned"
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "dismissed"
+    assert main(arguments) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "partial_editorial_batch_abandoned"
+    with closing(sqlite3.connect(store_path)) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (6,)
+        assert (
+            connection.execute(
+                "SELECT candidate_key,revision,decision,request,result,created_at FROM decisions "
+                "ORDER BY candidate_key,revision"
+            ).fetchall()
+            == before_decisions
+        )
+        assert (
+            connection.execute(
+                "SELECT attempt_id,delivery_id,candidate_key,operation,status,started_at,"
+                "finished_at,"
+                "error_code FROM attempts ORDER BY attempt_id"
+            ).fetchall()
+            == before_attempts
+        )
+        assert connection.execute("SELECT COUNT(*) FROM publication_jobs").fetchone() == (0,)
+        assert connection.execute("SELECT COUNT(*) FROM ack_outbox").fetchone() == (0,)
+
+
+def test_partial_editorial_abandon_v5_preflight_does_not_migrate_before_ttl(
+    tmp_path: Path,
+) -> None:
+    _bridge, envelope, store_path, controller = _partial_editorial_batch(
+        tmp_path, production_shape=True
+    )
+    _downgrade_partial_batch_store_to_v5(store_path)
+
+    with pytest.raises(EditorialError, match="^partial_editorial_abandon_requires_expiry$"):
+        controller.abandon_partial_editorial_batch(
+            envelope["delivery_id"], operator_confirm=True, now=NOW
+        )
+    with closing(sqlite3.connect(store_path)) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (5,)
+
+
+def test_partial_editorial_abandon_v5_migration_failure_leaves_bridge_and_history_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge, envelope, store_path, controller = _partial_editorial_batch(
+        tmp_path, production_shape=True
+    )
+    _downgrade_partial_batch_store_to_v5(store_path)
+    with closing(sqlite3.connect(store_path)) as connection:
+        before = connection.execute("SELECT COUNT(*) FROM decisions").fetchone()
+    original = EditorialStore.transaction
+
+    @contextmanager
+    def fail_migration(_store: EditorialStore):
+        raise sqlite3.OperationalError("synthetic migration failure")
+        yield
+
+    monkeypatch.setattr(EditorialStore, "transaction", fail_migration)
+    result = controller.abandon_partial_editorial_batch(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+    monkeypatch.setattr(EditorialStore, "transaction", original)
+
+    assert result["status"] == "operator_required"
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
+    with closing(sqlite3.connect(store_path)) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (5,)
+        assert connection.execute("SELECT COUNT(*) FROM decisions").fetchone() == before
+
+
+def test_partial_editorial_abandon_v5_refuses_corrupt_bridge_receipt_without_migration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge, envelope, store_path, controller = _partial_editorial_batch(
+        tmp_path, production_shape=True
+    )
+    _downgrade_partial_batch_store_to_v5(store_path)
+    receipt = bridge.inspect_delivery(envelope["delivery_id"])
+    receipt["payload_digest"] = "0" * 64
+    monkeypatch.setattr(bridge, "inspect_delivery", lambda _delivery: receipt)
+
+    result = controller.abandon_partial_editorial_batch(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+
+    assert result["error_code"] == "partial_editorial_abandon_authority_unknown"
+    with closing(sqlite3.connect(store_path)) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (5,)
+
+
+def test_partial_editorial_abandon_v5_recovers_bridge_commit_interrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge, envelope, store_path, controller = _partial_editorial_batch(
+        tmp_path, production_shape=True
+    )
+    _downgrade_partial_batch_store_to_v5(store_path)
+    original = bridge.abandon_ambiguous_selection
+
+    def commit_then_interrupt(*args: object, **kwargs: object) -> dict[str, Any]:
+        original(*args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(bridge, "abandon_ambiguous_selection", commit_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        controller.abandon_partial_editorial_batch(
+            envelope["delivery_id"], operator_confirm=True, now=_expired()
+        )
+    with closing(sqlite3.connect(store_path)) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone() == (6,)
+        assert connection.execute("SELECT status FROM deliveries").fetchone() == (
+            "partial_editorial_abandon_pending",
+        )
+    monkeypatch.setattr(bridge, "abandon_ambiguous_selection", original)
+    assert (
+        controller.abandon_partial_editorial_batch(
+            envelope["delivery_id"], operator_confirm=True, now=_expired()
+        )["status"]
+        == "partial_editorial_batch_abandoned"
+    )
 
 
 @pytest.mark.parametrize("corruption", ["failed_attempt", "wrong_decision"])

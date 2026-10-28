@@ -102,7 +102,7 @@ The final compatibility target is site commit
 `ca112b2ab89a7ec0d82b85b06df07bb86a35b41c`; see the
 [final operator handoff](docs/WAAGD_DISCOVERY_STABLE_HANDOFF.md).
 
-v1.0.8 is the production partial-batch recovery compatibility hotfix for the accepted Discovery-to-publication chain.
+v1.0.9 is the production partial-batch recovery migration hotfix for the accepted Discovery-to-publication chain.
 It retains the Docker Discovery Scheduler, isolated Bridge and Editorial state,
 OpenClaw tool-free Gateway restricted to `openrouter/openrouter/free`, Fidelity,
 immutable PublicationIntent delivery, ACK reconciliation and the Bangkok daily
@@ -115,7 +115,8 @@ in the [v1.0.0 release guide](docs/RELEASE_1_0_0.md), the
 [v1.0.5 route-attestation recovery hotfix](docs/HOTFIX_1_0_5_ROUTE_ATTESTATION.md), and the
 [v1.0.6 OpenClaw attestation-format hotfix](docs/HOTFIX_1_0_6_OPENCLAW_ATTESTATION.md), and the
 [v1.0.7 Gateway diagnostics hotfix](docs/HOTFIX_1_0_7_GATEWAY_BATCH_RECOVERY.md), and the
-[v1.0.8 partial-batch compatibility hotfix](docs/HOTFIX_1_0_8_PARTIAL_BATCH_COMPATIBILITY.md).
+[v1.0.8 partial-batch compatibility hotfix](docs/HOTFIX_1_0_8_PARTIAL_BATCH_COMPATIBILITY.md), and the
+[v1.0.9 partial-batch migration hotfix](docs/HOTFIX_1_0_9_PARTIAL_BATCH_MIGRATION.md).
 
 ## Development
 

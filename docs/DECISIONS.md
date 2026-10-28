@@ -225,3 +225,9 @@
     their exact delivery/revision-bound decisions and valid stored request and
     result, while rejecting every failed, repeated, started or unknown
     nonselected Gateway attempt. It does not alter or publish any decision.
+
+49. v1.0.9 permits a narrowly scoped, read-only schema-v5 preflight for the
+    partial-batch operator recovery. It proves Bridge authority, expiry,
+    persisted delivery and absence of downstream effects before the normal
+    forward-only v5-to-v6 migration. The writable Store then repeats Bridge and
+    recovery checks before it reserves or dismisses anything.

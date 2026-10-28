@@ -98,11 +98,14 @@ class Controller:
         # Validate overlaps before even reading an inbox or constructing a store.
         EditorialStore(self.store_path, simulation=simulation, protected_roots=self.protected_roots)
 
-    def _store(self, *, readonly: bool = False) -> EditorialStore:
+    def _store(
+        self, *, readonly: bool = False, allow_legacy_readonly: bool = False
+    ) -> EditorialStore:
         return EditorialStore(
             self.store_path,
             simulation=self.simulation,
             readonly=readonly,
+            allow_legacy_readonly=allow_legacy_readonly,
             protected_roots=self.protected_roots,
         )
 
@@ -1371,7 +1374,7 @@ class Controller:
         if operator_confirm is not True:
             raise EditorialError("partial_editorial_abandon_confirmation_required")
         clock = utc(now)
-        with self._store(readonly=True) as store:
+        with self._store(readonly=True, allow_legacy_readonly=True) as store:
             persisted = store.persisted_delivery(delivery)
         if persisted is None:
             raise EditorialError("partial_editorial_abandon_delivery_mismatch")
@@ -1426,7 +1429,49 @@ class Controller:
                 "simulation": self.simulation,
             }
         try:
+            with self._store(readonly=True, allow_legacy_readonly=True) as store:
+                preflight = store.preflight_partial_editorial_abandon(envelope, clock.isoformat())
+                if not preflight:
+                    result = self._result(store, delivery)
+                    if (
+                        result["status"] == "partial_editorial_batch_abandoned"
+                        and receipt["status"] == "dismissed"
+                    ):
+                        return self._selection_abandon_result(
+                            store,
+                            delivery,
+                            recovered=1,
+                            terminal_status="partial_editorial_batch_abandoned",
+                            terminal_error="partial_editorial_batch_abandoned",
+                        )
+                    result["status"] = "operator_required"
+                    return result
+        except (EditorialError, io.BridgeError, OSError, sqlite3.Error, TypeError):
+            return {
+                "delivery_id": delivery,
+                "status": "operator_required",
+                "error_code": "partial_editorial_abandon_preflight_uncertain",
+                "simulation": self.simulation,
+            }
+        try:
             with self._store() as store:
+                # Opening a v5 Store performs the forward-only v5->v6
+                # migration. Re-read Bridge immediately afterwards, then rerun
+                # the complete Store proof before recording any terminal state.
+                receipt = self.bridge.inspect_delivery(delivery)
+                if (
+                    receipt.get("delivery_id") != delivery
+                    or receipt.get("payload_digest") != expected
+                    or receipt.get("schema_version") != envelope["bridge_schema_version"]
+                    or receipt.get("expires_at") != envelope["expires_at"]
+                    or receipt.get("status") not in {"pending", "dismissed"}
+                    or (receipt.get("status") == "pending" and not live_inbox)
+                    or (
+                        receipt.get("status") == "pending"
+                        and not callable(getattr(self.bridge, "abandon_ambiguous_selection", None))
+                    )
+                ):
+                    raise EditorialError("bridge_authority_mismatch")
                 reserved = store.begin_partial_editorial_abandon(envelope, clock.isoformat())
                 if not reserved:
                     result = self._result(store, delivery)
