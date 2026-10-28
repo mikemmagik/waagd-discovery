@@ -570,10 +570,64 @@ def test_gateway_requires_the_configured_openrouter_free_route(tmp_path: Path) -
     with pytest.raises(EditorialError, match="^gateway_model_route_unverified$"):
         editor._parse(json.dumps(response).encode(), request())
 
-    response["result"]["meta"]["agentMeta"]["terminalReceipt"]["requested"]["model"] = (
-        "openrouter/openrouter/free"
-    )
+    receipt = response["result"]["meta"]["agentMeta"]["terminalReceipt"]
+    receipt["requested"] = {"provider": "openrouter", "model": "openrouter/free"}
+    receipt["effective"] = {
+        "provider": "openrouter",
+        "model": "openrouter/free",
+        "responseModel": "dots-studio/dots-3-note-preview:free",
+    }
+    receipt["rerouted"] = True
+    receipt["fallbackUsed"] = False
+    receipt["modelRouteChange"] = {
+        "from": "openrouter/openrouter/free",
+        "to": "openrouter/dots-studio/dots-3-note-preview:free",
+    }
     assert editor._parse(json.dumps(response).encode(), request())["decision"] == "READY_FOR_REVIEW"
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda receipt: receipt["requested"].update({"provider": "other"}),
+        lambda receipt: receipt["requested"].update({"model": "other/free"}),
+        lambda receipt: receipt["effective"].update({"provider": "other"}),
+        lambda receipt: receipt["effective"].update({"model": "other/free"}),
+        lambda receipt: receipt["effective"].update({"responseModel": "vendor/paid-model"}),
+        lambda receipt: receipt.update({"rerouted": False}),
+        lambda receipt: receipt.update({"fallbackUsed": True}),
+        lambda receipt: receipt.update({"fallbacks": ["paid/model"]}),
+        lambda receipt: receipt["modelRouteChange"].update({"from": "other/free"}),
+        lambda receipt: receipt["modelRouteChange"].update({"to": "openrouter/paid/model"}),
+        lambda receipt: receipt.pop("fallbackUsed"),
+        lambda receipt: receipt.pop("modelRouteChange"),
+        lambda receipt: receipt["effective"].pop("responseModel"),
+    ],
+)
+def test_gateway_rejects_unattested_openrouter_free_route_variants(
+    tmp_path: Path, mutate: Any
+) -> None:
+    response = openclaw_2026_10_3()
+    receipt = response["result"]["meta"]["agentMeta"]["terminalReceipt"]
+    receipt["requested"] = {"provider": "openrouter", "model": "openrouter/free"}
+    receipt["effective"] = {
+        "provider": "openrouter",
+        "model": "openrouter/free",
+        "responseModel": "dots-studio/dots-3-note-preview:free",
+    }
+    receipt["rerouted"] = True
+    receipt["fallbackUsed"] = False
+    receipt["modelRouteChange"] = {
+        "from": "openrouter/openrouter/free",
+        "to": "openrouter/dots-studio/dots-3-note-preview:free",
+    }
+    mutate(receipt)
+    editor = GatewayEditor(
+        fake_cli(tmp_path, json.dumps(response).encode()),
+        required_model_route="openrouter/openrouter/free",
+    )
+    with pytest.raises(EditorialError, match="^gateway_model_route_unverified$"):
+        editor._parse(json.dumps(response).encode(), request())
 
 
 @pytest.mark.parametrize("route", ["openrouter/other/free", "paid/provider-model", ""])

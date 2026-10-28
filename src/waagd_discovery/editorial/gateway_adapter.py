@@ -25,6 +25,11 @@ from waagd_discovery.editorial.trusted_publishers import sensitive_risks
 
 _MAXIMUM = 128 * 1024
 _OPENROUTER_FREE_ROUTE = "openrouter/openrouter/free"
+_OPENROUTER_FREE_PROVIDER = "openrouter"
+_OPENROUTER_FREE_MODEL = "openrouter/free"
+_DYNAMIC_OPENROUTER_FREE_MODEL = re.compile(
+    r"[a-z0-9][a-z0-9._-]{0,63}/[a-z0-9][a-z0-9._:-]{0,127}:free"
+)
 _OUTPUT_GUIDE = (
     b"WAAGD style: write sharp, dry, intelligent, deadpan absurdist satire for an international "
     b"English-speaking audience. Find one independent satirical angle, rather than retelling the "
@@ -699,6 +704,9 @@ class GatewayEditor:
             "requested",
             "effective",
             "rerouted",
+            "fallbackUsed",
+            "fallbacks",
+            "modelRouteChange",
             "terminalDisposition",
         }
         if (
@@ -733,12 +741,37 @@ class GatewayEditor:
                 raise EditorialError("gateway_tool_attestation_missing")
         if self.required_model_route is not None:
             requested = receipt.get("requested")
+            effective = receipt.get("effective")
+            rerouted = receipt.get("rerouted")
+            fallback_used = receipt.get("fallbackUsed")
+            route_change = receipt.get("modelRouteChange")
             if (
                 not isinstance(requested, dict)
-                or requested.get("model") != self.required_model_route
+                or set(requested) != {"provider", "model"}
+                or requested.get("provider") != _OPENROUTER_FREE_PROVIDER
+                or requested.get("model") != _OPENROUTER_FREE_MODEL
+                or not isinstance(effective, dict)
+                or set(effective) != {"provider", "model", "responseModel"}
+                or effective.get("provider") != _OPENROUTER_FREE_PROVIDER
+                or effective.get("model") != _OPENROUTER_FREE_MODEL
+                or not isinstance(effective.get("responseModel"), str)
+                or _DYNAMIC_OPENROUTER_FREE_MODEL.fullmatch(effective["responseModel"]) is None
+                or rerouted is not True
+                or fallback_used is not False
+                or not isinstance(route_change, dict)
+                or set(route_change) != {"from", "to"}
+                or route_change.get("from") != _OPENROUTER_FREE_ROUTE
+                or route_change.get("to")
+                != f"{_OPENROUTER_FREE_PROVIDER}/{effective['responseModel']}"
+            ):
+                raise EditorialError("gateway_model_route_unverified")
+            if "fallbacks" in receipt and (
+                not isinstance(receipt["fallbacks"], list) or receipt["fallbacks"]
             ):
                 raise EditorialError("gateway_model_route_unverified")
         if "rerouted" in receipt and type(receipt["rerouted"]) is not bool:
+            raise EditorialError("gateway_tool_attestation_missing")
+        if "fallbackUsed" in receipt and type(receipt["fallbackUsed"]) is not bool:
             raise EditorialError("gateway_tool_attestation_missing")
         if "terminalDisposition" in receipt and receipt["terminalDisposition"] not in {
             "visible",

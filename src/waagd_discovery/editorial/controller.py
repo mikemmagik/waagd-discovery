@@ -664,14 +664,20 @@ class Controller:
         }
 
     def _selection_abandon_result(
-        self, store: EditorialStore, delivery: str, *, recovered: int
+        self,
+        store: EditorialStore,
+        delivery: str,
+        *,
+        recovered: int,
+        terminal_status: str,
+        terminal_error: str,
     ) -> dict[str, Any]:
         result = self._result(store, delivery)
-        result["status"] = "selection_abandoned"
-        result["error_code"] = "selection_outcome_unknown_abandoned"
+        result["status"] = terminal_status
+        result["error_code"] = terminal_error
         result["operational"] = {
             "stage": "editorial",
-            "failure_category": "selection_outcome_unknown_abandoned",
+            "failure_category": terminal_error,
             "recovered": recovered,
             "quarantined": 0,
             "operator_required": False,
@@ -1107,10 +1113,17 @@ class Controller:
             store.mark_delivery(delivery, "processing", None)
         return self.process(now)
 
-    def abandon_ambiguous_selection(
-        self, delivery: str, *, operator_confirm: bool = False, now: datetime | None = None
+    def _abandon_terminal_selection(
+        self,
+        delivery: str,
+        *,
+        operator_confirm: bool,
+        now: datetime | None,
+        selection_error: str,
+        terminal_status: str,
+        terminal_error: str,
     ) -> dict[str, Any]:
-        """Explicitly abandon one expired, ambiguous Gateway selection.
+        """Explicitly abandon one expired, terminal Gateway selection failure.
 
         This is deliberately distinct from selection retry and expiry quarantine.
         It neither invokes a Gateway adapter nor creates an ACK; it only releases
@@ -1185,19 +1198,37 @@ class Controller:
             }
         try:
             with self._store() as store:
-                reserved = store.begin_selection_abandon(envelope, clock.isoformat())
+                if selection_error == "selection_outcome_unknown":
+                    reserved = store.begin_selection_abandon(envelope, clock.isoformat())
+                    finish = store.finish_selection_abandon
+                    fail = store.fail_selection_abandon
+                else:
+                    reserved = store.begin_selection_attestation_abandon(
+                        envelope, clock.isoformat()
+                    )
+                    finish = store.finish_selection_attestation_abandon
+                    fail = store.fail_selection_attestation_abandon
                 if not reserved:
                     result = self._result(store, delivery)
-                    if (
-                        result["status"] == "selection_abandoned"
-                        and receipt["status"] == "dismissed"
-                    ):
-                        return self._selection_abandon_result(store, delivery, recovered=1)
+                    if result["status"] == terminal_status and receipt["status"] == "dismissed":
+                        return self._selection_abandon_result(
+                            store,
+                            delivery,
+                            recovered=1,
+                            terminal_status=terminal_status,
+                            terminal_error=terminal_error,
+                        )
                     result["status"] = "operator_required"
                     return result
                 if receipt["status"] == "dismissed":
-                    store.finish_selection_abandon(delivery)
-                    return self._selection_abandon_result(store, delivery, recovered=1)
+                    finish(delivery)
+                    return self._selection_abandon_result(
+                        store,
+                        delivery,
+                        recovered=1,
+                        terminal_status=terminal_status,
+                        terminal_error=terminal_error,
+                    )
                 try:
                     abandoned = self.bridge.abandon_ambiguous_selection(delivery, expected, clock)
                     if (
@@ -1227,10 +1258,16 @@ class Controller:
                         or reconciled.get("expires_at") != envelope["expires_at"]
                         or reconciled.get("status") != "dismissed"
                     ):
-                        store.fail_selection_abandon(delivery)
+                        fail(delivery)
                         return self._result(store, delivery)
-                store.finish_selection_abandon(delivery)
-                return self._selection_abandon_result(store, delivery, recovered=1)
+                finish(delivery)
+                return self._selection_abandon_result(
+                    store,
+                    delivery,
+                    recovered=1,
+                    terminal_status=terminal_status,
+                    terminal_error=terminal_error,
+                )
         except (EditorialError, io.BridgeError, OSError, sqlite3.Error, TypeError):
             return {
                 "delivery_id": delivery,
@@ -1245,6 +1282,32 @@ class Controller:
                     "operator_required": True,
                 },
             }
+
+    def abandon_ambiguous_selection(
+        self, delivery: str, *, operator_confirm: bool = False, now: datetime | None = None
+    ) -> dict[str, Any]:
+        return self._abandon_terminal_selection(
+            delivery,
+            operator_confirm=operator_confirm,
+            now=now,
+            selection_error="selection_outcome_unknown",
+            terminal_status="selection_abandoned",
+            terminal_error="selection_outcome_unknown_abandoned",
+        )
+
+    def abandon_selection_attestation(
+        self, delivery: str, *, operator_confirm: bool = False, now: datetime | None = None
+    ) -> dict[str, Any]:
+        """Explicitly abandon one expired terminal selection-attestation failure."""
+
+        return self._abandon_terminal_selection(
+            delivery,
+            operator_confirm=operator_confirm,
+            now=now,
+            selection_error="selection_attestation_missing",
+            terminal_status="selection_attestation_abandoned",
+            terminal_error="selection_attestation_missing_abandoned",
+        )
 
     def reconsider(self, candidate_key: str, now: datetime | None = None) -> dict[str, Any]:
         if len(candidate_key) != 64 or any(c not in "0123456789abcdef" for c in candidate_key):

@@ -223,6 +223,9 @@ def main(argv: list[str] | None = None) -> int:
     abandon_selection = commands.add_parser("abandon-ambiguous-selection")
     abandon_selection.add_argument("--delivery-id", required=True)
     abandon_selection.add_argument("--operator-confirm", action="store_true")
+    abandon_attestation = commands.add_parser("abandon-selection-attestation")
+    abandon_attestation.add_argument("--delivery-id", required=True)
+    abandon_attestation.add_argument("--operator-confirm", action="store_true")
     commands.add_parser("status")
     reconsider = commands.add_parser("reconsider")
     reconsider.add_argument("--candidate-key", required=True)
@@ -230,7 +233,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = load_config(args.config)
         gateway = args.command in {"gateway-process", "gateway-stage", "retry-selection"}
-        operator_abandon = args.command == "abandon-ambiguous-selection"
+        operator_abandon = args.command in {
+            "abandon-ambiguous-selection",
+            "abandon-selection-attestation",
+        }
         if (args.allow_ack and not gateway) or (
             not args.simulation
             and args.command != "status"
@@ -345,6 +351,10 @@ def main(argv: list[str] | None = None) -> int:
                 result = instance.retry_selection(args.delivery_id)
             elif args.command == "abandon-ambiguous-selection":
                 result = instance.abandon_ambiguous_selection(
+                    args.delivery_id, operator_confirm=args.operator_confirm
+                )
+            elif args.command == "abandon-selection-attestation":
+                result = instance.abandon_selection_attestation(
                     args.delivery_id, operator_confirm=args.operator_confirm
                 )
             else:

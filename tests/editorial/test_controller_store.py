@@ -346,8 +346,15 @@ def real_selector_executable(tmp_path):
         "  'The fictional institution filed another meeting and called it progress.'\n"
         "] * 12)})\n"
         "print(json.dumps({'status':'ok','result':{'payloads':[{'text':text}],"
-        "'meta':{'agentMeta':{'costUsd':0.0,'terminalReceipt':{'successfulToolNames':[],"
-        "'requested':{'model':'openrouter/openrouter/free'}},"
+        "'meta':{'agentMeta':{'costUsd':0.0,'terminalReceipt':{"
+        "'successfulToolNames':[],'runId':'run','sessionId':'session','turnId':'turn',"
+        "'requested':{'provider':'openrouter','model':'openrouter/free'},"
+        "'effective':{'provider':'openrouter','model':'openrouter/free',"
+        "'responseModel':'dots-studio/dots-3-note-preview:free'},"
+        "'rerouted':True,'fallbackUsed':False,"
+        "'modelRouteChange':{'from':'openrouter/openrouter/free',"
+        "'to':'openrouter/dots-studio/dots-3-note-preview:free'},"
+        "'terminalDisposition':'visible'},"
         "'codeModeEngaged':False},'systemPromptReport':{'tools':{'entries':[]}}}}}))\n"
     )
     path.chmod(0o700)

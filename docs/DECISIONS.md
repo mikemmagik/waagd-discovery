@@ -196,3 +196,12 @@
     ambiguous selection attempt and rejects every unfinished, unknown,
     editorial, Gateway, Fidelity, export, ACK, decision, PublicationIntent and
     Site trace. The verification and selection history is never modified.
+
+45. v1.0.5 attests the required OpenRouter Free route as the exact provider and
+    model pair `openrouter` / `openrouter/free` in both requested and effective
+    fields. A `rerouted` run is accepted only with `fallbackUsed=false`, a
+    separately attested dynamic `:free` response model, and a matching route
+    transition from `openrouter/openrouter/free`; any reported fallback fails.
+    The only new terminal recovery is an expired, operator-confirmed
+    `selection_attestation_missing`; it requires a completed failed selection
+    history and preserves all records.

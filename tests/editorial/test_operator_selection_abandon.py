@@ -34,7 +34,11 @@ class NoSelection:
 
 
 def _ambiguous_selection(
-    tmp_path: Path, *, candidate_count: int = 1, completed_verifications: bool = False
+    tmp_path: Path,
+    *,
+    candidate_count: int = 1,
+    completed_verifications: bool = False,
+    selection_error: str = "selection_outcome_unknown",
 ) -> tuple[Bridge, dict[str, Any], Path, Controller, NoSelection]:
     bridge = seed_bridge(tmp_path)
     if candidate_count > 1:
@@ -74,10 +78,10 @@ def _ambiguous_selection(
                 store.finish_attempt(verification, NOW.isoformat())
         attempt = store.start_attempt(envelope["delivery_id"], None, "selection", NOW.isoformat())
         store.begin_selection_call(envelope["delivery_id"])
-        store.finish_attempt(attempt, NOW.isoformat(), "selection_outcome_unknown")
-        store.mark_delivery(
-            envelope["delivery_id"], "operator_required", "selection_outcome_unknown"
-        )
+        store.finish_attempt(attempt, NOW.isoformat(), selection_error)
+        if selection_error != "selection_outcome_unknown":
+            store.finish_selection(envelope["delivery_id"], [], NOW.isoformat(), selection_error)
+        store.mark_delivery(envelope["delivery_id"], "operator_required", selection_error)
     selector = NoSelection()
     controller = Controller(
         bridge.inbox_dir / "inbox.json",
@@ -96,7 +100,9 @@ def _expired() -> object:
     return NOW + timedelta(hours=3)
 
 
-def _cli_arguments(bridge: Bridge, store_path: Path, delivery: str) -> list[str]:
+def _cli_arguments(
+    bridge: Bridge, store_path: Path, delivery: str, command: str = "abandon-ambiguous-selection"
+) -> list[str]:
     return [
         "--inbox",
         str(bridge.inbox_dir / "inbox.json"),
@@ -109,7 +115,7 @@ def _cli_arguments(bridge: Bridge, store_path: Path, delivery: str) -> list[str]
         "--state-dir",
         str(bridge.state_dir),
         "--no-simulation",
-        "abandon-ambiguous-selection",
+        command,
         "--delivery-id",
         delivery,
         "--operator-confirm",
@@ -166,6 +172,161 @@ def test_operator_abandon_allows_completed_verification_history_for_ten_candidat
             "SELECT COUNT(*) FROM attempts WHERE operation='selection' "
             "AND status='failed' AND error_code='selection_outcome_unknown'"
         ).fetchone() == (1,)
+
+
+def test_operator_abandon_selection_attestation_failure_with_verification_history(
+    tmp_path: Path,
+) -> None:
+    bridge, envelope, store_path, controller, selector = _ambiguous_selection(
+        tmp_path,
+        candidate_count=10,
+        completed_verifications=True,
+        selection_error="selection_attestation_missing",
+    )
+
+    result = controller.abandon_selection_attestation(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+
+    assert result["status"] == "selection_attestation_abandoned"
+    assert result["error_code"] == "selection_attestation_missing_abandoned"
+    assert selector.calls == 0
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "dismissed"
+    with closing(sqlite3.connect(store_path)) as connection:
+        assert connection.execute("SELECT status,error_code FROM deliveries").fetchone() == (
+            "selection_attestation_abandoned",
+            "selection_attestation_missing_abandoned",
+        )
+        assert connection.execute("SELECT status,error_code FROM selection_runs").fetchone() == (
+            "failed",
+            "selection_attestation_missing",
+        )
+        assert connection.execute(
+            "SELECT COUNT(*) FROM attempts WHERE operation='verification' AND status='completed'"
+        ).fetchone() == (10,)
+        assert connection.execute("SELECT COUNT(*) FROM ack_outbox").fetchone() == (0,)
+        assert connection.execute("SELECT COUNT(*) FROM publication_jobs").fetchone() == (0,)
+
+
+def test_selection_attestation_abandon_rejects_unexpired_extra_attempt_or_downstream_state(
+    tmp_path: Path,
+) -> None:
+    bridge, envelope, store_path, controller, selector = _ambiguous_selection(
+        tmp_path, selection_error="selection_attestation_missing"
+    )
+    with pytest.raises(EditorialError, match="^selection_abandon_requires_expiry$"):
+        controller.abandon_selection_attestation(
+            envelope["delivery_id"], operator_confirm=True, now=NOW
+        )
+    with EditorialStore(store_path, simulation=False) as store:
+        extra = store.start_attempt(envelope["delivery_id"], None, "selection", NOW.isoformat())
+        store.finish_attempt(extra, NOW.isoformat(), "selection_attestation_missing")
+    result = controller.abandon_selection_attestation(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+    assert result["status"] == "operator_required"
+    assert selector.calls == 0
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
+
+
+def test_selection_attestation_abandon_is_idempotent_after_bridge_reconciliation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge, envelope, _store_path, controller, selector = _ambiguous_selection(
+        tmp_path, selection_error="selection_attestation_missing"
+    )
+    assert (
+        controller.abandon_selection_attestation(
+            envelope["delivery_id"], operator_confirm=True, now=_expired()
+        )["status"]
+        == "selection_attestation_abandoned"
+    )
+    monkeypatch.setattr(
+        bridge,
+        "abandon_ambiguous_selection",
+        lambda *_args, **_kwargs: pytest.fail("completed recovery must not repeat Bridge mutation"),
+    )
+    repeated = controller.abandon_selection_attestation(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+    assert repeated["status"] == "selection_attestation_abandoned"
+    assert selector.calls == 0
+
+
+@pytest.mark.parametrize("side_effect", ["ack", "publication"])
+def test_selection_attestation_abandon_rejects_downstream_side_effect(
+    tmp_path: Path, side_effect: str
+) -> None:
+    bridge, envelope, store_path, controller, selector = _ambiguous_selection(
+        tmp_path, selection_error="selection_attestation_missing"
+    )
+    with EditorialStore(store_path, simulation=False) as store, store.transaction():
+        if side_effect == "ack":
+            store.connection.execute(
+                "INSERT INTO ack_outbox VALUES (?,?,?, ?,NULL,NULL)",
+                (envelope["delivery_id"], digest(envelope), "pending", NOW.isoformat()),
+            )
+        else:
+            store.connection.execute(
+                "INSERT INTO publication_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    str(uuid.uuid4()),
+                    envelope["candidates"][0]["candidate_key"],
+                    1,
+                    envelope["delivery_id"],
+                    "f" * 64,
+                    "{}",
+                    "pending",
+                    None,
+                    NOW.isoformat(),
+                    NOW.isoformat(),
+                    None,
+                ),
+            )
+    result = controller.abandon_selection_attestation(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+    assert result["status"] == "operator_required"
+    assert selector.calls == 0
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
+
+
+def test_selection_attestation_abandon_rejects_inbox_mismatch_and_recovers_bridge_interrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge, envelope, store_path, controller, selector = _ambiguous_selection(
+        tmp_path, selection_error="selection_attestation_missing"
+    )
+    original_envelope = deepcopy(envelope)
+    envelope["candidates"][0]["title"] = "tampered fixture"
+    (bridge.inbox_dir / "inbox.json").write_text(json.dumps(envelope))
+    mismatch = controller.abandon_selection_attestation(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+    assert mismatch["error_code"] == "selection_abandon_inbox_mismatch"
+    (bridge.inbox_dir / "inbox.json").write_text(json.dumps(original_envelope))
+
+    original = bridge.abandon_ambiguous_selection
+
+    def commit_then_interrupt(*args: object, **kwargs: object) -> dict[str, Any]:
+        original(*args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(bridge, "abandon_ambiguous_selection", commit_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        controller.abandon_selection_attestation(
+            original_envelope["delivery_id"], operator_confirm=True, now=_expired()
+        )
+    with closing(sqlite3.connect(store_path)) as connection:
+        assert connection.execute("SELECT status FROM deliveries").fetchone() == (
+            "selection_attestation_abandon_pending",
+        )
+    monkeypatch.setattr(bridge, "abandon_ambiguous_selection", original)
+    recovered = controller.abandon_selection_attestation(
+        original_envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+    assert recovered["status"] == "selection_attestation_abandoned"
+    assert selector.calls == 0
 
 
 def test_operator_abandon_refuses_extra_selection_attempt(tmp_path: Path) -> None:
@@ -449,3 +610,23 @@ def test_operator_abandon_cli_requires_explicit_confirmation_and_never_uses_gate
         "error": "selection_abandon_confirmation_required",
         "status": "error",
     }
+
+
+def test_selection_attestation_abandon_cli_is_operator_only_and_terminal(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bridge, envelope, store_path, _controller, _selector = _ambiguous_selection(
+        tmp_path, selection_error="selection_attestation_missing"
+    )
+    arguments = _cli_arguments(
+        bridge,
+        store_path,
+        envelope["delivery_id"],
+        command="abandon-selection-attestation",
+    )
+
+    assert main(arguments) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "selection_attestation_abandoned"
+    assert result["error_code"] == "selection_attestation_missing_abandoned"
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "dismissed"

@@ -1,3 +1,3 @@
 """WAAGD Discovery: data collection without editorial automation."""
 
-__version__ = "1.0.4"
+__version__ = "1.0.5"

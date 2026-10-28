@@ -1040,8 +1040,17 @@ class EditorialStore:
                 (delivery,),
             )
 
-    def begin_selection_abandon(self, envelope: dict[str, Any], clock: str) -> bool:
-        """Reserve exactly one expired, ambiguous selection for terminal abandon.
+    def _begin_selection_abandon(
+        self,
+        envelope: dict[str, Any],
+        clock: str,
+        *,
+        selection_error: str,
+        pending_status: str,
+        pending_error: str,
+        completed_status: str,
+    ) -> bool:
+        """Reserve exactly one expired terminal selection failure for abandon.
 
         The selection record and its failed attempt remain untouched so this
         cannot be mistaken for a valid model choice.  Only an operator-required
@@ -1066,27 +1075,43 @@ class EditorialStore:
                 raise EditorialError("persisted_delivery_invalid") from None
             if not isinstance(persisted, dict) or digest(persisted) != expected:
                 raise EditorialError("persisted_delivery_invalid")
-            if row["status"] == "selection_abandon_pending":
+            if row["status"] == pending_status:
                 return True
-            if row["status"] == "selection_abandoned":
+            if row["status"] == completed_status:
                 return False
             if (
                 row["status"] != "operator_required"
                 or row["ack_status"] != "not_ready"
-                or row["error_code"] != "selection_outcome_unknown"
+                or row["error_code"] != selection_error
             ):
                 return False
             run = self.connection.execute(
-                "SELECT status,selected,finished_at FROM selection_runs WHERE delivery_id=?",
+                "SELECT status,selected,finished_at,error_code FROM selection_runs "
+                "WHERE delivery_id=?",
                 (delivery,),
             ).fetchone()
-            if (
-                run is None
-                or run["status"] != "in_flight"
-                or run["selected"] is not None
-                or run["finished_at"] is not None
-            ):
+            if run is None:
                 return False
+            if selection_error == "selection_outcome_unknown":
+                if (
+                    run["status"] != "in_flight"
+                    or run["selected"] is not None
+                    or run["finished_at"] is not None
+                    or run["error_code"] is not None
+                ):
+                    return False
+            else:
+                try:
+                    selected = io.decode(run["selected"].encode())
+                except (AttributeError, io.BridgeError, UnicodeError):
+                    return False
+                if (
+                    run["status"] != "failed"
+                    or selected != []
+                    or run["finished_at"] is None
+                    or run["error_code"] != selection_error
+                ):
+                    return False
             candidate_keys = {
                 entry[0]
                 for entry in self.connection.execute(
@@ -1116,7 +1141,7 @@ class EditorialStore:
             if len(selections) != 1:
                 return False
             status, error, candidate_key, finished = selections[0]
-            if (status, error, candidate_key) != ("failed", "selection_outcome_unknown", None) or (
+            if (status, error, candidate_key) != ("failed", selection_error, None) or (
                 finished is None
             ):
                 return False
@@ -1153,9 +1178,8 @@ class EditorialStore:
             ):
                 return False
             self.connection.execute(
-                "UPDATE deliveries SET status='selection_abandon_pending',"
-                "error_code='selection_outcome_unknown_abandon_pending' WHERE delivery_id=?",
-                (delivery,),
+                "UPDATE deliveries SET status=?,error_code=? WHERE delivery_id=?",
+                (pending_status, pending_error, delivery),
             )
             self.connection.execute(
                 "UPDATE candidates SET status='selection_abandoned',"
@@ -1165,24 +1189,76 @@ class EditorialStore:
             )
             return True
 
-    def finish_selection_abandon(self, delivery: str) -> None:
+    def begin_selection_abandon(self, envelope: dict[str, Any], clock: str) -> bool:
+        return self._begin_selection_abandon(
+            envelope,
+            clock,
+            selection_error="selection_outcome_unknown",
+            pending_status="selection_abandon_pending",
+            pending_error="selection_outcome_unknown_abandon_pending",
+            completed_status="selection_abandoned",
+        )
+
+    def begin_selection_attestation_abandon(self, envelope: dict[str, Any], clock: str) -> bool:
+        return self._begin_selection_abandon(
+            envelope,
+            clock,
+            selection_error="selection_attestation_missing",
+            pending_status="selection_attestation_abandon_pending",
+            pending_error="selection_attestation_missing_abandon_pending",
+            completed_status="selection_attestation_abandoned",
+        )
+
+    def _finish_selection_abandon(
+        self, delivery: str, *, pending_status: str, completed_status: str, completed_error: str
+    ) -> None:
         with self.transaction():
             self.connection.execute(
-                "UPDATE deliveries SET status='selection_abandoned',"
-                "processing_finished_at=COALESCE(processing_finished_at,received_at),"
-                "error_code='selection_outcome_unknown_abandoned' WHERE delivery_id=? "
-                "AND status='selection_abandon_pending'",
-                (delivery,),
+                "UPDATE deliveries SET status=?,processing_finished_at="
+                "COALESCE(processing_finished_at,received_at),error_code=? WHERE delivery_id=? "
+                "AND status=?",
+                (completed_status, completed_error, delivery, pending_status),
             )
 
-    def fail_selection_abandon(self, delivery: str) -> None:
+    def _fail_selection_abandon(
+        self, delivery: str, *, pending_status: str, uncertain_error: str
+    ) -> None:
         with self.transaction():
             self.connection.execute(
                 "UPDATE deliveries SET status='operator_required',"
-                "error_code='selection_outcome_unknown_abandon_uncertain' WHERE delivery_id=? "
-                "AND status='selection_abandon_pending'",
-                (delivery,),
+                "error_code=? WHERE delivery_id=? AND status=?",
+                (uncertain_error, delivery, pending_status),
             )
+
+    def finish_selection_abandon(self, delivery: str) -> None:
+        self._finish_selection_abandon(
+            delivery,
+            pending_status="selection_abandon_pending",
+            completed_status="selection_abandoned",
+            completed_error="selection_outcome_unknown_abandoned",
+        )
+
+    def fail_selection_abandon(self, delivery: str) -> None:
+        self._fail_selection_abandon(
+            delivery,
+            pending_status="selection_abandon_pending",
+            uncertain_error="selection_outcome_unknown_abandon_uncertain",
+        )
+
+    def finish_selection_attestation_abandon(self, delivery: str) -> None:
+        self._finish_selection_abandon(
+            delivery,
+            pending_status="selection_attestation_abandon_pending",
+            completed_status="selection_attestation_abandoned",
+            completed_error="selection_attestation_missing_abandoned",
+        )
+
+    def fail_selection_attestation_abandon(self, delivery: str) -> None:
+        self._fail_selection_abandon(
+            delivery,
+            pending_status="selection_attestation_abandon_pending",
+            uncertain_error="selection_attestation_missing_abandon_uncertain",
+        )
 
     def acknowledged(self, delivery: str, clock: str) -> None:
         with self.transaction():
