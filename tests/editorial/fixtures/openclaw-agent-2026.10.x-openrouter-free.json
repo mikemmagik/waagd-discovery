@@ -1,0 +1,59 @@
+{
+  "ok": true,
+  "status": "completed",
+  "result": {
+    "payloads": [
+      {
+        "text": "{\"satirical_angle\":\"Bureaucracy mistakes activity for progress.\",\"headline\":\"A Committee Finds Another Committee\",\"summary\":\"A tidy machine keeps moving while the answer waits outside the meeting room.\",\"article\":\"The committee discovered that every emergency became tidier once it was filed twice. Its paperwork applauded itself and requested a smaller meeting about applause. Nobody solved anything, but every folder achieved a sense of purpose. A fictional spokesperson for forms declined to comment because the comment needed another form. By sunset, the institution had produced a timetable for deciding when to begin deciding. It was a triumph of motion, provided nobody confused motion with arrival. The queue wore a tie, the minutes applauded politely, and the stapler was promoted to deputy strategy officer.\"}"
+      }
+    ],
+    "meta": {
+      "toolSummary": {
+        "calls": 0,
+        "tools": []
+      },
+      "agentMeta": {
+        "costUsd": 0.0,
+        "bridgeCalls": {
+          "search": 0,
+          "describe": 0,
+          "call": 0
+        },
+        "terminalReceipt": {
+          "runId": "run-redacted",
+          "sessionId": "session-redacted",
+          "turnId": "turn-redacted",
+          "requested": {
+            "provider": "openrouter",
+            "model": "openrouter/free"
+          },
+          "effective": {
+            "provider": "openrouter",
+            "model": "openrouter/free",
+            "responseModel": "dots-studio/dots-3-note-preview:free"
+          },
+          "rerouted": true,
+          "terminalDisposition": "visible",
+          "successfulToolNames": [],
+          "attemptedToolNames": [],
+          "failedToolNames": []
+        }
+      },
+      "executionTrace": {
+        "fallbackUsed": false,
+        "completion": "attested"
+      },
+      "terminalReply": {
+        "modelRouteChange": "Model route changed: openrouter/openrouter/free → openrouter/dots-studio/dots-3-note-preview:free.",
+        "visible": true
+      },
+      "systemPromptReport": {
+        "tools": {
+          "entries": [],
+          "toolSearch": false
+        }
+      },
+      "codeModeEngaged": false
+    }
+  }
+}

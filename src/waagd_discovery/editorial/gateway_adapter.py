@@ -642,6 +642,8 @@ class GatewayEditor:
         detailed_fields = (
             "bridgeCalls",
             "terminalReceipt",
+            "executionTrace",
+            "terminalReply",
             "systemPromptReport",
             "codeModeEngaged",
         )
@@ -668,7 +670,7 @@ class GatewayEditor:
                 raise EditorialError("gateway_tools_used")
 
         if not detailed:
-            if not summaries:
+            if not summaries or self.required_model_route is not None:
                 raise EditorialError("gateway_tool_attestation_missing")
             return containers
 
@@ -743,8 +745,8 @@ class GatewayEditor:
             requested = receipt.get("requested")
             effective = receipt.get("effective")
             rerouted = receipt.get("rerouted")
-            fallback_used = receipt.get("fallbackUsed")
-            route_change = receipt.get("modelRouteChange")
+            execution_traces = self._values(containers, "executionTrace")
+            terminal_replies = self._values(containers, "terminalReply")
             if (
                 not isinstance(requested, dict)
                 or set(requested) != {"provider", "model"}
@@ -757,21 +759,51 @@ class GatewayEditor:
                 or not isinstance(effective.get("responseModel"), str)
                 or _DYNAMIC_OPENROUTER_FREE_MODEL.fullmatch(effective["responseModel"]) is None
                 or rerouted is not True
-                or fallback_used is not False
-                or not isinstance(route_change, dict)
-                or set(route_change) != {"from", "to"}
-                or route_change.get("from") != _OPENROUTER_FREE_ROUTE
-                or route_change.get("to")
-                != f"{_OPENROUTER_FREE_PROVIDER}/{effective['responseModel']}"
+                or not execution_traces
+                or not terminal_replies
             ):
                 raise EditorialError("gateway_model_route_unverified")
+            fallback_values = []
+            for trace in execution_traces:
+                if not isinstance(trace, dict) or "fallbackUsed" not in trace:
+                    raise EditorialError("gateway_model_route_unverified")
+                fallback_values.append(trace["fallbackUsed"])
+            fallback_values.extend(self._values(containers, "fallbackUsed"))
+            if "fallbackUsed" in receipt:
+                fallback_values.append(receipt["fallbackUsed"])
+            if any(type(value) is not bool or value is not False for value in fallback_values):
+                raise EditorialError("gateway_model_route_unverified")
+            expected_route_change = (
+                f"Model route changed: {_OPENROUTER_FREE_ROUTE} \u2192 "
+                f"{_OPENROUTER_FREE_PROVIDER}/{effective['responseModel']}."
+            )
+            route_changes = []
+            for reply in terminal_replies:
+                if not isinstance(reply, dict) or "modelRouteChange" not in reply:
+                    raise EditorialError("gateway_model_route_unverified")
+                route_changes.append(reply["modelRouteChange"])
+            route_changes.extend(self._values(containers, "modelRouteChange"))
+            if "modelRouteChange" in receipt:
+                route_changes.append(receipt["modelRouteChange"])
+            for route_change in route_changes:
+                if isinstance(route_change, str):
+                    valid_route_change = route_change == expected_route_change
+                elif isinstance(route_change, dict):
+                    valid_route_change = (
+                        set(route_change) == {"from", "to"}
+                        and route_change.get("from") == _OPENROUTER_FREE_ROUTE
+                        and route_change.get("to")
+                        == f"{_OPENROUTER_FREE_PROVIDER}/{effective['responseModel']}"
+                    )
+                else:
+                    valid_route_change = False
+                if not valid_route_change:
+                    raise EditorialError("gateway_model_route_unverified")
             if "fallbacks" in receipt and (
                 not isinstance(receipt["fallbacks"], list) or receipt["fallbacks"]
             ):
                 raise EditorialError("gateway_model_route_unverified")
         if "rerouted" in receipt and type(receipt["rerouted"]) is not bool:
-            raise EditorialError("gateway_tool_attestation_missing")
-        if "fallbackUsed" in receipt and type(receipt["fallbackUsed"]) is not bool:
             raise EditorialError("gateway_tool_attestation_missing")
         if "terminalDisposition" in receipt and receipt["terminalDisposition"] not in {
             "visible",

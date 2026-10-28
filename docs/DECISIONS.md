@@ -205,3 +205,9 @@
     The only new terminal recovery is an expired, operator-confirmed
     `selection_attestation_missing`; it requires a completed failed selection
     history and preserves all records.
+
+46. v1.0.6 reads the OpenClaw 2026.10.x Free Router fallback attestation only
+    from `meta.executionTrace.fallbackUsed` and route transition only from
+    `meta.terminalReply.modelRouteChange`. Both must be explicit and match the
+    attested Free Router receipt; any duplicate, missing or conflicting route
+    metadata remains fail-closed. No routing metadata is treated as cost proof.

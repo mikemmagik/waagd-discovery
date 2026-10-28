@@ -253,6 +253,19 @@ def openclaw_2026_10_3_tool_free(*, text: str | None = None) -> dict[str, Any]:
     return fixture
 
 
+def openclaw_2026_10_x_openrouter_free(*, text: str | None = None) -> dict[str, Any]:
+    """Synthetic full 2026.10.x Free Router envelope matching production paths."""
+
+    fixture = json.loads(
+        (
+            Path(__file__).parent / "fixtures" / "openclaw-agent-2026.10.x-openrouter-free.json"
+        ).read_text()
+    )
+    if text is not None:
+        fixture["result"]["payloads"][0]["text"] = text
+    return fixture
+
+
 def visible_tool_free_fidelity_response(text: str | None) -> bytes:
     """Construct the current, fully attested tool-free Fidelity envelope."""
 
@@ -570,63 +583,180 @@ def test_gateway_requires_the_configured_openrouter_free_route(tmp_path: Path) -
     with pytest.raises(EditorialError, match="^gateway_model_route_unverified$"):
         editor._parse(json.dumps(response).encode(), request())
 
-    receipt = response["result"]["meta"]["agentMeta"]["terminalReceipt"]
-    receipt["requested"] = {"provider": "openrouter", "model": "openrouter/free"}
-    receipt["effective"] = {
-        "provider": "openrouter",
-        "model": "openrouter/free",
-        "responseModel": "dots-studio/dots-3-note-preview:free",
-    }
-    receipt["rerouted"] = True
-    receipt["fallbackUsed"] = False
-    receipt["modelRouteChange"] = {
-        "from": "openrouter/openrouter/free",
-        "to": "openrouter/dots-studio/dots-3-note-preview:free",
-    }
-    assert editor._parse(json.dumps(response).encode(), request())["decision"] == "READY_FOR_REVIEW"
+    positive = openclaw_2026_10_x_openrouter_free()
+    assert editor._parse(json.dumps(positive).encode(), request())["decision"] == "READY_FOR_REVIEW"
 
 
-@pytest.mark.parametrize(
-    "mutate",
-    [
-        lambda receipt: receipt["requested"].update({"provider": "other"}),
-        lambda receipt: receipt["requested"].update({"model": "other/free"}),
-        lambda receipt: receipt["effective"].update({"provider": "other"}),
-        lambda receipt: receipt["effective"].update({"model": "other/free"}),
-        lambda receipt: receipt["effective"].update({"responseModel": "vendor/paid-model"}),
-        lambda receipt: receipt.update({"rerouted": False}),
-        lambda receipt: receipt.update({"fallbackUsed": True}),
-        lambda receipt: receipt.update({"fallbacks": ["paid/model"]}),
-        lambda receipt: receipt["modelRouteChange"].update({"from": "other/free"}),
-        lambda receipt: receipt["modelRouteChange"].update({"to": "openrouter/paid/model"}),
-        lambda receipt: receipt.pop("fallbackUsed"),
-        lambda receipt: receipt.pop("modelRouteChange"),
-        lambda receipt: receipt["effective"].pop("responseModel"),
-    ],
-)
-def test_gateway_rejects_unattested_openrouter_free_route_variants(
-    tmp_path: Path, mutate: Any
+def test_gateway_parses_full_openrouter_free_2026_10_x_envelope_and_downstream_contracts(
+    tmp_path: Path,
 ) -> None:
-    response = openclaw_2026_10_3()
+    from waagd_discovery.editorial.fidelity import GatewayFidelityReviewer
+
+    response = openclaw_2026_10_x_openrouter_free()
+    raw = json.dumps(response).encode()
+    editor = GatewayEditor(
+        fake_cli(tmp_path, raw),
+        required_model_route="openrouter/openrouter/free",
+    )
+
+    envelope, result, text, containers = editor._parse_envelope_text(raw)
+    assert envelope["status"] == "completed"
+    assert result == response["result"]
+    assert text == response["result"]["payloads"][0]["text"]
+    assert any("executionTrace" in container for container in containers)
+    decision_value = editor._parse(raw, request())
+    assert decision_value["decision"] == "READY_FOR_REVIEW"
+    assert decision_value["candidate_key"] == KEY
+
+    fidelity_response = openclaw_2026_10_x_openrouter_free(text=fidelity_value())
+    reviewer = GatewayFidelityReviewer(
+        GatewayEditor(
+            fidelity_cli(tmp_path, "", response=json.dumps(fidelity_response).encode()),
+            required_model_route="openrouter/openrouter/free",
+        )
+    )
+    assert reviewer.review(request(), decision_value).accepted
+
+
+def test_gateway_requires_duplicate_route_attestations_to_match_2026_10_x_metadata(
+    tmp_path: Path,
+) -> None:
+    response = openclaw_2026_10_x_openrouter_free()
     receipt = response["result"]["meta"]["agentMeta"]["terminalReceipt"]
-    receipt["requested"] = {"provider": "openrouter", "model": "openrouter/free"}
-    receipt["effective"] = {
-        "provider": "openrouter",
-        "model": "openrouter/free",
-        "responseModel": "dots-studio/dots-3-note-preview:free",
-    }
-    receipt["rerouted"] = True
     receipt["fallbackUsed"] = False
     receipt["modelRouteChange"] = {
         "from": "openrouter/openrouter/free",
         "to": "openrouter/dots-studio/dots-3-note-preview:free",
     }
-    mutate(receipt)
+    response["result"]["meta"]["agentMeta"]["executionTrace"] = {
+        "fallbackUsed": False,
+        "secondary": "attested",
+    }
     editor = GatewayEditor(
         fake_cli(tmp_path, json.dumps(response).encode()),
         required_model_route="openrouter/openrouter/free",
     )
-    with pytest.raises(EditorialError, match="^gateway_model_route_unverified$"):
+    assert editor._parse_envelope_text(json.dumps(response).encode())[2]
+
+
+@pytest.mark.parametrize(
+    ("mutate", "code"),
+    [
+        (
+            lambda value: value["result"]["meta"]["executionTrace"].update({"fallbackUsed": True}),
+            "gateway_model_route_unverified",
+        ),
+        (
+            lambda value: value["result"]["meta"]["executionTrace"].pop("fallbackUsed"),
+            "gateway_model_route_unverified",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"]["terminalReceipt"][
+                "requested"
+            ].update({"provider": "other"}),
+            "gateway_model_route_unverified",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"]["terminalReceipt"][
+                "requested"
+            ].update({"model": "other/free"}),
+            "gateway_model_route_unverified",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"]["terminalReceipt"][
+                "effective"
+            ].update({"provider": "other"}),
+            "gateway_model_route_unverified",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"]["terminalReceipt"][
+                "effective"
+            ].update({"model": "paid/model"}),
+            "gateway_model_route_unverified",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"]["terminalReceipt"][
+                "effective"
+            ].update({"responseModel": "vendor/paid-model"}),
+            "gateway_model_route_unverified",
+        ),
+        (
+            lambda value: value["result"]["meta"]["terminalReply"].update(
+                {
+                    "modelRouteChange": (
+                        "Model route changed: openrouter/openrouter/free → paid/model."
+                    )
+                }
+            ),
+            "gateway_model_route_unverified",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"]["terminalReceipt"][
+                "effective"
+            ].update({"responseModel": "other/free-model:free"}),
+            "gateway_model_route_unverified",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"]["terminalReceipt"].update(
+                {"rerouted": False}
+            ),
+            "gateway_model_route_unverified",
+        ),
+        (
+            lambda value: value["result"]["meta"].pop("terminalReply"),
+            "gateway_model_route_unverified",
+        ),
+        (
+            lambda value: value["result"]["meta"]["toolSummary"].update(
+                {"calls": 1, "tools": ["search"]}
+            ),
+            "gateway_tools_used",
+        ),
+        (
+            lambda value: value["result"]["meta"]["systemPromptReport"]["tools"].update(
+                {"entries": ["search"]}
+            ),
+            "gateway_tools_exposed",
+        ),
+        (
+            lambda value: value["result"]["meta"].update({"codeModeEngaged": True}),
+            "gateway_tools_used",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"].update(
+                {"executionTrace": {"fallbackUsed": True}}
+            ),
+            "gateway_model_route_unverified",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"]["terminalReceipt"].update(
+                {"fallbackUsed": True}
+            ),
+            "gateway_model_route_unverified",
+        ),
+        (
+            lambda value: value["result"]["meta"]["agentMeta"]["terminalReceipt"].update(
+                {
+                    "modelRouteChange": {
+                        "from": "openrouter/openrouter/free",
+                        "to": "openrouter/other-free-model:free",
+                    }
+                }
+            ),
+            "gateway_model_route_unverified",
+        ),
+    ],
+)
+def test_gateway_rejects_unattested_openrouter_free_route_variants(
+    tmp_path: Path, mutate: Any, code: str
+) -> None:
+    response = openclaw_2026_10_x_openrouter_free()
+    mutate(response)
+    editor = GatewayEditor(
+        fake_cli(tmp_path, json.dumps(response).encode()),
+        required_model_route="openrouter/openrouter/free",
+    )
+    with pytest.raises(EditorialError, match=f"^{code}$"):
         editor._parse(json.dumps(response).encode(), request())
 
 

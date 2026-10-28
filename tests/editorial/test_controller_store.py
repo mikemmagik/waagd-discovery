@@ -351,11 +351,13 @@ def real_selector_executable(tmp_path):
         "'requested':{'provider':'openrouter','model':'openrouter/free'},"
         "'effective':{'provider':'openrouter','model':'openrouter/free',"
         "'responseModel':'dots-studio/dots-3-note-preview:free'},"
-        "'rerouted':True,'fallbackUsed':False,"
-        "'modelRouteChange':{'from':'openrouter/openrouter/free',"
-        "'to':'openrouter/dots-studio/dots-3-note-preview:free'},"
+        "'rerouted':True,"
         "'terminalDisposition':'visible'},"
-        "'codeModeEngaged':False},'systemPromptReport':{'tools':{'entries':[]}}}}}))\n"
+        "'codeModeEngaged':False},"
+        "'executionTrace':{'fallbackUsed':False},"
+        "'terminalReply':{'modelRouteChange':'Model route changed: "
+        "openrouter/openrouter/free → openrouter/dots-studio/dots-3-note-preview:free.'},"
+        "'systemPromptReport':{'tools':{'entries':[]}}}}}))\n"
     )
     path.chmod(0o700)
     return path
