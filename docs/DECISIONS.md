@@ -218,3 +218,10 @@
     both retained Fidelity-passed decisions and a proven failed attestation
     turn, with no ACK, intent, Site or export evidence. Retained decisions stay
     historical and are never published through this recovery.
+
+48. v1.0.8 recognizes the completed deterministic `NEEDS_VERIFICATION`
+    policy attempts that can belong to nonselected, PARTIAL-verification
+    candidates in a mixed Editorial batch. The operator-only recovery requires
+    their exact delivery/revision-bound decisions and valid stored request and
+    result, while rejecting every failed, repeated, started or unknown
+    nonselected Gateway attempt. It does not alter or publish any decision.

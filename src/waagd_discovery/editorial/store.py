@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from waagd_discovery.bridge import io
-from waagd_discovery.editorial.contracts import EditorialError, digest
+from waagd_discovery.editorial.contracts import EditorialError, digest, validate_decision
 
 SCHEMA_VERSION = 6
 _SELECTION_RUNS = (
@@ -1435,16 +1435,18 @@ class EditorialStore:
             if (
                 not isinstance(selected, list)
                 or len(selected) < 2
+                or len(set(selected)) != len(selected)
                 or not all(isinstance(key, str) for key in selected)
             ):
                 return False
+            selected_keys = set(selected)
             candidate_keys = {
                 entry[0]
                 for entry in self.connection.execute(
                     "SELECT candidate_key FROM delivery_candidates WHERE delivery_id=?", (delivery,)
                 ).fetchall()
             }
-            if set(selected) - candidate_keys:
+            if selected_keys - candidate_keys:
                 return False
             attempts = self.connection.execute(
                 "SELECT operation,status,error_code,candidate_key,finished_at FROM attempts "
@@ -1452,10 +1454,14 @@ class EditorialStore:
                 (delivery,),
             ).fetchall()
             verifications: set[str] = set()
+            verification_counts: dict[str, int] = {}
             selections = 0
             failed_gateway: set[str] = set()
             completed_gateway: set[str] = set()
             completed_fidelity: set[str] = set()
+            gateway_counts: dict[str, int] = {}
+            fidelity_counts: dict[str, int] = {}
+            deterministic_nonselected: set[str] = set()
             for attempt in attempts:
                 operation, status, error, key, finished = tuple(attempt)
                 if finished is None or status not in {"completed", "failed"}:
@@ -1463,29 +1469,47 @@ class EditorialStore:
                 if operation == "verification":
                     if key not in candidate_keys or status != "completed" or error is not None:
                         return False
+                    verification_counts[key] = verification_counts.get(key, 0) + 1
                     verifications.add(key)
                 elif operation == "selection":
                     if key is not None or status != "completed" or error is not None:
                         return False
                     selections += 1
                 elif operation == "editorial_gateway":
-                    if key not in set(selected):
+                    if key not in candidate_keys:
                         return False
-                    if status == "completed" and error is None:
+                    gateway_counts[key] = gateway_counts.get(key, 0) + 1
+                    if key not in selected_keys:
+                        # A PARTIAL verification is deterministically converted
+                        # into NEEDS_VERIFICATION by GatewayEditor without an LLM
+                        # turn.  Preserve that completed policy outcome only;
+                        # any error or uncertain attempt remains fail-closed.
+                        if status != "completed" or error is not None:
+                            return False
+                        deterministic_nonselected.add(key)
+                    elif status == "completed" and error is None:
                         completed_gateway.add(key)
                     elif status == "failed" and error == "editorial_gateway_attestation_invalid":
                         failed_gateway.add(key)
                     else:
                         return False
                 elif operation == "fidelity":
-                    if key not in set(selected) or status != "completed" or error is not None:
+                    if key not in selected_keys or status != "completed" or error is not None:
                         return False
+                    fidelity_counts[key] = fidelity_counts.get(key, 0) + 1
                     completed_fidelity.add(key)
                 else:
                     return False
-            if verifications != candidate_keys or selections != 1 or not failed_gateway:
+            if (
+                verifications != candidate_keys
+                or any(count != 1 for count in verification_counts.values())
+                or selections != 1
+                or not failed_gateway
+                or any(count != 1 for count in gateway_counts.values())
+                or any(count != 1 for count in fidelity_counts.values())
+            ):
                 return False
-            retained = set(selected) - failed_gateway
+            retained = selected_keys - failed_gateway
             if not retained or retained != completed_gateway or retained != completed_fidelity:
                 return False
             for key in retained:
@@ -1504,6 +1528,40 @@ class EditorialStore:
                     "AND candidate_key=?)",
                     (key, delivery, key),
                 ).fetchone():
+                    return False
+            for key in candidate_keys - selected_keys:
+                decision = self.connection.execute(
+                    "SELECT d.decision,d.request,d.result,c.source_url FROM decisions d "
+                    "JOIN delivery_candidates dc ON dc.candidate_key=d.candidate_key "
+                    "AND dc.revision=d.revision JOIN candidates c "
+                    "ON c.candidate_key=dc.candidate_key "
+                    "WHERE dc.delivery_id=? AND dc.candidate_key=?",
+                    (delivery, key),
+                ).fetchone()
+                if decision is None:
+                    return False
+                if key not in deterministic_nonselected:
+                    # The remaining nonselected candidates were rejected by
+                    # trusted selection before editorial evaluation.
+                    if decision["decision"] != "REJECTED":
+                        return False
+                    continue
+                if decision["decision"] != "NEEDS_VERIFICATION":
+                    return False
+                try:
+                    request = io.decode(decision["request"].encode())
+                    result = io.decode(decision["result"].encode())
+                    validate_decision(result, request)
+                except (AttributeError, io.BridgeError, EditorialError, UnicodeError):
+                    return False
+                if (
+                    request.get("simulation") is not self.simulation
+                    or request.get("candidate", {}).get("candidate_key") != key
+                    or request["candidate"].get("url") != decision["source_url"]
+                    or request.get("verification", {}).get("verification_status") != "PARTIAL"
+                    or result.get("decision") != "NEEDS_VERIFICATION"
+                    or result.get("model_identifier") != "trusted-policy-v1"
+                ):
                     return False
             if (
                 self.connection.execute(

@@ -18,7 +18,13 @@ from test_independent_contracts import NOW
 from waagd_discovery.bridge import Bridge
 from waagd_discovery.editorial.adapter import MockEditor
 from waagd_discovery.editorial.cli import main
-from waagd_discovery.editorial.contracts import EditorialError, digest
+from waagd_discovery.editorial.contracts import (
+    VERIFICATION_POLICY,
+    EditorialError,
+    digest,
+    make_request,
+    trusted_decision,
+)
 from waagd_discovery.editorial.controller import Controller
 from waagd_discovery.editorial.store import EditorialStore
 from waagd_discovery.editorial.verifier import SyntheticVerifier
@@ -102,12 +108,25 @@ def _expired() -> object:
 
 def _partial_editorial_batch(
     tmp_path: Path,
+    *,
+    production_shape: bool = False,
 ) -> tuple[Bridge, dict[str, Any], Path, Controller]:
     bridge, envelope, store_path, controller, _selector = _ambiguous_selection(
-        tmp_path, candidate_count=2, completed_verifications=True
+        tmp_path, candidate_count=10 if production_shape else 2, completed_verifications=True
     )
-    selected = [candidate["candidate_key"] for candidate in envelope["candidates"]]
+    selected = [candidate["candidate_key"] for candidate in envelope["candidates"][:2]]
     with EditorialStore(store_path, simulation=False) as store:
+        revisions = dict(store.required(envelope["delivery_id"]))
+        if production_shape:
+            verifier = SyntheticVerifier()
+            for candidate in envelope["candidates"]:
+                key = candidate["candidate_key"]
+                store.save_verification(
+                    key,
+                    revisions[key],
+                    verifier.verify(candidate, policy_id=VERIFICATION_POLICY),
+                    NOW.isoformat(),
+                )
         selection = store.connection.execute(
             "SELECT attempt_id FROM attempts WHERE operation='selection'"
         ).fetchone()[0]
@@ -124,7 +143,7 @@ def _partial_editorial_batch(
         with store.transaction():
             store.connection.execute(
                 "INSERT INTO decisions VALUES (?,?,?,?,?,?)",
-                (completed, 1, "READY_FOR_REVIEW", "{}", "{}", NOW.isoformat()),
+                (completed, revisions[completed], "READY_FOR_REVIEW", "{}", "{}", NOW.isoformat()),
             )
         store.mark_selection_editorial(envelope["delivery_id"], completed, "completed")
         failed = selected[1]
@@ -147,6 +166,30 @@ def _partial_editorial_batch(
             },
         )
         store.mark_selection_editorial(envelope["delivery_id"], failed, "failed")
+        if production_shape:
+            # Six unselected PARTIAL verifications follow GatewayEditor's
+            # deterministic no-LLM policy path. The remaining two were
+            # rejected by trusted selection without an editorial attempt.
+            for candidate in envelope["candidates"][2:8]:
+                key = candidate["candidate_key"]
+                revision = revisions[key]
+                verification = store.verification(key, revision)
+                assert verification is not None
+                request = make_request(candidate, verification, simulation=False)
+                decision = trusted_decision(request, now=NOW)
+                attempt = store.start_attempt(
+                    envelope["delivery_id"], key, "editorial_gateway", NOW.isoformat()
+                )
+                store.save_decision(key, revision, request, decision, None, NOW.isoformat())
+                store.finish_attempt(attempt, NOW.isoformat())
+            for candidate in envelope["candidates"][8:]:
+                controller._excluded(
+                    store,
+                    candidate,
+                    revisions[candidate["candidate_key"]],
+                    envelope["delivery_id"],
+                    NOW,  # noqa: SLF001
+                )
         store.mark_delivery(
             envelope["delivery_id"], "operator_required", "editorial_gateway_attestation_invalid"
         )
@@ -193,6 +236,79 @@ def test_partial_editorial_abandon_preserves_fidelity_pass_and_releases_expired_
         assert connection.execute(
             "SELECT failure_category,elapsed_ms,route_attestation FROM attempt_diagnostics"
         ).fetchone() == ("gateway_model_route_unverified", 189000, "failed")
+
+
+def test_partial_editorial_abandon_accepts_production_nonselected_policy_history_via_cli(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bridge, envelope, store_path, _controller = _partial_editorial_batch(
+        tmp_path, production_shape=True
+    )
+
+    assert (
+        main(
+            _cli_arguments(
+                bridge,
+                store_path,
+                envelope["delivery_id"],
+                command="abandon-partial-editorial-batch",
+            )
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["status"] == "partial_editorial_batch_abandoned"
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "dismissed"
+    with closing(sqlite3.connect(store_path)) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM attempts WHERE operation='verification' AND status='completed'"
+        ).fetchone() == (10,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM attempts WHERE operation='selection' AND status='completed'"
+        ).fetchone() == (1,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM attempts WHERE operation='editorial_gateway' "
+            "AND status='completed'"
+        ).fetchone() == (7,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM attempts WHERE operation='editorial_gateway' AND status='failed'"
+        ).fetchone() == (1,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM decisions WHERE decision='NEEDS_VERIFICATION'"
+        ).fetchone() == (6,)
+        assert connection.execute("SELECT COUNT(*) FROM decisions").fetchone() == (9,)
+        assert connection.execute("SELECT COUNT(*) FROM publication_jobs").fetchone() == (0,)
+        assert connection.execute("SELECT COUNT(*) FROM ack_outbox").fetchone() == (0,)
+
+
+@pytest.mark.parametrize("corruption", ["failed_attempt", "wrong_decision"])
+def test_partial_editorial_abandon_rejects_nonselected_ambiguous_or_inconsistent_history(
+    tmp_path: Path, corruption: str
+) -> None:
+    bridge, envelope, store_path, controller = _partial_editorial_batch(
+        tmp_path, production_shape=True
+    )
+    key = envelope["candidates"][2]["candidate_key"]
+    with EditorialStore(store_path, simulation=False) as store, store.transaction():
+        if corruption == "failed_attempt":
+            store.connection.execute(
+                "UPDATE attempts SET status='failed',error_code='gateway_outcome_unknown' "
+                "WHERE delivery_id=? AND candidate_key=? AND operation='editorial_gateway'",
+                (envelope["delivery_id"], key),
+            )
+        else:
+            store.connection.execute(
+                "UPDATE decisions SET decision='REJECTED' WHERE candidate_key=? "
+                "AND revision=(SELECT revision FROM delivery_candidates "
+                "WHERE delivery_id=? AND candidate_key=?)",
+                (key, envelope["delivery_id"], key),
+            )
+
+    result = controller.abandon_partial_editorial_batch(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+
+    assert result["status"] == "operator_required"
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
 
 
 def test_partial_editorial_abandon_refuses_unexpired_unknown_or_downstream_batch(
