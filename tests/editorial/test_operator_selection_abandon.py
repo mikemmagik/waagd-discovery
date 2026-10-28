@@ -6,6 +6,7 @@ import json
 import sqlite3
 import uuid
 from contextlib import closing
+from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -33,9 +34,24 @@ class NoSelection:
 
 
 def _ambiguous_selection(
-    tmp_path: Path,
+    tmp_path: Path, *, candidate_count: int = 1, completed_verifications: bool = False
 ) -> tuple[Bridge, dict[str, Any], Path, Controller, NoSelection]:
     bridge = seed_bridge(tmp_path)
+    if candidate_count > 1:
+        initial = read_inbox(bridge)
+        bridge.dismiss(initial["delivery_id"], NOW)
+        export = json.loads(bridge.export.read_text())
+        source = export["candidates"][0]
+        export["candidates"] = []
+        for index in range(candidate_count):
+            candidate = deepcopy(source)
+            candidate["id"] = index + 1
+            candidate["url"] = f"https://example.test/selection-abandon/{index}"
+            candidate["title"] = f"Synthetic selection candidate {index}"
+            export["candidates"].append(candidate)
+        export["selection"]["counts"]["eligible"] = candidate_count
+        bridge.export.write_text(json.dumps(export))
+        bridge.sync(NOW)
     envelope = read_inbox(bridge)
     store_path = tmp_path.resolve() / "editorial" / "editorial.sqlite3"
     with EditorialStore(store_path, simulation=False) as store:
@@ -43,10 +59,19 @@ def _ambiguous_selection(
         store.start_selection(
             envelope["delivery_id"],
             NOW.date().isoformat(),
-            [{"candidate_key": envelope["candidates"][0]["candidate_key"]}],
+            [{"candidate_key": candidate["candidate_key"]} for candidate in envelope["candidates"]],
             {},
             NOW.isoformat(),
         )
+        if completed_verifications:
+            for candidate in envelope["candidates"]:
+                verification = store.start_attempt(
+                    envelope["delivery_id"],
+                    candidate["candidate_key"],
+                    "verification",
+                    NOW.isoformat(),
+                )
+                store.finish_attempt(verification, NOW.isoformat())
         attempt = store.start_attempt(envelope["delivery_id"], None, "selection", NOW.isoformat())
         store.begin_selection_call(envelope["delivery_id"])
         store.finish_attempt(attempt, NOW.isoformat(), "selection_outcome_unknown")
@@ -118,7 +143,121 @@ def test_operator_abandon_expired_ambiguous_selection_is_terminal_and_side_effec
         assert connection.execute("SELECT COUNT(*) FROM publication_jobs").fetchone() == (0,)
 
 
-@pytest.mark.parametrize("side_effect", ["publication", "ack", "site"])
+def test_operator_abandon_allows_completed_verification_history_for_ten_candidates(
+    tmp_path: Path,
+) -> None:
+    bridge, envelope, store_path, controller, selector = _ambiguous_selection(
+        tmp_path, candidate_count=10, completed_verifications=True
+    )
+
+    result = controller.abandon_ambiguous_selection(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+
+    assert result["status"] == "selection_abandoned"
+    assert selector.calls == 0
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "dismissed"
+    with closing(sqlite3.connect(store_path)) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM attempts WHERE operation='verification' "
+            "AND status='completed' AND error_code IS NULL"
+        ).fetchone() == (10,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM attempts WHERE operation='selection' "
+            "AND status='failed' AND error_code='selection_outcome_unknown'"
+        ).fetchone() == (1,)
+
+
+def test_operator_abandon_refuses_extra_selection_attempt(tmp_path: Path) -> None:
+    bridge, envelope, store_path, controller, selector = _ambiguous_selection(tmp_path)
+    with EditorialStore(store_path, simulation=False) as store:
+        extra = store.start_attempt(envelope["delivery_id"], None, "selection", NOW.isoformat())
+        store.finish_attempt(extra, NOW.isoformat(), "selection_outcome_unknown")
+
+    result = controller.abandon_ambiguous_selection(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+
+    assert result["status"] == "operator_required"
+    assert selector.calls == 0
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
+
+
+@pytest.mark.parametrize("status,error", [("started", None), ("failed", "verification_unknown")])
+def test_operator_abandon_refuses_unfinished_or_unknown_verification_attempt(
+    tmp_path: Path, status: str, error: str | None
+) -> None:
+    bridge, envelope, store_path, controller, selector = _ambiguous_selection(tmp_path)
+    with EditorialStore(store_path, simulation=False) as store:
+        attempt = store.start_attempt(
+            envelope["delivery_id"],
+            envelope["candidates"][0]["candidate_key"],
+            "verification",
+            NOW.isoformat(),
+        )
+        if status != "started":
+            store.finish_attempt(attempt, NOW.isoformat(), error)
+
+    result = controller.abandon_ambiguous_selection(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+
+    assert result["status"] == "operator_required"
+    assert selector.calls == 0
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
+
+
+def test_operator_abandon_refuses_verification_for_another_delivery_candidate(
+    tmp_path: Path,
+) -> None:
+    bridge, envelope, store_path, controller, selector = _ambiguous_selection(tmp_path)
+    other = deepcopy(envelope)
+    other["delivery_id"] = str(uuid.uuid4())
+    other["candidates"][0]["candidate_key"] = "e" * 64
+    other["candidates"][0]["url"] = "https://example.test/other-delivery-candidate"
+    with EditorialStore(store_path, simulation=False) as store:
+        store.register(other, NOW.isoformat())
+        attempt = store.start_attempt(
+            envelope["delivery_id"],
+            other["candidates"][0]["candidate_key"],
+            "verification",
+            NOW.isoformat(),
+        )
+        store.finish_attempt(attempt, NOW.isoformat())
+
+    result = controller.abandon_ambiguous_selection(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+
+    assert result["status"] == "operator_required"
+    assert selector.calls == 0
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
+
+
+@pytest.mark.parametrize("operation", ["editorial", "editorial_gateway", "fidelity", "export"])
+def test_operator_abandon_refuses_nonverification_downstream_attempt(
+    tmp_path: Path, operation: str
+) -> None:
+    bridge, envelope, store_path, controller, selector = _ambiguous_selection(tmp_path)
+    with EditorialStore(store_path, simulation=False) as store:
+        attempt = store.start_attempt(
+            envelope["delivery_id"],
+            envelope["candidates"][0]["candidate_key"],
+            operation,
+            NOW.isoformat(),
+        )
+        store.finish_attempt(attempt, NOW.isoformat())
+
+    result = controller.abandon_ambiguous_selection(
+        envelope["delivery_id"], operator_confirm=True, now=_expired()
+    )
+
+    assert result["status"] == "operator_required"
+    assert selector.calls == 0
+    assert bridge.inspect_delivery(envelope["delivery_id"])["status"] == "pending"
+
+
+@pytest.mark.parametrize("side_effect", ["publication", "ack", "site", "decision", "export"])
 def test_operator_abandon_refuses_any_downstream_side_effect(
     tmp_path: Path, side_effect: str
 ) -> None:
@@ -128,6 +267,24 @@ def test_operator_abandon_refuses_any_downstream_side_effect(
             store.connection.execute(
                 "INSERT INTO ack_outbox VALUES (?,?,?, ?,NULL,NULL)",
                 (envelope["delivery_id"], digest(envelope), "pending", NOW.isoformat()),
+            )
+        elif side_effect == "decision":
+            store.connection.execute(
+                "INSERT INTO decisions VALUES (?,?,?,?,?,?)",
+                (
+                    envelope["candidates"][0]["candidate_key"],
+                    1,
+                    "REJECTED",
+                    "{}",
+                    "{}",
+                    NOW.isoformat(),
+                ),
+            )
+        elif side_effect == "export":
+            store.connection.execute(
+                "UPDATE selection_items SET export_status='exported' WHERE run_id="
+                "(SELECT run_id FROM selection_runs WHERE delivery_id=?)",
+                (envelope["delivery_id"],),
             )
         else:
             status = "delivered" if side_effect == "site" else "pending"

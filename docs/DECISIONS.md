@@ -190,3 +190,9 @@
     sole failed ambiguous selection attempt, while rejecting any decision, ACK,
     PublicationIntent or Site trace. The original selection history remains
     in-flight; Bridge is released only through its exact expired-receipt method.
+
+44. v1.0.4 permits completed, delivery-bound Source Verification attempts in
+    the v1.0.3 terminal-abandon proof. It still requires exactly one failed
+    ambiguous selection attempt and rejects every unfinished, unknown,
+    editorial, Gateway, Fidelity, export, ACK, decision, PublicationIntent and
+    Site trace. The verification and selection history is never modified.

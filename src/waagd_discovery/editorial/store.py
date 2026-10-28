@@ -1087,16 +1087,37 @@ class EditorialStore:
                 or run["finished_at"] is not None
             ):
                 return False
+            candidate_keys = {
+                entry[0]
+                for entry in self.connection.execute(
+                    "SELECT candidate_key FROM delivery_candidates WHERE delivery_id=?", (delivery,)
+                ).fetchall()
+            }
             attempts = self.connection.execute(
-                "SELECT operation,status,error_code,candidate_key FROM attempts "
+                "SELECT operation,status,error_code,candidate_key,finished_at FROM attempts "
                 "WHERE delivery_id=?",
                 (delivery,),
             ).fetchall()
-            if len(attempts) != 1 or tuple(attempts[0]) != (
-                "selection",
-                "failed",
-                "selection_outcome_unknown",
-                None,
+            selections = []
+            for attempt in attempts:
+                operation, status, error, candidate_key, finished = tuple(attempt)
+                if operation == "selection":
+                    selections.append((status, error, candidate_key, finished))
+                    continue
+                if operation != "verification" or candidate_key not in candidate_keys:
+                    return False
+                if finished is None:
+                    return False
+                if (status == "completed" and error is None) or (
+                    status == "failed" and error == "source_verification_failed"
+                ):
+                    continue
+                return False
+            if len(selections) != 1:
+                return False
+            status, error, candidate_key, finished = selections[0]
+            if (status, error, candidate_key) != ("failed", "selection_outcome_unknown", None) or (
+                finished is None
             ):
                 return False
             if (

@@ -102,7 +102,7 @@ The final compatibility target is site commit
 `ca112b2ab89a7ec0d82b85b06df07bb86a35b41c`; see the
 [final operator handoff](docs/WAAGD_DISCOVERY_STABLE_HANDOFF.md).
 
-v1.0.3 is the production recovery hotfix for the accepted Discovery-to-publication chain.
+v1.0.4 is the production recovery hotfix for the accepted Discovery-to-publication chain.
 It retains the Docker Discovery Scheduler, isolated Bridge and Editorial state,
 OpenClaw tool-free Gateway restricted to `openrouter/openrouter/free`, Fidelity,
 immutable PublicationIntent delivery, ACK reconciliation and the Bangkok daily
@@ -110,7 +110,8 @@ coordinator. Production installation, state separation and rollback are specifie
 in the [v1.0.0 release guide](docs/RELEASE_1_0_0.md), the
 [v1.0.1 stage-contract hotfix](docs/HOTFIX_1_0_1_STAGE_CONTRACT.md), the
 [v1.0.2 expiry recovery hotfix](docs/HOTFIX_1_0_2_EXPIRY_RECOVERY.md), and the
-[v1.0.3 selection-abandon hotfix](docs/HOTFIX_1_0_3_SELECTION_ABANDON.md).
+[v1.0.3 selection-abandon hotfix](docs/HOTFIX_1_0_3_SELECTION_ABANDON.md), and the
+[v1.0.4 verification-history hotfix](docs/HOTFIX_1_0_4_VERIFICATION_ABANDON.md).
 
 ## Development
 
