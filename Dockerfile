@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Both digests are multi-platform indexes verified against the upstream registries.
 FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
-FROM python:3.13.16-slim-bookworm@sha256:a1165e272e578941b84abc79e4ab38a0305cd12803a5c4247979ac7655f4d641 AS builder
+FROM python:3.15.0-slim-bookworm@sha256:0e019bbdfb5d9874cb2389f1c2884b64aa2ac97c99960b5bc521cef978c0617d AS builder
 
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_PYTHON_DOWNLOADS=0 \
@@ -14,7 +14,7 @@ RUN uv sync --frozen --no-dev --no-install-project --python /usr/local/bin/pytho
 COPY src ./src
 RUN uv sync --frozen --no-dev --no-editable --python /usr/local/bin/python3.13
 
-FROM python:3.13.16-slim-bookworm@sha256:a1165e272e578941b84abc79e4ab38a0305cd12803a5c4247979ac7655f4d641 AS runtime
+FROM python:3.15.0-slim-bookworm@sha256:0e019bbdfb5d9874cb2389f1c2884b64aa2ac97c99960b5bc521cef978c0617d AS runtime
 LABEL org.opencontainers.image.title="WAAGD Discovery" \
       org.opencontainers.image.source="https://github.com/mikemmagik/waagd-discovery" \
       org.opencontainers.image.description="RSS/Atom discovery with opt-in scheduling and data-only candidate handoff"
